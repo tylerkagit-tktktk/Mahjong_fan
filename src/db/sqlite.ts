@@ -1,5 +1,6 @@
 import SQLite from 'react-native-sqlite-storage';
 import { initializeSchema } from './schema';
+import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
 
 const DB_NAME = 'mahjong_be_fd.db';
 
@@ -7,6 +8,7 @@ SQLite.enablePromise(true);
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let schemaReady = false;
+let writeQueue: Promise<void> = Promise.resolve();
 
 async function openDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
@@ -16,14 +18,59 @@ async function openDb(): Promise<SQLite.SQLiteDatabase> {
     });
   }
 
-  const db = await dbPromise;
+  let db: SQLite.SQLiteDatabase;
+  try {
+    db = await dbPromise;
+  } catch (error) {
+    if (!error && __DEV__) {
+      console.error('[DB] falsy error at openDb', new Error('trace').stack, dumpBreadcrumbs(10));
+      const bug = new Error('[BUG] falsy rejection');
+      (bug as { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
+      throw bug;
+    }
+    throw error;
+  }
 
   if (!schemaReady) {
-    await initializeSchema(db);
-    schemaReady = true;
+    try {
+      await initializeSchema(db);
+      schemaReady = true;
+    } catch (error) {
+      if (!error && __DEV__) {
+        console.error(
+          '[DB] falsy error at initializeSchema',
+          new Error('trace').stack,
+          dumpBreadcrumbs(10),
+        );
+        const bug = new Error('[BUG] falsy rejection');
+        (bug as { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
+        throw bug;
+      }
+      throw error;
+    }
   }
 
   return db;
+}
+
+export async function withDb<T>(runner: (db: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
+  const db = await openDb();
+  return runner(db);
+}
+
+export async function runWithWriteLock<T>(runner: () => Promise<T>): Promise<T> {
+  const prev = writeQueue;
+  let release: (() => void) | null = null;
+  writeQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await prev;
+  try {
+    return await runner();
+  } finally {
+    release?.();
+  }
 }
 
 export async function executeSql<T = SQLite.ResultSet>(
@@ -32,36 +79,24 @@ export async function executeSql<T = SQLite.ResultSet>(
 ): Promise<T> {
   try {
     const db = await openDb();
+    if (__DEV__) {
+      setBreadcrumb('SQL execute', { statement: sql, params });
+    }
     const [result] = await db.executeSql(sql, params);
     return result as T;
   } catch (error) {
+    if (!error && __DEV__) {
+      console.error('[DB] falsy error at executeSql', new Error('trace').stack, {
+        sql,
+        params,
+      });
+      const bug = new Error('[BUG] falsy rejection');
+      (bug as { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
+      throw bug;
+    }
     console.error('[DB] executeSql failed', { sql, params, error });
     throw error;
   }
-}
-
-export async function runInTransaction<T>(
-  runner: (tx: SQLite.Transaction) => Promise<T>,
-): Promise<T> {
-  const db = await openDb();
-
-  return new Promise<T>((resolve, reject) => {
-    db.transaction(
-      (tx) => {
-        runner(tx)
-          .then(resolve)
-          .catch((error) => {
-            console.error('[DB] transaction runner failed', error);
-            reject(error);
-            throw error;
-          });
-      },
-      (error) => {
-        console.error('[DB] transaction failed', error);
-        reject(error);
-      },
-    );
-  });
 }
 
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {

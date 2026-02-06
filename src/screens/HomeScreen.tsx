@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import PrimaryButton from '../components/PrimaryButton';
 import Card from '../components/Card';
 import theme from '../theme/theme';
-import { RootStackParamList } from '../navigation/RootNavigator';
+import { RootStackParamList } from '../navigation/types';
 import { listGames } from '../db/repo';
 import { Game } from '../models/db';
 import { useAppLanguage } from '../i18n/useAppLanguage';

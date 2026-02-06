@@ -2,15 +2,17 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { StyleSheet, Text, View } from 'react-native';
 import PrimaryButton from '../components/PrimaryButton';
 import theme from '../theme/theme';
-import { RootStackParamList } from '../navigation/RootNavigator';
+import { RootStackParamList } from '../navigation/types';
+import { useAppLanguage } from '../i18n/useAppLanguage';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Summary'>;
 
 function SummaryScreen({ navigation }: Props) {
+  const { t } = useAppLanguage();
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Summary</Text>
-      <PrimaryButton label="Back" onPress={() => navigation.goBack()} />
+      <Text style={styles.title}>{t('summary.title')}</Text>
+      <PrimaryButton label={t('common.back')} onPress={() => navigation.goBack()} />
     </View>
   );
 }

@@ -3,9 +3,10 @@ import { StyleSheet, Text, View } from 'react-native';
 import PrimaryButton from '../components/PrimaryButton';
 import Card from '../components/Card';
 import theme from '../theme/theme';
-import { RootStackParamList } from '../navigation/RootNavigator';
+import { RootStackParamList } from '../navigation/types';
 import { createGameWithPlayers, listGames, wipeAllData } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
+import { getDefaultRules, serializeRules } from '../models/rules';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
@@ -15,14 +16,15 @@ function SettingsScreen({ navigation }: Props) {
   const handleCreateSample = async () => {
     try {
       const gameId = makeId('game');
+      const rules = getDefaultRules('HK');
       await createGameWithPlayers(
         {
           id: gameId,
           title: t('home.sampleGame'),
           createdAt: Date.now(),
-          currencySymbol: '$',
-          variant: 'classic',
-          rulesJson: JSON.stringify({}),
+          currencySymbol: rules.currencySymbol,
+          variant: rules.variant,
+          rulesJson: serializeRules(rules),
           languageOverride: null,
         },
         [

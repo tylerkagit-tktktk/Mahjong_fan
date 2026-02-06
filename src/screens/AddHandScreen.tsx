@@ -1,8 +1,18 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import PrimaryButton from '../components/PrimaryButton';
+import type { StyleProp, ViewStyle } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AppButton from '../components/AppButton';
 import TextField from '../components/TextField';
 import Card from '../components/Card';
 import theme from '../theme/theme';
@@ -15,9 +25,19 @@ import { DEBUG_FLAGS } from '../debug/debugFlags';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddHand'>;
 
+const GRID = {
+  x1: 8,
+  x1_5: 12,
+  x2: 16,
+  x3: 24,
+} as const;
+const HIT_SLOP = { top: GRID.x1, right: GRID.x1, bottom: GRID.x1, left: GRID.x1 } as const;
+
 function AddHandScreen({ navigation, route }: Props) {
   const { gameId } = route.params;
   const { t } = useAppLanguage();
+  const insets = useSafeAreaInsets();
+
   const [bundle, setBundle] = useState<GameBundle | null>(null);
   const [handType, setHandType] = useState<'normal' | 'draw' | 'bonus'>('normal');
   const [inputValue, setInputValue] = useState('');
@@ -116,24 +136,49 @@ function AddHandScreen({ navigation, route }: Props) {
   };
 
   return (
-    <View style={styles.container}>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>{t('addHand.title')}</Text>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={0}
+    >
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
+        <Text style={styles.pageTitle}>{t('addHand.title')}</Text>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
         <Card style={styles.card}>
           <Text style={styles.sectionTitle}>{t('addHand.type')}</Text>
-          <View style={styles.row}>
-          {(['normal', 'draw', 'bonus'] as const).map((type) => (
-            <Pressable
-              key={type}
-              style={[styles.optionButton, handType === type && styles.optionSelected]}
-              onPress={() => setHandType(type)}
-            >
-              <Text style={styles.optionText}>{t(`addHand.type.${type}`)}</Text>
-            </Pressable>
-          ))}
+          <View style={styles.segmentedRow}>
+            {(['normal', 'draw', 'bonus'] as const).map((type, index, list) => {
+              const selected = handType === type;
+              const isLast = index === list.length - 1;
+              return (
+                <Pressable
+                  key={type}
+                  style={[
+                    styles.segmentedButton,
+                    !isLast && styles.segmentedButtonSpacing,
+                    selected && styles.segmentedButtonActive,
+                  ]}
+                  onPress={() => setHandType(type)}
+                  disabled={saving}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: saving, selected }}
+                  hitSlop={HIT_SLOP}
+                >
+                  <Text style={[styles.segmentedText, selected && styles.segmentedTextActive]}>
+                    {t(`addHand.type.${type}`)}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </Card>
+
         <Card style={styles.card}>
           <TextField
             label={t('addHand.inputValue')}
@@ -143,51 +188,90 @@ function AddHandScreen({ navigation, route }: Props) {
           />
           <Text style={styles.helperText}>{t('addHand.inputHint')}</Text>
         </Card>
+
         <Card style={styles.card}>
           <Text style={styles.sectionTitle}>{t('addHand.winner')}</Text>
-          <View style={styles.rowWrap}>
-            <Pressable
-              style={[styles.optionButton, winnerId === null && styles.optionSelected]}
+          <View style={styles.pillWrap}>
+            <ChoicePill
+              label={t('addHand.none')}
+              selected={winnerId === null}
               onPress={() => setWinnerId(null)}
-            >
-              <Text style={styles.optionText}>{t('addHand.none')}</Text>
-            </Pressable>
-          {bundle?.players.map((player) => (
-            <Pressable
-              key={player.id}
-              style={[styles.optionButton, winnerId === player.id && styles.optionSelected]}
-              onPress={() => setWinnerId(player.id)}
-            >
-              <Text style={styles.optionText}>{player.name}</Text>
-            </Pressable>
-          ))}
+              disabled={saving}
+              style={styles.choicePillSpacing}
+            />
+            {bundle?.players.map((player) => (
+              <ChoicePill
+                key={player.id}
+                label={player.name}
+                selected={winnerId === player.id}
+                onPress={() => setWinnerId(player.id)}
+                disabled={saving}
+                style={styles.choicePillSpacing}
+              />
+            ))}
           </View>
         </Card>
+
         <Card style={styles.card}>
           <Text style={styles.sectionTitle}>{t('addHand.discarder')}</Text>
-          <View style={styles.rowWrap}>
-            <Pressable
-              style={[styles.optionButton, discarderId === null && styles.optionSelected]}
+          <View style={styles.pillWrap}>
+            <ChoicePill
+              label={t('addHand.none')}
+              selected={discarderId === null}
               onPress={() => setDiscarderId(null)}
-            >
-              <Text style={styles.optionText}>{t('addHand.none')}</Text>
-            </Pressable>
-          {bundle?.players.map((player) => (
-            <Pressable
-              key={player.id}
-              style={[styles.optionButton, discarderId === player.id && styles.optionSelected]}
-              onPress={() => setDiscarderId(player.id)}
-            >
-              <Text style={styles.optionText}>{player.name}</Text>
-            </Pressable>
-          ))}
+              disabled={saving}
+              style={styles.choicePillSpacing}
+            />
+            {bundle?.players.map((player) => (
+              <ChoicePill
+                key={player.id}
+                label={player.name}
+                selected={discarderId === player.id}
+                onPress={() => setDiscarderId(player.id)}
+                disabled={saving}
+                style={styles.choicePillSpacing}
+              />
+            ))}
           </View>
         </Card>
-        <PrimaryButton label={t('addHand.save')} onPress={handleSave} disabled={saving} />
-        <PrimaryButton label={t('common.back')} onPress={() => navigation.goBack()} />
+
         {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
       </ScrollView>
-    </View>
+
+      <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, GRID.x2) }]}>
+        <AppButton label={t('addHand.save')} onPress={handleSave} disabled={saving} />
+        <AppButton
+          label={t('common.back')}
+          onPress={() => navigation.goBack()}
+          disabled={saving}
+          variant="secondary"
+          style={styles.secondaryAction}
+        />
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+type ChoicePillProps = {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
+};
+
+function ChoicePill({ label, selected, onPress, disabled, style }: ChoicePillProps) {
+  return (
+    <Pressable
+      style={[styles.choicePill, selected && styles.choicePillActive, style]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: Boolean(disabled), selected }}
+      hitSlop={HIT_SLOP}
+    >
+      <Text style={[styles.choicePillText, selected && styles.choicePillTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -207,57 +291,107 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: theme.spacing.lg,
-    flexGrow: 1,
+    paddingHorizontal: GRID.x2,
+    paddingTop: GRID.x3,
+    paddingBottom: 168,
   },
-  title: {
+  pageTitle: {
     fontSize: theme.fontSize.lg,
-    fontWeight: '600',
+    fontWeight: '700',
     color: theme.colors.textPrimary,
+    marginBottom: GRID.x2,
   },
   errorText: {
+    marginBottom: GRID.x2,
     color: theme.colors.danger,
+    fontSize: theme.fontSize.sm,
   },
   card: {
-    marginBottom: theme.spacing.md,
+    marginBottom: GRID.x2,
+    padding: GRID.x2,
   },
   sectionTitle: {
     fontSize: theme.fontSize.md,
     fontWeight: '600',
     color: theme.colors.textPrimary,
+    marginBottom: GRID.x1_5,
   },
-  row: {
+  segmentedRow: {
     flexDirection: 'row',
-    alignItems: 'center',
   },
-  rowWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-  },
-  optionButton: {
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.md,
+  segmentedButton: {
+    flex: 1,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
-    marginRight: theme.spacing.sm,
-    marginBottom: theme.spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: GRID.x1,
   },
-  optionButtonLast: {
-    marginRight: 0,
+  segmentedButtonSpacing: {
+    marginRight: GRID.x1,
   },
-  optionSelected: {
+  segmentedButtonActive: {
     borderColor: theme.colors.primary,
+    backgroundColor: '#E6F5F5',
   },
-  optionText: {
+  segmentedText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: '500',
     color: theme.colors.textPrimary,
-    fontWeight: '600',
+  },
+  segmentedTextActive: {
+    color: theme.colors.primary,
+    fontWeight: '700',
   },
   helperText: {
+    marginTop: GRID.x1,
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
+  },
+  pillWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  choicePillSpacing: {
+    marginRight: GRID.x1,
+    marginBottom: GRID.x1,
+  },
+  choicePill: {
+    minWidth: 64,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: GRID.x1_5,
+  },
+  choicePillActive: {
+    borderColor: theme.colors.primary,
+    backgroundColor: '#E6F5F5',
+  },
+  choicePillText: {
+    color: theme.colors.textPrimary,
+    fontSize: theme.fontSize.md,
+    fontWeight: '500',
+  },
+  choicePillTextActive: {
+    color: theme.colors.primary,
+    fontWeight: '700',
+  },
+  actionBar: {
+    paddingHorizontal: GRID.x2,
+    paddingTop: GRID.x1_5,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.background,
+  },
+  secondaryAction: {
+    marginTop: GRID.x1_5,
   },
   debugSpacer: {
     height: 800,

@@ -1,0 +1,19 @@
+{
+  "common.back": "返回",
+  "home.title": "歡迎",
+  "home.subtitle": "開始新一局（自摸、出銃）或調整設定。",
+  "home.newGame": "新開局",
+  "home.settings": "設定",
+  "home.history": "對局紀錄",
+  "home.empty": "未有對局。",
+  "home.sampleGame": "示範對局",
+  "settings.title": "設定",
+  "settings.dbDebug": "資料庫偵錯",
+  "settings.createSample": "建立示範對局",
+  "settings.listGames": "列出對局（console）",
+  "settings.wipeAll": "清空資料",
+  "settings.language": "語言",
+  "language.zhHant": "繁體中文（香港）",
+  "language.zhHans": "簡體中文",
+  "language.en": "英文"
+}

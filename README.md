@@ -86,6 +86,8 @@ You've successfully run and modified your React Native App. :partying_face:
 
 If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
 
+Project note: SQLite writes are unified to explicit transactions (`BEGIN IMMEDIATE`/`COMMIT`/`ROLLBACK`) behind a global write lock to keep write ordering deterministic.
+
 # Learn More
 
 To learn more about React Native, take a look at the following resources:

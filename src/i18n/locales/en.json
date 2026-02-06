@@ -1,0 +1,19 @@
+{
+  "common.back": "Back",
+  "home.title": "Welcome",
+  "home.subtitle": "Start a new round (Zimo, Discard win) or tweak settings.",
+  "home.newGame": "New Game",
+  "home.settings": "Settings",
+  "home.history": "History",
+  "home.empty": "No games yet.",
+  "home.sampleGame": "Sample Game",
+  "settings.title": "Settings",
+  "settings.dbDebug": "DB Debug",
+  "settings.createSample": "Create sample game",
+  "settings.listGames": "List games (console)",
+  "settings.wipeAll": "Wipe all",
+  "settings.language": "Language",
+  "language.zhHant": "Traditional Chinese (HK)",
+  "language.zhHans": "Simplified Chinese",
+  "language.en": "English"
+}

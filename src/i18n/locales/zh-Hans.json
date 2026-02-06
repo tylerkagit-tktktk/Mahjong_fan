@@ -1,0 +1,19 @@
+{
+  "common.back": "返回",
+  "home.title": "欢迎",
+  "home.subtitle": "开始新一局（自摸、出铳）或调整设置。",
+  "home.newGame": "新开局",
+  "home.settings": "设置",
+  "home.history": "对局记录",
+  "home.empty": "暂无对局。",
+  "home.sampleGame": "示例对局",
+  "settings.title": "设置",
+  "settings.dbDebug": "数据库调试",
+  "settings.createSample": "创建示例对局",
+  "settings.listGames": "列出对局（console）",
+  "settings.wipeAll": "清空数据",
+  "settings.language": "语言",
+  "language.zhHant": "繁体中文（香港）",
+  "language.zhHans": "简体中文",
+  "language.en": "英文"
+}

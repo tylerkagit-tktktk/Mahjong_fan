@@ -14,13 +14,16 @@ build/
 *.perspectivev3
 !default.perspectivev3
 xcuserdata
+**/xcuserdata/
 *.xccheckout
 *.moved-aside
 DerivedData
 *.hmap
 *.ipa
 *.xcuserstate
+**/*.xcuserstate
 **/.xcode.env.local
+ios/build/
 
 # Android/IntelliJ
 #

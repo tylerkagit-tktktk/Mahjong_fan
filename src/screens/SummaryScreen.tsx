@@ -1,6 +1,7 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { StyleSheet, Text, View } from 'react-native';
-import PrimaryButton from '../components/PrimaryButton';
+import { StyleSheet, Text } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import AppButton from '../components/AppButton';
 import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { useAppLanguage } from '../i18n/useAppLanguage';
@@ -10,10 +11,10 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Summary'>;
 function SummaryScreen({ navigation }: Props) {
   const { t } = useAppLanguage();
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <Text style={styles.title}>{t('summary.title')}</Text>
-      <PrimaryButton label={t('common.back')} onPress={() => navigation.goBack()} />
-    </View>
+      <AppButton label={t('common.back')} onPress={() => navigation.goBack()} />
+    </SafeAreaView>
   );
 }
 

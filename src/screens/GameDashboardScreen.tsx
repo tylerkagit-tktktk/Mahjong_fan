@@ -2,7 +2,8 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import PrimaryButton from '../components/PrimaryButton';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import AppButton from '../components/AppButton';
 import Card from '../components/Card';
 import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
@@ -76,7 +77,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         <Text style={styles.title}>{t('dashboard.title')}</Text>
         <Text style={styles.subtitle}>
@@ -125,15 +126,22 @@ function GameDashboardScreen({ navigation, route }: Props) {
           </>
         ) : null}
 
-        <PrimaryButton
-          label={t('dashboard.addHand')}
-          onPress={() => navigation.navigate('AddHand', { gameId })}
-        />
-        <PrimaryButton label={t('common.back')} onPress={() => navigation.goBack()} />
+        <View style={styles.actions}>
+          <AppButton
+            label={t('dashboard.addHand')}
+            onPress={() => navigation.navigate('AddHand', { gameId })}
+          />
+          <AppButton
+            label={t('common.back')}
+            onPress={() => navigation.goBack()}
+            variant="secondary"
+            style={styles.secondaryAction}
+          />
+        </View>
 
         {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -165,7 +173,7 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md,
   },
   card: {
-    marginBottom: theme.spacing.md,
+    marginBottom: theme.spacing.lg,
   },
   sectionTitle: {
     fontSize: theme.fontSize.md,
@@ -182,6 +190,12 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.md,
     color: theme.colors.textPrimary,
     marginBottom: theme.spacing.xs,
+  },
+  actions: {
+    marginTop: theme.spacing.md,
+  },
+  secondaryAction: {
+    marginTop: theme.spacing.md,
   },
   debugSpacer: {
     height: 800,

@@ -1,6 +1,6 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
 import {
   KeyboardAvoidingView,
@@ -19,6 +19,7 @@ import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { getGameBundle, insertHand } from '../db/repo';
 import { GameBundle } from '../models/db';
+import { parseRules, Variant } from '../models/rules';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
 import { DEBUG_FLAGS } from '../debug/debugFlags';
@@ -39,12 +40,20 @@ function AddHandScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
 
   const [bundle, setBundle] = useState<GameBundle | null>(null);
+  const [mode, setMode] = useState<Variant>('HK');
   const [handType, setHandType] = useState<'normal' | 'draw' | 'bonus'>('normal');
   const [inputValue, setInputValue] = useState('');
   const [winnerId, setWinnerId] = useState<string | null>(null);
   const [discarderId, setDiscarderId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const isPma = mode === 'PMA';
+
+  const inputLabel = isPma ? t('addHand.inputAmount') : t('addHand.inputValue');
+  const inputHint = isPma ? t('addHand.inputAmountHint') : t('addHand.inputHint');
+
+  const inputRegex = useMemo(() => (isPma ? /[^0-9.-]/g : /[^0-9.-]/g), [isPma]);
 
   const loadBundle = useCallback(async () => {
     try {
@@ -63,8 +72,11 @@ function AddHandScreen({ navigation, route }: Props) {
         console.error('[AddHand] step getGameBundle failed', err ?? 'falsy', new Error('trace').stack);
         throw new Error('AddHand step getGameBundle failed', { cause: err });
       }
+
+      const parsedRules = parseRules(data.game.rulesJson, normalizeVariant(data.game.variant));
+      setMode(parsedRules.mode);
       setBundle(data);
-      setBreadcrumb('AddHand: after setBundle', { playerCount: data.players.length });
+      setBreadcrumb('AddHand: after setBundle', { playerCount: data.players.length, mode: parsedRules.mode });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[AddHand] load failed', err ?? 'falsy', new Error('trace').stack);
@@ -101,14 +113,20 @@ function AddHandScreen({ navigation, route }: Props) {
     try {
       setSaving(true);
       const numericValue = inputValue.trim().length === 0 ? null : Number(inputValue);
+
+      if (isPma && (numericValue === null || Number.isNaN(numericValue))) {
+        setError(t('errors.invalidAmount'));
+        return;
+      }
+
       try {
-        setBreadcrumb('AddHand: before insertHand', { gameId, handType });
+        setBreadcrumb('AddHand: before insertHand', { gameId, handType, mode });
         await insertHand({
           id: makeId('hand'),
           gameId,
-          type: handType,
-          winnerPlayerId: winnerId,
-          discarderPlayerId: discarderId,
+          type: isPma ? 'amount' : handType,
+          winnerPlayerId: isPma ? null : winnerId,
+          discarderPlayerId: isPma ? null : discarderId,
           inputValue: Number.isNaN(numericValue) ? null : numericValue,
           computedJson: JSON.stringify({}),
           createdAt: Date.now(),
@@ -150,95 +168,101 @@ function AddHandScreen({ navigation, route }: Props) {
         <Text style={styles.pageTitle}>{t('addHand.title')}</Text>
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('addHand.type')}</Text>
-          <View style={styles.segmentedRow}>
-            {(['normal', 'draw', 'bonus'] as const).map((type, index, list) => {
-              const selected = handType === type;
-              const isLast = index === list.length - 1;
-              return (
-                <Pressable
-                  key={type}
-                  style={[
-                    styles.segmentedButton,
-                    !isLast && styles.segmentedButtonSpacing,
-                    selected && styles.segmentedButtonActive,
-                  ]}
-                  onPress={() => setHandType(type)}
-                  disabled={saving}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: saving, selected }}
-                  hitSlop={HIT_SLOP}
-                >
-                  <Text style={[styles.segmentedText, selected && styles.segmentedTextActive]}>
-                    {t(`addHand.type.${type}`)}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </Card>
+        {!isPma ? (
+          <Card style={styles.card}>
+            <Text style={styles.sectionTitle}>{t('addHand.type')}</Text>
+            <View style={styles.segmentedRow}>
+              {(['normal', 'draw', 'bonus'] as const).map((type, index, list) => {
+                const selected = handType === type;
+                const isLast = index === list.length - 1;
+                return (
+                  <Pressable
+                    key={type}
+                    style={[
+                      styles.segmentedButton,
+                      !isLast && styles.segmentedButtonSpacing,
+                      selected && styles.segmentedButtonActive,
+                    ]}
+                    onPress={() => setHandType(type)}
+                    disabled={saving}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: saving, selected }}
+                    hitSlop={HIT_SLOP}
+                  >
+                    <Text style={[styles.segmentedText, selected && styles.segmentedTextActive]}>
+                      {t(`addHand.type.${type}`)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Card>
+        ) : null}
 
         <Card style={styles.card}>
           <TextField
-            label={t('addHand.inputValue')}
+            label={inputLabel}
             value={inputValue}
-            onChangeText={(value) => setInputValue(value.replace(/[^0-9.-]/g, ''))}
+            onChangeText={(value) => setInputValue(value.replace(inputRegex, ''))}
             placeholder="0"
           />
-          <Text style={styles.helperText}>{t('addHand.inputHint')}</Text>
+          <Text style={styles.helperText}>{inputHint}</Text>
         </Card>
 
-        <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('addHand.winner')}</Text>
-          <View style={styles.pillWrap}>
-            <ChoicePill
-              label={t('addHand.none')}
-              selected={winnerId === null}
-              onPress={() => setWinnerId(null)}
-              disabled={saving}
-              style={styles.choicePillSpacing}
-            />
-            {bundle?.players.map((player) => (
+        {!isPma ? (
+          <Card style={styles.card}>
+            <Text style={styles.sectionTitle}>{t('addHand.winner')}</Text>
+            <View style={styles.pillWrap}>
               <ChoicePill
-                key={player.id}
-                label={player.name}
-                selected={winnerId === player.id}
-                onPress={() => setWinnerId(player.id)}
+                label={t('addHand.none')}
+                selected={winnerId === null}
+                onPress={() => setWinnerId(null)}
                 disabled={saving}
                 style={styles.choicePillSpacing}
               />
-            ))}
-          </View>
-        </Card>
+              {bundle?.players.map((player) => (
+                <ChoicePill
+                  key={player.id}
+                  label={player.name}
+                  selected={winnerId === player.id}
+                  onPress={() => setWinnerId(player.id)}
+                  disabled={saving}
+                  style={styles.choicePillSpacing}
+                />
+              ))}
+            </View>
+          </Card>
+        ) : null}
 
-        <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('addHand.discarder')}</Text>
-          <View style={styles.pillWrap}>
-            <ChoicePill
-              label={t('addHand.none')}
-              selected={discarderId === null}
-              onPress={() => setDiscarderId(null)}
-              disabled={saving}
-              style={styles.choicePillSpacing}
-            />
-            {bundle?.players.map((player) => (
+        {!isPma ? (
+          <Card style={styles.card}>
+            <Text style={styles.sectionTitle}>{t('addHand.discarder')}</Text>
+            <View style={styles.pillWrap}>
               <ChoicePill
-                key={player.id}
-                label={player.name}
-                selected={discarderId === player.id}
-                onPress={() => setDiscarderId(player.id)}
+                label={t('addHand.none')}
+                selected={discarderId === null}
+                onPress={() => setDiscarderId(null)}
                 disabled={saving}
                 style={styles.choicePillSpacing}
               />
-            ))}
-          </View>
-        </Card>
+              {bundle?.players.map((player) => (
+                <ChoicePill
+                  key={player.id}
+                  label={player.name}
+                  selected={discarderId === player.id}
+                  onPress={() => setDiscarderId(player.id)}
+                  disabled={saving}
+                  style={styles.choicePillSpacing}
+                />
+              ))}
+            </View>
+          </Card>
+        ) : null}
 
         {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
       </ScrollView>
 
-      <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, GRID.x2) }]}>
+      <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, GRID.x2) }]}> 
         <AppButton label={t('addHand.save')} onPress={handleSave} disabled={saving} />
         <AppButton
           label={t('common.back')}
@@ -280,6 +304,16 @@ function makeId(prefix: string) {
     return `${prefix}_${crypto.randomUUID()}`;
   }
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeVariant(value: string): Variant {
+  if (value === 'HK' || value === 'TW' || value === 'PMA') {
+    return value;
+  }
+  if (value === 'TW_SIMPLE') {
+    return 'TW';
+  }
+  return 'HK';
 }
 
 const styles = StyleSheet.create({

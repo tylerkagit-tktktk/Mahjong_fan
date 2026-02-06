@@ -9,7 +9,7 @@ import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { getGameBundle, getHandsCount } from '../db/repo';
 import { GameBundle } from '../models/db';
-import { parseRules, RulesV1 } from '../models/rules';
+import { parseRules, RulesV1, Variant } from '../models/rules';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { setBreadcrumb } from '../debug/breadcrumbs';
 import { DEBUG_FLAGS } from '../debug/debugFlags';
@@ -35,7 +35,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
     setBreadcrumb('Dashboard: after getHandsCount', { gameId, count });
 
     setBreadcrumb('Dashboard: before parseRules', { gameId });
-    const parsedRules = parseRules(data.game.rulesJson, data.game.variant as 'HK' | 'TW_SIMPLE');
+    const parsedRules = parseRules(data.game.rulesJson, normalizeVariant(data.game.variant));
     setBreadcrumb('Dashboard: after parseRules', { gameId, variant: parsedRules.variant });
 
     setBundle(data);
@@ -96,15 +96,9 @@ function GameDashboardScreen({ navigation, route }: Props) {
                 {t('dashboard.variant')}{' '}
                 {bundle.game.variant === 'HK' ? t('newGame.variant.hk') : t('newGame.variant.twSimple')}
               </Text>
-              {rules?.hk ? (
+              {rules?.mode !== 'PMA' ? (
                 <Text style={styles.metaText}>
-                  {t('dashboard.minFanToWin')} {rules.hk.minFanToWin}
-                </Text>
-              ) : null}
-              {rules?.twSimple ? (
-                <Text style={styles.metaText}>
-                  {t('dashboard.twBase')} {rules.twSimple.base}, {t('dashboard.twDealerExtra')}{' '}
-                  {rules.twSimple.dealerExtra}
+                  {t('dashboard.minFanToWin')} {rules?.minFanToWin ?? '-'}
                 </Text>
               ) : null}
               <Text style={styles.metaText}>
@@ -143,6 +137,16 @@ function GameDashboardScreen({ navigation, route }: Props) {
       </ScrollView>
     </SafeAreaView>
   );
+}
+
+function normalizeVariant(value: string): Variant {
+  if (value === 'HK' || value === 'TW' || value === 'PMA') {
+    return value;
+  }
+  if (value === 'TW_SIMPLE') {
+    return 'TW';
+  }
+  return 'HK';
 }
 
 const styles = StyleSheet.create({

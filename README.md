@@ -50,6 +50,16 @@ bundle exec pod install
 
 For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
 
+Project iOS setup (recommended):
+
+```sh
+cd ios
+pod install
+cd ..
+```
+
+Then open the iOS app in Xcode using the workspace file (`ios/mahjong_be_fd.xcworkspace`). If the workspace is unavailable for any reason, open the project file (`ios/mahjong_be_fd.xcodeproj`) and regenerate pods.
+
 ```sh
 # Using npm
 npm run ios

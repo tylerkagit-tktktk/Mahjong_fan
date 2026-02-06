@@ -3,7 +3,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AppButton from '../components/AppButton';
 import Card from '../components/Card';
 import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
@@ -11,27 +10,25 @@ import { listGames } from '../db/repo';
 import { Game } from '../models/db';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
+type Props = NativeStackScreenProps<RootStackParamList, 'History'>;
 
-function HomeScreen({ navigation }: Props) {
+function HistoryScreen({ navigation }: Props) {
   const [games, setGames] = useState<Game[]>([]);
   const { t } = useAppLanguage();
-  const recentGames = games.slice(0, 10);
-  const hasMoreHistory = games.length > 10;
 
   const loadGames = useCallback(async () => {
     try {
       const data = await listGames();
       setGames(data);
     } catch (error) {
-      console.error('[DB] Failed to load games', error);
+      console.error('[DB] Failed to load all games', error);
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
       loadGames().catch((error) => {
-        console.error('[DB] Failed to refresh games', error);
+        console.error('[DB] Failed to refresh all games', error);
       });
     }, [loadGames]),
   );
@@ -40,35 +37,18 @@ function HomeScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         <Card style={styles.card}>
-          <Text style={styles.title}>{t('home.title')}</Text>
-          <Text style={styles.subtitle}>{t('home.subtitle')}</Text>
-          <View style={styles.actions}>
-            <AppButton
-              label={t('home.newGame')}
-              onPress={() => navigation.navigate('NewGameStepper')}
-            />
-            <AppButton
-              label={t('home.settings')}
-              onPress={() => navigation.navigate('Settings')}
-              variant="secondary"
-              style={styles.secondaryButton}
-            />
-          </View>
-        </Card>
-
-        <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('home.history')}</Text>
-          {recentGames.length === 0 ? (
+          <Text style={styles.sectionTitle}>{t('home.historyAll')}</Text>
+          {games.length === 0 ? (
             <Text style={styles.emptyText}>{t('home.empty')}</Text>
           ) : (
             <View style={styles.historyList}>
-              {recentGames.map((game, index) => (
+              {games.map((game, index) => (
                 <Pressable
                   key={game.id}
                   onPress={() => navigation.navigate('GameDashboard', { gameId: game.id })}
                   style={({ pressed }) => [
                     styles.historyItem,
-                    index < recentGames.length - 1 && styles.historyItemSpacing,
+                    index < games.length - 1 && styles.historyItemSpacing,
                     pressed && styles.pressed,
                   ]}
                 >
@@ -80,14 +60,6 @@ function HomeScreen({ navigation }: Props) {
               ))}
             </View>
           )}
-          {hasMoreHistory ? (
-            <AppButton
-              label={t('home.viewMore')}
-              onPress={() => navigation.navigate('History')}
-              variant="secondary"
-              style={styles.viewMoreButton}
-            />
-          ) : null}
         </Card>
       </ScrollView>
     </SafeAreaView>
@@ -109,21 +81,6 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: theme.spacing.md,
   },
-  title: {
-    fontSize: theme.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: theme.fontSize.md,
-    color: theme.colors.textSecondary,
-  },
-  actions: {
-    marginTop: theme.spacing.sm,
-  },
-  secondaryButton: {
-    marginTop: theme.spacing.sm,
-  },
   sectionTitle: {
     fontSize: theme.fontSize.md,
     fontWeight: '600',
@@ -131,12 +88,10 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: theme.colors.textSecondary,
+    marginTop: theme.spacing.sm,
   },
   historyList: {
     marginTop: theme.spacing.sm,
-  },
-  viewMoreButton: {
-    marginTop: theme.spacing.md,
   },
   historyItem: {
     paddingVertical: theme.spacing.sm,
@@ -163,4 +118,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default HomeScreen;
+export default HistoryScreen;

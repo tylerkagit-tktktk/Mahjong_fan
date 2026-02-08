@@ -1,4 +1,11 @@
 import { setBreadcrumb } from '../debug/breadcrumbs';
+import {
+  CurrencyCode,
+  DEFAULT_CURRENCY_CODE,
+  getCurrencyMeta,
+  inferCurrencyCodeFromSymbol,
+  resolveCurrencyCode,
+} from './currency';
 
 export type RulesVersion = 1;
 export type Variant = 'HK' | 'TW' | 'PMA';
@@ -14,6 +21,7 @@ export interface RulesV1 {
   variant: Variant;
   mode: GameMode;
   languageDefault: 'zh-Hant' | 'zh-Hans' | 'en';
+  currencyCode: CurrencyCode;
   currencySymbol: string;
   seats: { order: SeatWind[] };
   minFanToWin?: number;
@@ -41,7 +49,8 @@ export function getDefaultRules(variant: Variant): RulesV1 {
     variant,
     mode: variant,
     languageDefault: 'zh-Hant',
-    currencySymbol: '$',
+    currencyCode: DEFAULT_CURRENCY_CODE,
+    currencySymbol: getCurrencyMeta(DEFAULT_CURRENCY_CODE).symbol,
     seats: { order: ['E', 'S', 'W', 'N'] },
     settlement: { mode: 'immediate' },
   };
@@ -118,12 +127,19 @@ export function parseRules(
 
     const variant = normalizeVariant(parsed.mode ?? parsed.variant, fallbackVariant);
     const fallback = getDefaultRules(variant);
+    const currencyCode = resolveCurrencyCode(
+      parsed.currencyCode ?? inferCurrencyCodeFromSymbol(parsed.currencySymbol),
+      fallback.currencyCode,
+    );
+    const currencySymbol = getCurrencyMeta(currencyCode).symbol;
 
     const normalized: RulesV1 = {
       ...fallback,
       ...parsed,
       variant,
       mode: variant,
+      currencyCode,
+      currencySymbol,
       hk:
         variant === 'HK'
           ? {

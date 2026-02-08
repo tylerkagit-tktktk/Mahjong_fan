@@ -10,6 +10,12 @@ import { RootStackParamList } from '../navigation/types';
 import { getGameBundle, getHandsCount } from '../db/repo';
 import { GameBundle } from '../models/db';
 import { parseRules, RulesV1, Variant } from '../models/rules';
+import {
+  formatCurrencyAmount,
+  formatCurrencyUnit,
+  inferCurrencyCodeFromSymbol,
+  resolveCurrencyCode,
+} from '../models/currency';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { setBreadcrumb } from '../debug/breadcrumbs';
 import { DEBUG_FLAGS } from '../debug/debugFlags';
@@ -96,6 +102,15 @@ function GameDashboardScreen({ navigation, route }: Props) {
                 {t('dashboard.variant')}{' '}
                 {bundle.game.variant === 'HK' ? t('newGame.variant.hk') : t('newGame.variant.twSimple')}
               </Text>
+              <Text style={styles.metaText}>
+                {t('dashboard.currency')}{' '}
+                {formatCurrencyUnit(
+                  resolveCurrencyCode(
+                    rules?.currencyCode ??
+                      inferCurrencyCodeFromSymbol(bundle.game.currencySymbol),
+                  ),
+                )}
+              </Text>
               {rules?.mode !== 'PMA' ? (
                 <Text style={styles.metaText}>
                   {t('dashboard.minFanToWin')} {rules?.minFanToWin ?? '-'}
@@ -111,7 +126,13 @@ function GameDashboardScreen({ navigation, route }: Props) {
                   </Text>
                   {rules.hk?.scoringPreset === 'customTable' ? (
                     <Text style={styles.metaText}>
-                      {t('dashboard.unitPerFan')} {rules.hk?.unitPerFan ?? 1}
+                      {t('dashboard.unitPerFan')}{' '}
+                      {formatCurrencyAmount(
+                        rules.hk?.unitPerFan ?? 1,
+                        resolveCurrencyCode(
+                          rules.currencyCode ?? inferCurrencyCodeFromSymbol(bundle.game.currencySymbol),
+                        ),
+                      )}
                     </Text>
                   ) : null}
                   <Text style={styles.metaText}>

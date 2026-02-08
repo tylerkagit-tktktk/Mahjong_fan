@@ -43,15 +43,13 @@ export function computeCustomPayout(input: HkCustomPayoutInput): HkCustomPayout 
 
   const effectiveFan = computeEffectiveFan(fan, capFan);
   const baseAmount = unitPerFan * effectiveFan;
-  const zimoPerPlayer = baseAmount;
-  const discarderPays = gunMode === 'fullGun' ? baseAmount * 2 : baseAmount;
-  const otherPlayersPay = gunMode === 'halfGun' ? baseAmount / 2 : null;
+  const zimoPerPlayer = baseAmount * 2;
+  const discarderPays = gunMode === 'fullGun' ? baseAmount * 4 : baseAmount * 2;
+  const otherPlayersPay = gunMode === 'halfGun' ? baseAmount : null;
 
   const totalWinAmount =
     settlementType === 'zimo'
       ? zimoPerPlayer * 3
-      : gunMode === 'fullGun'
-      ? discarderPays
       : discarderPays + (otherPlayersPay ?? 0) * 2;
 
   return {

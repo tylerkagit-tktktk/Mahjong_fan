@@ -21,6 +21,14 @@ import { getGameBundle, insertHand } from '../db/repo';
 import { GameBundle } from '../models/db';
 import { parseRules, Variant } from '../models/rules';
 import { computeCustomPayout, HkSettlementType } from '../models/hkStakes';
+import {
+  CurrencyCode,
+  DEFAULT_CURRENCY_CODE,
+  formatCurrencyAmount,
+  formatCurrencyUnit,
+  inferCurrencyCodeFromSymbol,
+  resolveCurrencyCode,
+} from '../models/currency';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
 import { DEBUG_FLAGS } from '../debug/debugFlags';
@@ -47,6 +55,7 @@ function AddHandScreen({ navigation, route }: Props) {
   const [hkGunMode, setHkGunMode] = useState<'halfGun' | 'fullGun'>('halfGun');
   const [unitPerFan, setUnitPerFan] = useState(1);
   const [capFan, setCapFan] = useState<number | null>(null);
+  const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(DEFAULT_CURRENCY_CODE);
   const [mode, setMode] = useState<Variant>('HK');
   const [handType, setHandType] = useState<'normal' | 'draw' | 'bonus'>('normal');
   const [inputValue, setInputValue] = useState('');
@@ -73,9 +82,9 @@ function AddHandScreen({ navigation, route }: Props) {
     ? t('addHand.inputFan')
     : t('addHand.inputValue');
   const inputHint = isPma
-    ? t('addHand.inputAmountHint')
+    ? `${t('addHand.inputAmountHint')} ${formatCurrencyUnit(currencyCode)}`
     : isHkCustom
-    ? t('addHand.inputFanHint')
+    ? `${t('addHand.inputFanHint')} ${formatCurrencyUnit(currencyCode)}`
     : t('addHand.inputHint');
 
   const inputRegex = useMemo(() => (isPma ? /[^0-9.-]/g : /[^0-9.-]/g), [isPma]);
@@ -99,7 +108,11 @@ function AddHandScreen({ navigation, route }: Props) {
       }
 
       const parsedRules = parseRules(data.game.rulesJson, normalizeVariant(data.game.variant));
+      const resolvedCurrencyCode = resolveCurrencyCode(
+        parsedRules.currencyCode ?? inferCurrencyCodeFromSymbol(data.game.currencySymbol),
+      );
       setMode(parsedRules.mode);
+      setCurrencyCode(resolvedCurrencyCode);
       setHkScoringPreset(parsedRules.hk?.scoringPreset ?? 'traditionalFan');
       setHkGunMode(parsedRules.hk?.gunMode ?? 'halfGun');
       setUnitPerFan(parsedRules.hk?.unitPerFan ?? 1);
@@ -179,6 +192,14 @@ function AddHandScreen({ navigation, route }: Props) {
               settlementType,
             })
           : null;
+        const payoutShareText = customPayout
+          ? [
+              `${t('addHand.share.customTitle')} ${formatCurrencyUnit(currencyCode)}`,
+              `${t('addHand.share.customFan')} ${customPayout.fan}`,
+              `${t('addHand.share.customEffectiveFan')} ${customPayout.effectiveFan}`,
+              `${t('addHand.share.customTotal')} ${formatCurrencyAmount(customPayout.totalWinAmount, currencyCode)}`,
+            ].join(' | ')
+          : null;
         await insertHand({
           id: makeId('hand'),
           gameId,
@@ -199,6 +220,7 @@ function AddHandScreen({ navigation, route }: Props) {
                   discarderPays: customPayout.discarderPays,
                   otherPlayersPay: customPayout.otherPlayersPay,
                   totalWinAmount: customPayout.totalWinAmount,
+                  shareText: payoutShareText,
                 }
               : {},
           ),
@@ -239,6 +261,9 @@ function AddHandScreen({ navigation, route }: Props) {
         automaticallyAdjustKeyboardInsets
       >
         <Text style={styles.pageTitle}>{t('addHand.title')}</Text>
+        <Text style={styles.currencyText}>
+          {`${t('addHand.currency')}${formatCurrencyUnit(currencyCode)}`}
+        </Text>
         {error && !showFanInlineError && !showWinnerInlineError && !showDiscarderInlineError ? (
           <Text style={styles.errorText}>{error}</Text>
         ) : null}
@@ -452,6 +477,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: theme.colors.textPrimary,
     marginBottom: GRID.x2,
+  },
+  currencyText: {
+    marginBottom: GRID.x1_5,
+    color: theme.colors.textSecondary,
+    fontSize: theme.fontSize.sm,
   },
   errorText: {
     marginBottom: GRID.x2,

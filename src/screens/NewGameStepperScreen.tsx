@@ -18,6 +18,12 @@ import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { createGameWithPlayers } from '../db/repo';
 import {
+  DEFAULT_CURRENCY_CODE,
+  CurrencyCode,
+  getCurrencyMeta,
+  formatCurrencyUnit,
+} from '../models/currency';
+import {
   getDefaultRules,
   HkGunMode,
   HkScoringPreset,
@@ -56,6 +62,7 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [title, setTitle] = useState('');
   const [seatMode, setSeatMode] = useState<SeatMode>('manual');
   const [mode, setMode] = useState<Variant>('HK');
+  const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(DEFAULT_CURRENCY_CODE);
   const [hkScoringPreset, setHkScoringPreset] = useState<HkScoringPreset>('traditionalFan');
   const [hkGunMode, setHkGunMode] = useState<HkGunMode>('halfGun');
   const [hkStakePreset, setHkStakePreset] = useState<HkStakePreset>('TWO_FIVE_CHICKEN');
@@ -237,7 +244,8 @@ function NewGameStepperScreen({ navigation }: Props) {
       variant: mode,
       mode,
       languageDefault: language,
-      currencySymbol: '$',
+      currencyCode,
+      currencySymbol: getCurrencyMeta(currencyCode).symbol,
     };
 
     if (mode === 'HK') {
@@ -380,6 +388,59 @@ function NewGameStepperScreen({ navigation }: Props) {
               <Text style={[styles.segmentedText, mode === 'PMA' && styles.segmentedTextActive]}>{t('newGame.mode.pma')}</Text>
             </Pressable>
           </View>
+        </Card>
+
+        <Card style={styles.card}>
+          <Text style={styles.sectionTitle}>{t('newGame.currencyTitle')}</Text>
+          <View style={styles.segmentedRow}>
+            <Pressable
+              style={[
+                styles.segmentedButton,
+                styles.segmentedButtonSpacing,
+                currencyCode === 'HKD' && styles.segmentedButtonActive,
+              ]}
+              onPress={() => setCurrencyCode('HKD')}
+              disabled={loading}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: loading, selected: currencyCode === 'HKD' }}
+              hitSlop={HIT_SLOP}
+            >
+              <Text style={[styles.segmentedText, currencyCode === 'HKD' && styles.segmentedTextActive]}>
+                {t('currency.hkd')}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.segmentedButton,
+                styles.segmentedButtonSpacing,
+                currencyCode === 'TWD' && styles.segmentedButtonActive,
+              ]}
+              onPress={() => setCurrencyCode('TWD')}
+              disabled={loading}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: loading, selected: currencyCode === 'TWD' }}
+              hitSlop={HIT_SLOP}
+            >
+              <Text style={[styles.segmentedText, currencyCode === 'TWD' && styles.segmentedTextActive]}>
+                {t('currency.twd')}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.segmentedButton, currencyCode === 'CNY' && styles.segmentedButtonActive]}
+              onPress={() => setCurrencyCode('CNY')}
+              disabled={loading}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: loading, selected: currencyCode === 'CNY' }}
+              hitSlop={HIT_SLOP}
+            >
+              <Text style={[styles.segmentedText, currencyCode === 'CNY' && styles.segmentedTextActive]}>
+                {t('currency.cny')}
+              </Text>
+            </Pressable>
+          </View>
+          <Text style={styles.helperText}>
+            {`${t('newGame.currencySelectedPrefix')}${formatCurrencyUnit(currencyCode)}`}
+          </Text>
         </Card>
 
         <Card style={styles.card}>

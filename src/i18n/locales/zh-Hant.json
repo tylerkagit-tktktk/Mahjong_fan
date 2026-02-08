@@ -98,6 +98,9 @@
   "newGame.scoringMethod": "計番方式",
   "newGame.hkPreset.traditional": "傳統番數",
   "newGame.hkPreset.custom": "自訂番數（價錢表）",
+  "newGame.unitPerFanLabel": "每番值（單位）",
+  "newGame.unitPerFanHelp": "每番金額（正整數）。",
+  "newGame.unitPerFanValidation": "每番值必須為正整數",
   "newGame.hkGunModeLabel": "出銃制",
   "newGame.hkGunMode.half": "半銃制",
   "newGame.hkGunMode.full": "全銃制",
@@ -117,6 +120,10 @@
   "newGame.hkThresholdHelp": "達到此番數或以上才算胡牌",
   "newGame.capFanLabel": "爆棚番數",
   "newGame.capFanHelp": "達到此番數後封頂計算（預設 10）。",
+  "newGame.capFanDisabledHelp": "不封頂：按實際番數計算。",
+  "newGame.capModeLabel": "封頂設定",
+  "newGame.capMode.none": "不封頂",
+  "newGame.capMode.fanCap": "封頂番數",
   "newGame.capFanValidation": "爆棚番數必須為整數",
   "newGame.twThresholdHelp": "番數門檻",
   "newGame.hkCustomSummary": "將來可自訂每個番數對應金額。",
@@ -124,5 +131,22 @@
   "newGame.pmaDescription": "跑馬仔：每手直接輸入輸贏金額（暫不計番數）。",
   "addHand.inputAmount": "輸入輸贏金額",
   "addHand.inputAmountHint": "可輸入正負金額，例如 -20 或 50。",
+  "addHand.inputFan": "輸入番數",
+  "addHand.inputFanHint": "請輸入正整數番數。",
+  "addHand.settlementType": "胡牌方式",
+  "addHand.settlementType.zimo": "自摸",
+  "addHand.settlementType.discard": "出銃",
   "errors.invalidAmount": "請輸入有效金額。"
+  ,"errors.invalidFan": "請輸入有效番數（正整數）。"
+  ,"errors.selectWinner": "請選擇贏家。"
+  ,"errors.selectDiscarder": "請選擇出銃者。"
+  ,"errors.discarderCannotBeWinner": "出銃者不能與贏家相同。"
+  ,"dashboard.scoringMethod": "計番方式："
+  ,"dashboard.scoringMethodTraditional": "傳統番數"
+  ,"dashboard.scoringMethodCustom": "自訂（每番值）"
+  ,"dashboard.unitPerFan": "每番值："
+  ,"dashboard.capStatus": "封頂："
+  ,"dashboard.capNone": "不封頂"
+  ,"dashboard.capFanPrefix": "封頂 "
+  ,"dashboard.capFanSuffix": " 番"
 }

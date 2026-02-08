@@ -20,6 +20,7 @@ import { RootStackParamList } from '../navigation/types';
 import { getGameBundle, insertHand } from '../db/repo';
 import { GameBundle } from '../models/db';
 import { parseRules, Variant } from '../models/rules';
+import { computeCustomPayout, HkSettlementType } from '../models/hkStakes';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
 import { DEBUG_FLAGS } from '../debug/debugFlags';
@@ -40,18 +41,42 @@ function AddHandScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
 
   const [bundle, setBundle] = useState<GameBundle | null>(null);
+  const [hkScoringPreset, setHkScoringPreset] = useState<'traditionalFan' | 'customTable'>(
+    'traditionalFan',
+  );
+  const [hkGunMode, setHkGunMode] = useState<'halfGun' | 'fullGun'>('halfGun');
+  const [unitPerFan, setUnitPerFan] = useState(1);
+  const [capFan, setCapFan] = useState<number | null>(null);
   const [mode, setMode] = useState<Variant>('HK');
   const [handType, setHandType] = useState<'normal' | 'draw' | 'bonus'>('normal');
   const [inputValue, setInputValue] = useState('');
+  const [settlementType, setSettlementType] = useState<HkSettlementType>('zimo');
   const [winnerId, setWinnerId] = useState<string | null>(null);
   const [discarderId, setDiscarderId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const isPma = mode === 'PMA';
+  const isHkCustom = mode === 'HK' && hkScoringPreset === 'customTable';
+  const invalidFanError = t('errors.invalidFan');
+  const selectWinnerError = t('errors.selectWinner');
+  const selectDiscarderError = t('errors.selectDiscarder');
+  const discarderCannotBeWinnerError = t('errors.discarderCannotBeWinner');
+  const showFanInlineError = error === invalidFanError;
+  const showWinnerInlineError = error === selectWinnerError;
+  const showDiscarderInlineError =
+    error === selectDiscarderError || error === discarderCannotBeWinnerError;
 
-  const inputLabel = isPma ? t('addHand.inputAmount') : t('addHand.inputValue');
-  const inputHint = isPma ? t('addHand.inputAmountHint') : t('addHand.inputHint');
+  const inputLabel = isPma
+    ? t('addHand.inputAmount')
+    : isHkCustom
+    ? t('addHand.inputFan')
+    : t('addHand.inputValue');
+  const inputHint = isPma
+    ? t('addHand.inputAmountHint')
+    : isHkCustom
+    ? t('addHand.inputFanHint')
+    : t('addHand.inputHint');
 
   const inputRegex = useMemo(() => (isPma ? /[^0-9.-]/g : /[^0-9.-]/g), [isPma]);
 
@@ -75,6 +100,10 @@ function AddHandScreen({ navigation, route }: Props) {
 
       const parsedRules = parseRules(data.game.rulesJson, normalizeVariant(data.game.variant));
       setMode(parsedRules.mode);
+      setHkScoringPreset(parsedRules.hk?.scoringPreset ?? 'traditionalFan');
+      setHkGunMode(parsedRules.hk?.gunMode ?? 'halfGun');
+      setUnitPerFan(parsedRules.hk?.unitPerFan ?? 1);
+      setCapFan(parsedRules.hk?.capFan ?? null);
       setBundle(data);
       setBreadcrumb('AddHand: after setBundle', { playerCount: data.players.length, mode: parsedRules.mode });
     } catch (err) {
@@ -118,17 +147,61 @@ function AddHandScreen({ navigation, route }: Props) {
         setError(t('errors.invalidAmount'));
         return;
       }
+      if (isHkCustom) {
+        if (numericValue === null || !Number.isInteger(numericValue) || numericValue <= 0) {
+          setError(t('errors.invalidFan'));
+          return;
+        }
+        if (!winnerId) {
+          setError(t('errors.selectWinner'));
+          return;
+        }
+        if (settlementType === 'discard') {
+          if (!discarderId) {
+            setError(t('errors.selectDiscarder'));
+            return;
+          }
+          if (discarderId === winnerId) {
+            setError(t('errors.discarderCannotBeWinner'));
+            return;
+          }
+        }
+      }
 
       try {
         setBreadcrumb('AddHand: before insertHand', { gameId, handType, mode });
+        const customPayout = isHkCustom
+          ? computeCustomPayout({
+              fan: Number(numericValue),
+              unitPerFan,
+              capFan,
+              gunMode: hkGunMode,
+              settlementType,
+            })
+          : null;
         await insertHand({
           id: makeId('hand'),
           gameId,
-          type: isPma ? 'amount' : handType,
+          type: isPma ? 'amount' : isHkCustom ? 'fan' : handType,
           winnerPlayerId: isPma ? null : winnerId,
-          discarderPlayerId: isPma ? null : discarderId,
-          inputValue: Number.isNaN(numericValue) ? null : numericValue,
-          computedJson: JSON.stringify({}),
+          discarderPlayerId:
+            isPma || (isHkCustom && settlementType === 'zimo') ? null : discarderId,
+          inputValue: customPayout ? customPayout.totalWinAmount : Number.isNaN(numericValue) ? null : numericValue,
+          computedJson: JSON.stringify(
+            customPayout
+              ? {
+                  fan: customPayout.fan,
+                  effectiveFan: customPayout.effectiveFan,
+                  unitPerFan,
+                  gunMode: hkGunMode,
+                  settlementType,
+                  zimoPerPlayer: customPayout.zimoPerPlayer,
+                  discarderPays: customPayout.discarderPays,
+                  otherPlayersPay: customPayout.otherPlayersPay,
+                  totalWinAmount: customPayout.totalWinAmount,
+                }
+              : {},
+          ),
           createdAt: Date.now(),
         });
         setBreadcrumb('AddHand: after insertHand', { gameId });
@@ -166,9 +239,11 @@ function AddHandScreen({ navigation, route }: Props) {
         automaticallyAdjustKeyboardInsets
       >
         <Text style={styles.pageTitle}>{t('addHand.title')}</Text>
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {error && !showFanInlineError && !showWinnerInlineError && !showDiscarderInlineError ? (
+          <Text style={styles.errorText}>{error}</Text>
+        ) : null}
 
-        {!isPma ? (
+        {!isPma && !isHkCustom ? (
           <Card style={styles.card}>
             <Text style={styles.sectionTitle}>{t('addHand.type')}</Text>
             <View style={styles.segmentedRow}>
@@ -207,10 +282,51 @@ function AddHandScreen({ navigation, route }: Props) {
             placeholder="0"
           />
           <Text style={styles.helperText}>{inputHint}</Text>
+          {showFanInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
         </Card>
 
         {!isPma ? (
           <Card style={styles.card}>
+            {isHkCustom ? (
+              <>
+                <Text style={styles.sectionTitle}>{t('addHand.settlementType')}</Text>
+                <View style={styles.segmentedRow}>
+                  <Pressable
+                    style={[
+                      styles.segmentedButton,
+                      styles.segmentedButtonSpacing,
+                      settlementType === 'zimo' && styles.segmentedButtonActive,
+                    ]}
+                    onPress={() => setSettlementType('zimo')}
+                    disabled={saving}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: saving, selected: settlementType === 'zimo' }}
+                    hitSlop={HIT_SLOP}
+                  >
+                    <Text style={[styles.segmentedText, settlementType === 'zimo' && styles.segmentedTextActive]}>
+                      {t('addHand.settlementType.zimo')}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.segmentedButton, settlementType === 'discard' && styles.segmentedButtonActive]}
+                    onPress={() => setSettlementType('discard')}
+                    disabled={saving}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: saving, selected: settlementType === 'discard' }}
+                    hitSlop={HIT_SLOP}
+                  >
+                    <Text
+                      style={[
+                        styles.segmentedText,
+                        settlementType === 'discard' && styles.segmentedTextActive,
+                      ]}
+                    >
+                      {t('addHand.settlementType.discard')}
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : null}
             <Text style={styles.sectionTitle}>{t('addHand.winner')}</Text>
             <View style={styles.pillWrap}>
               <ChoicePill
@@ -231,10 +347,11 @@ function AddHandScreen({ navigation, route }: Props) {
                 />
               ))}
             </View>
+            {showWinnerInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
           </Card>
         ) : null}
 
-        {!isPma ? (
+        {!isPma && (!isHkCustom || settlementType === 'discard') ? (
           <Card style={styles.card}>
             <Text style={styles.sectionTitle}>{t('addHand.discarder')}</Text>
             <View style={styles.pillWrap}>
@@ -256,6 +373,7 @@ function AddHandScreen({ navigation, route }: Props) {
                 />
               ))}
             </View>
+            {showDiscarderInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
           </Card>
         ) : null}
 

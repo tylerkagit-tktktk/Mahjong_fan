@@ -101,6 +101,27 @@ function GameDashboardScreen({ navigation, route }: Props) {
                   {t('dashboard.minFanToWin')} {rules?.minFanToWin ?? '-'}
                 </Text>
               ) : null}
+              {rules?.mode === 'HK' ? (
+                <>
+                  <Text style={styles.metaText}>
+                    {t('dashboard.scoringMethod')}{' '}
+                    {rules.hk?.scoringPreset === 'customTable'
+                      ? t('dashboard.scoringMethodCustom')
+                      : t('dashboard.scoringMethodTraditional')}
+                  </Text>
+                  {rules.hk?.scoringPreset === 'customTable' ? (
+                    <Text style={styles.metaText}>
+                      {t('dashboard.unitPerFan')} {rules.hk?.unitPerFan ?? 1}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.metaText}>
+                    {t('dashboard.capStatus')}{' '}
+                    {rules.hk?.capFan === null
+                      ? t('dashboard.capNone')
+                      : `${t('dashboard.capFanPrefix')}${rules.hk?.capFan}${t('dashboard.capFanSuffix')}`}
+                  </Text>
+                </>
+              ) : null}
               <Text style={styles.metaText}>
                 {t('dashboard.handsCount')} {handsCount}
               </Text>

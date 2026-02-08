@@ -22,6 +22,7 @@ export interface RulesV1 {
     scoringPreset: HkScoringPreset;
     gunMode: HkGunMode;
     stakePreset: HkStakePreset;
+    unitPerFan?: number;
     capFan?: number | null;
     applyDealerMultiplier: boolean;
   };
@@ -54,6 +55,7 @@ export function getDefaultRules(variant: Variant): RulesV1 {
         scoringPreset: 'traditionalFan',
         gunMode: 'halfGun',
         stakePreset: 'TWO_FIVE_CHICKEN',
+        unitPerFan: 1,
         capFan: null,
         applyDealerMultiplier: true,
       },
@@ -136,6 +138,10 @@ export function parseRules(
                   : parsed.hk?.stakePreset === 'CUSTOM'
                   ? 'TWO_FIVE_CHICKEN'
                   : fallback.hk!.stakePreset,
+              unitPerFan:
+                Number.isInteger(parsed.hk?.unitPerFan) && Number(parsed.hk?.unitPerFan) > 0
+                  ? Number(parsed.hk?.unitPerFan)
+                  : fallback.hk!.unitPerFan,
               capFan: parsed.hk?.capFan ?? fallback.hk!.capFan,
               applyDealerMultiplier:
                 parsed.hk?.applyDealerMultiplier ?? fallback.hk!.applyDealerMultiplier,

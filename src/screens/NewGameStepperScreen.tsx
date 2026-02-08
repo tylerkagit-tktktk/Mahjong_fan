@@ -44,6 +44,8 @@ const HIT_SLOP = { top: GRID.x1, right: GRID.x1, bottom: GRID.x1, left: GRID.x1 
 
 const MIN_FAN_MIN = 0;
 const MIN_FAN_MAX = 13;
+const UNIT_PER_FAN_MIN = 1;
+const UNIT_PER_FAN_MAX = 9999;
 const CAP_FAN_MIN = 1;
 const CAP_FAN_MAX = 20;
 
@@ -57,9 +59,13 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [hkScoringPreset, setHkScoringPreset] = useState<HkScoringPreset>('traditionalFan');
   const [hkGunMode, setHkGunMode] = useState<HkGunMode>('halfGun');
   const [hkStakePreset, setHkStakePreset] = useState<HkStakePreset>('TWO_FIVE_CHICKEN');
+  const [unitPerFan, setUnitPerFan] = useState(1);
+  const [unitPerFanInput, setUnitPerFanInput] = useState('1');
+  const [unitPerFanTouched, setUnitPerFanTouched] = useState(false);
   const [minFanToWin, setMinFanToWin] = useState(3);
   const [minFanInput, setMinFanInput] = useState('3');
   const [minFanTouched, setMinFanTouched] = useState(false);
+  const [capFanEnabled, setCapFanEnabled] = useState(true);
   const [capFan, setCapFan] = useState(10);
   const [capFanInput, setCapFanInput] = useState('10');
   const [capFanTouched, setCapFanTouched] = useState(false);
@@ -83,12 +89,26 @@ function NewGameStepperScreen({ navigation }: Props) {
     showMinFan && (minFanTouched || submitAttempted)
       ? getMinFanError(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX, t('newGame.minFanValidation'))
       : null;
+  const unitPerFanError =
+    mode === 'HK' && hkScoringPreset === 'customTable' && (unitPerFanTouched || submitAttempted)
+      ? getMinFanError(
+          unitPerFanInput,
+          UNIT_PER_FAN_MIN,
+          UNIT_PER_FAN_MAX,
+          t('newGame.unitPerFanValidation'),
+        )
+      : null;
   const capFanError =
-    mode === 'HK' && hkScoringPreset === 'traditionalFan' && (capFanTouched || submitAttempted)
+    mode === 'HK' &&
+    capFanEnabled &&
+    (hkScoringPreset === 'traditionalFan' || hkScoringPreset === 'customTable') &&
+    (capFanTouched || submitAttempted)
       ? getMinFanError(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX, t('newGame.capFanValidation'))
       : null;
   const minFanForHint = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX) ?? minFanToWin;
-  const capFanForHint = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) ?? capFan;
+  const capFanForHint = capFanEnabled
+    ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) ?? capFan
+    : null;
   const titleRequiredMessage = t('newGame.requiredTitle');
 
   const handleSetPlayer = (index: number, value: string) => {
@@ -148,6 +168,15 @@ function NewGameStepperScreen({ navigation }: Props) {
       }
       resolvedMinFan = parsedMinFan;
       setMinFanToWin(parsedMinFan);
+    }
+    let resolvedUnitPerFan = unitPerFan;
+    if (mode === 'HK' && hkScoringPreset === 'customTable') {
+      const parsedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+      if (parsedUnitPerFan === null) {
+        return;
+      }
+      resolvedUnitPerFan = parsedUnitPerFan;
+      setUnitPerFan(parsedUnitPerFan);
     }
 
     let resolvedPlayers = [...players];
@@ -212,11 +241,15 @@ function NewGameStepperScreen({ navigation }: Props) {
     };
 
     if (mode === 'HK') {
-      const parsedCapFan = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
-      if (parsedCapFan === null) {
-        return;
+      let parsedCapFan: number | null = null;
+      if (capFanEnabled) {
+        const value = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
+        if (value === null) {
+          return;
+        }
+        parsedCapFan = value;
+        setCapFan(value);
       }
-      setCapFan(parsedCapFan);
 
       const hkBase = rules.hk ?? getDefaultRules('HK').hk!;
       rules.hk = {
@@ -224,6 +257,7 @@ function NewGameStepperScreen({ navigation }: Props) {
         scoringPreset: hkScoringPreset,
         gunMode: hkGunMode,
         stakePreset: hkStakePreset,
+        unitPerFan: resolvedUnitPerFan,
         capFan: parsedCapFan,
       };
       rules.minFanToWin = hkScoringPreset === 'traditionalFan' ? resolvedMinFan : rules.minFanToWin ?? 3;
@@ -275,6 +309,13 @@ function NewGameStepperScreen({ navigation }: Props) {
     setCapFanTouched(true);
   };
 
+  const adjustUnitPerFan = (delta: number) => {
+    const next = clamp(unitPerFan + delta, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+    setUnitPerFan(next);
+    setUnitPerFanInput(String(next));
+    setUnitPerFanTouched(true);
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -283,7 +324,10 @@ function NewGameStepperScreen({ navigation }: Props) {
     >
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(insets.bottom, GRID.x2) + 64 },
+        ]}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
@@ -540,58 +584,140 @@ function NewGameStepperScreen({ navigation }: Props) {
                   <Text style={styles.helperText}>{t('newGame.hkThresholdHelp')}</Text>
                   {minFanError ? <Text style={styles.inlineErrorText}>{minFanError}</Text> : null}
 
-                  <View style={styles.blockSpacing}>
-                    <Text style={styles.inputLabel}>{t('newGame.capFanLabel')}</Text>
-                    <View style={styles.minFanRow}>
-                      <Pressable
-                        style={[styles.adjustButton, styles.adjustButtonLeft]}
-                        onPress={() => adjustCapFan(-1)}
-                        disabled={loading}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: loading }}
-                        hitSlop={HIT_SLOP}
-                      >
-                        <Text style={styles.adjustText}>-</Text>
-                      </Pressable>
-                      <TextInput
-                        style={[styles.minFanInput, capFanError ? styles.minFanInputError : null]}
-                        keyboardType="number-pad"
-                        value={capFanInput}
-                        onChangeText={(value) => setCapFanInput(value.replace(/[^0-9]/g, ''))}
-                        onBlur={() => {
-                          setCapFanTouched(true);
-                          const parsed = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
-                          if (parsed !== null) {
-                            setCapFan(parsed);
-                            setCapFanInput(String(parsed));
-                          }
-                        }}
-                        placeholder={`${CAP_FAN_MIN}-${CAP_FAN_MAX}`}
-                        placeholderTextColor={theme.colors.textSecondary}
-                        editable={!loading}
-                      />
-                      <Pressable
-                        style={[styles.adjustButton, styles.adjustButtonRight]}
-                        onPress={() => adjustCapFan(1)}
-                        disabled={loading}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: loading }}
-                        hitSlop={HIT_SLOP}
-                      >
-                        <Text style={styles.adjustText}>+</Text>
-                      </Pressable>
-                    </View>
-                    <Text style={styles.helperText}>{t('newGame.capFanHelp')}</Text>
-                    {capFanError ? <Text style={styles.inlineErrorText}>{capFanError}</Text> : null}
-                  </View>
                 </View>
               ) : (
                 <View style={styles.blockSpacing}>
-                  <Text style={styles.helperText}>{t('newGame.hkCustomSummary')}</Text>
-                  <AppButton label={t('newGame.hkCustomSetup')} onPress={() => {}} disabled variant="secondary" />
-                  <Text style={styles.comingSoonText}>{t('common.comingSoon')}</Text>
+                  <Text style={styles.inputLabel}>{t('newGame.unitPerFanLabel')}</Text>
+                  <View style={styles.minFanRow}>
+                    <Pressable
+                      style={[styles.adjustButton, styles.adjustButtonLeft]}
+                      onPress={() => adjustUnitPerFan(-1)}
+                      disabled={loading}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: loading }}
+                      hitSlop={HIT_SLOP}
+                    >
+                      <Text style={styles.adjustText}>-</Text>
+                    </Pressable>
+                    <TextInput
+                      style={[styles.minFanInput, unitPerFanError ? styles.minFanInputError : null]}
+                      keyboardType="number-pad"
+                      value={unitPerFanInput}
+                      onChangeText={(value) => setUnitPerFanInput(value.replace(/[^0-9]/g, ''))}
+                      onBlur={() => {
+                        setUnitPerFanTouched(true);
+                        const parsed = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+                        if (parsed !== null) {
+                          setUnitPerFan(parsed);
+                          setUnitPerFanInput(String(parsed));
+                        }
+                      }}
+                      placeholder={`${UNIT_PER_FAN_MIN}-${UNIT_PER_FAN_MAX}`}
+                      placeholderTextColor={theme.colors.textSecondary}
+                      editable={!loading}
+                    />
+                    <Pressable
+                      style={[styles.adjustButton, styles.adjustButtonRight]}
+                      onPress={() => adjustUnitPerFan(1)}
+                      disabled={loading}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: loading }}
+                      hitSlop={HIT_SLOP}
+                    >
+                      <Text style={styles.adjustText}>+</Text>
+                    </Pressable>
+                  </View>
+                  <Text style={styles.helperText}>{t('newGame.unitPerFanHelp')}</Text>
+                  {unitPerFanError ? <Text style={styles.inlineErrorText}>{unitPerFanError}</Text> : null}
                 </View>
               )}
+
+              <View style={styles.blockSpacing}>
+                <Text style={styles.inputLabel}>{t('newGame.capModeLabel')}</Text>
+                <View style={styles.segmentedRow}>
+                  <Pressable
+                    style={[
+                      styles.segmentedButton,
+                      styles.segmentedButtonSpacing,
+                      !capFanEnabled && styles.segmentedButtonActive,
+                    ]}
+                    onPress={() => {
+                      setCapFanEnabled(false);
+                      setCapFanTouched(false);
+                    }}
+                    disabled={loading}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: loading, selected: !capFanEnabled }}
+                    hitSlop={HIT_SLOP}
+                  >
+                    <Text style={[styles.segmentedText, !capFanEnabled && styles.segmentedTextActive]}>
+                      {t('newGame.capMode.none')}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.segmentedButton, capFanEnabled && styles.segmentedButtonActive]}
+                    onPress={() => setCapFanEnabled(true)}
+                    disabled={loading}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: loading, selected: capFanEnabled }}
+                    hitSlop={HIT_SLOP}
+                  >
+                    <Text style={[styles.segmentedText, capFanEnabled && styles.segmentedTextActive]}>
+                      {t('newGame.capMode.fanCap')}
+                    </Text>
+                  </Pressable>
+                </View>
+                {capFanEnabled ? (
+                  <>
+                    <View style={styles.blockSpacing}>
+                      <Text style={styles.inputLabel}>{t('newGame.capFanLabel')}</Text>
+                      <View style={styles.minFanRow}>
+                        <Pressable
+                          style={[styles.adjustButton, styles.adjustButtonLeft]}
+                          onPress={() => adjustCapFan(-1)}
+                          disabled={loading}
+                          accessibilityRole="button"
+                          accessibilityState={{ disabled: loading }}
+                          hitSlop={HIT_SLOP}
+                        >
+                          <Text style={styles.adjustText}>-</Text>
+                        </Pressable>
+                        <TextInput
+                          style={[styles.minFanInput, capFanError ? styles.minFanInputError : null]}
+                          keyboardType="number-pad"
+                          value={capFanInput}
+                          onChangeText={(value) => setCapFanInput(value.replace(/[^0-9]/g, ''))}
+                          onBlur={() => {
+                            setCapFanTouched(true);
+                            const parsed = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
+                            if (parsed !== null) {
+                              setCapFan(parsed);
+                              setCapFanInput(String(parsed));
+                            }
+                          }}
+                          placeholder={`${CAP_FAN_MIN}-${CAP_FAN_MAX}`}
+                          placeholderTextColor={theme.colors.textSecondary}
+                          editable={!loading}
+                        />
+                        <Pressable
+                          style={[styles.adjustButton, styles.adjustButtonRight]}
+                          onPress={() => adjustCapFan(1)}
+                          disabled={loading}
+                          accessibilityRole="button"
+                          accessibilityState={{ disabled: loading }}
+                          hitSlop={HIT_SLOP}
+                        >
+                          <Text style={styles.adjustText}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                    <Text style={styles.helperText}>{t('newGame.capFanHelp')}</Text>
+                    {capFanError ? <Text style={styles.inlineErrorText}>{capFanError}</Text> : null}
+                  </>
+                ) : (
+                  <Text style={styles.helperText}>{t('newGame.capFanDisabledHelp')}</Text>
+                )}
+              </View>
             </>
           ) : null}
 
@@ -804,13 +930,13 @@ function getStakePresetHintLines(
   preset: HkStakePreset,
   gunMode: HkGunMode,
   minFan: number,
-  capFan: number,
+  capFan: number | null,
   t: (key: TranslationKey) => string,
 ): string[] {
   const fanText = String(minFan);
-  const capFanText = String(capFan);
+  const capFanText = capFan === null ? t('newGame.capMode.none') : String(capFan);
   const effectiveMinFan = Math.max(1, minFan);
-  const effectiveCapFan = Math.max(1, capFan);
+  const effectiveCapFan = capFan === null ? effectiveMinFan : Math.max(1, capFan);
   const startMultiplier = 2 ** (effectiveMinFan - 1);
   const capMultiplier = 2 ** (effectiveCapFan - 1);
 
@@ -901,7 +1027,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: GRID.x2,
     paddingTop: GRID.x3,
-    paddingBottom: 168,
   },
   pageTitle: {
     fontSize: theme.fontSize.lg,

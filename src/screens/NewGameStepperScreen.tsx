@@ -54,6 +54,8 @@ const UNIT_PER_FAN_MIN = 1;
 const UNIT_PER_FAN_MAX = 9999;
 const CAP_FAN_MIN = 1;
 const CAP_FAN_MAX = 20;
+const SAMPLE_FAN_MIN = 1;
+const SAMPLE_FAN_MAX = 20;
 
 function NewGameStepperScreen({ navigation }: Props) {
   const { t, language } = useAppLanguage();
@@ -76,6 +78,7 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [capFan, setCapFan] = useState(10);
   const [capFanInput, setCapFanInput] = useState('10');
   const [capFanTouched, setCapFanTouched] = useState(false);
+  const [sampleFan, setSampleFan] = useState(3);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [players, setPlayers] = useState(['', '', '', '']);
   const [autoNames, setAutoNames] = useState(['', '', '', '']);
@@ -116,6 +119,12 @@ function NewGameStepperScreen({ navigation }: Props) {
   const capFanForHint = capFanEnabled
     ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) ?? capFan
     : null;
+  const parsedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+  const parsedCapFan = capFanEnabled ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) : null;
+  const sampleEffectiveFan =
+    parsedCapFan !== null ? Math.min(sampleFan, parsedCapFan) : sampleFan;
+  const sampleBaseAmount =
+    parsedUnitPerFan !== null ? sampleEffectiveFan * parsedUnitPerFan : null;
   const titleRequiredMessage = t('newGame.requiredTitle');
 
   const handleSetPlayer = (index: number, value: string) => {
@@ -178,12 +187,12 @@ function NewGameStepperScreen({ navigation }: Props) {
     }
     let resolvedUnitPerFan = unitPerFan;
     if (mode === 'HK' && hkScoringPreset === 'customTable') {
-      const parsedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
-      if (parsedUnitPerFan === null) {
+      const validatedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+      if (validatedUnitPerFan === null) {
         return;
       }
-      resolvedUnitPerFan = parsedUnitPerFan;
-      setUnitPerFan(parsedUnitPerFan);
+      resolvedUnitPerFan = validatedUnitPerFan;
+      setUnitPerFan(validatedUnitPerFan);
     }
 
     let resolvedPlayers = [...players];
@@ -251,12 +260,12 @@ function NewGameStepperScreen({ navigation }: Props) {
     if (mode === 'HK') {
       let parsedCapFan: number | null = null;
       if (capFanEnabled) {
-        const value = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
-        if (value === null) {
+        const validatedCapFan = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
+        if (validatedCapFan === null) {
           return;
         }
-        parsedCapFan = value;
-        setCapFan(value);
+        parsedCapFan = validatedCapFan;
+        setCapFan(validatedCapFan);
       }
 
       const hkBase = rules.hk ?? getDefaultRules('HK').hk!;
@@ -322,6 +331,11 @@ function NewGameStepperScreen({ navigation }: Props) {
     setUnitPerFan(next);
     setUnitPerFanInput(String(next));
     setUnitPerFanTouched(true);
+  };
+
+  const adjustSampleFan = (delta: number) => {
+    const next = clamp(sampleFan + delta, SAMPLE_FAN_MIN, SAMPLE_FAN_MAX);
+    setSampleFan(next);
   };
 
   return (
@@ -779,6 +793,62 @@ function NewGameStepperScreen({ navigation }: Props) {
                   <Text style={styles.helperText}>{t('newGame.capFanDisabledHelp')}</Text>
                 )}
               </View>
+
+              {hkScoringPreset === 'customTable' ? (
+                <View style={styles.blockSpacing}>
+                  <Text style={styles.inputLabel}>{t('newGame.sampleFanLabel')}</Text>
+                  <View style={styles.minFanRow}>
+                    <Pressable
+                      style={[styles.adjustButton, styles.adjustButtonLeft]}
+                      onPress={() => adjustSampleFan(-1)}
+                      disabled={loading}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: loading }}
+                      hitSlop={HIT_SLOP}
+                    >
+                      <Text style={styles.adjustText}>-</Text>
+                    </Pressable>
+                    <TextInput
+                      style={styles.minFanInput}
+                      keyboardType="number-pad"
+                      value={String(sampleFan)}
+                      onChangeText={(value) => {
+                        const parsed = parseMinFan(value.replace(/[^0-9]/g, ''), SAMPLE_FAN_MIN, SAMPLE_FAN_MAX);
+                        if (parsed !== null) {
+                          setSampleFan(parsed);
+                        }
+                      }}
+                      placeholder={`${SAMPLE_FAN_MIN}-${SAMPLE_FAN_MAX}`}
+                      placeholderTextColor={theme.colors.textSecondary}
+                      editable={!loading}
+                    />
+                    <Pressable
+                      style={[styles.adjustButton, styles.adjustButtonRight]}
+                      onPress={() => adjustSampleFan(1)}
+                      disabled={loading}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: loading }}
+                      hitSlop={HIT_SLOP}
+                    >
+                      <Text style={styles.adjustText}>+</Text>
+                    </Pressable>
+                  </View>
+                  {sampleBaseAmount !== null ? (
+                    <>
+                      <Text style={styles.helperText}>
+                        {`${t('newGame.realtime.effectiveFan')} = ${
+                          capFanEnabled ? `min(${sampleFan}, ${parsedCapFan ?? capFan})` : `${sampleFan}`
+                        } = ${sampleEffectiveFan}`}
+                      </Text>
+                      <Text style={styles.helperTextSubLine}>
+                        {`${t('newGame.realtime.baseAmount')} = ${sampleEffectiveFan} x ${
+                          parsedUnitPerFan ?? unitPerFan
+                        } = ${sampleBaseAmount}`}
+                      </Text>
+                    </>
+                  ) : null}
+                </View>
+              ) : null}
             </>
           ) : null}
 

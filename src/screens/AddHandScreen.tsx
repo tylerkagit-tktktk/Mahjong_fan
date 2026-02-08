@@ -88,6 +88,14 @@ function AddHandScreen({ navigation, route }: Props) {
     : t('addHand.inputHint');
 
   const inputRegex = useMemo(() => (isPma ? /[^0-9.-]/g : /[^0-9.-]/g), [isPma]);
+  const liveFanValue = Number(inputValue.trim());
+  const liveFanValid = Number.isInteger(liveFanValue) && liveFanValue >= 1;
+  const liveEffectiveFan = liveFanValid
+    ? capFan === null
+      ? liveFanValue
+      : Math.min(liveFanValue, capFan)
+    : null;
+  const liveBaseAmount = liveEffectiveFan !== null ? liveEffectiveFan * unitPerFan : null;
 
   const loadBundle = useCallback(async () => {
     try {
@@ -307,6 +315,21 @@ function AddHandScreen({ navigation, route }: Props) {
             placeholder="0"
           />
           <Text style={styles.helperText}>{inputHint}</Text>
+          {isHkCustom && liveFanValue >= 1 && liveFanValid && liveEffectiveFan !== null && liveBaseAmount !== null ? (
+            <>
+              <Text style={styles.helperText}>
+                {`${t('addHand.realtime.effectiveFan')} = ${
+                  capFan === null ? `${liveFanValue}` : `min(${liveFanValue}, ${capFan})`
+                } = ${liveEffectiveFan}`}
+              </Text>
+              <Text style={styles.helperTextSubLine}>
+                {`${t('addHand.realtime.baseAmount')} = ${liveEffectiveFan} x ${unitPerFan} = ${formatCurrencyAmount(
+                  liveBaseAmount,
+                  currencyCode,
+                )}`}
+              </Text>
+            </>
+          ) : null}
           {showFanInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
         </Card>
 
@@ -530,6 +553,11 @@ const styles = StyleSheet.create({
   },
   helperText: {
     marginTop: GRID.x1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.textSecondary,
+  },
+  helperTextSubLine: {
+    marginTop: 6,
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
   },

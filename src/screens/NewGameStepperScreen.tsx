@@ -120,9 +120,9 @@ function NewGameStepperScreen({ navigation }: Props) {
     ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) ?? capFan
     : null;
   const parsedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
-  const parsedCapFan = capFanEnabled ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) : null;
+  const previewCapFan = capFanEnabled ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) : null;
   const sampleEffectiveFan =
-    parsedCapFan !== null ? Math.min(sampleFan, parsedCapFan) : sampleFan;
+    previewCapFan !== null ? Math.min(sampleFan, previewCapFan) : sampleFan;
   const sampleBaseAmount =
     parsedUnitPerFan !== null ? sampleEffectiveFan * parsedUnitPerFan : null;
   const titleRequiredMessage = t('newGame.requiredTitle');
@@ -662,6 +662,39 @@ function NewGameStepperScreen({ navigation }: Props) {
                 </View>
               ) : (
                 <View style={styles.blockSpacing}>
+                  <Text style={styles.inputLabel}>{t('newGame.hkGunModeLabel')}</Text>
+                  <View style={styles.segmentedRow}>
+                    <Pressable
+                      style={[
+                        styles.segmentedButton,
+                        styles.segmentedButtonSpacing,
+                        hkGunMode === 'halfGun' && styles.segmentedButtonActive,
+                      ]}
+                      onPress={() => setHkGunMode('halfGun')}
+                      disabled={loading}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: loading, selected: hkGunMode === 'halfGun' }}
+                      hitSlop={HIT_SLOP}
+                    >
+                      <Text style={[styles.segmentedText, hkGunMode === 'halfGun' && styles.segmentedTextActive]}>
+                        {t('newGame.hkGunMode.half')}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.segmentedButton, hkGunMode === 'fullGun' && styles.segmentedButtonActive]}
+                      onPress={() => setHkGunMode('fullGun')}
+                      disabled={loading}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: loading, selected: hkGunMode === 'fullGun' }}
+                      hitSlop={HIT_SLOP}
+                    >
+                      <Text style={[styles.segmentedText, hkGunMode === 'fullGun' && styles.segmentedTextActive]}>
+                        {t('newGame.hkGunMode.full')}
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  <View style={styles.blockSpacing}>
                   <Text style={styles.inputLabel}>{t('newGame.unitPerFanLabel')}</Text>
                   <View style={styles.minFanRow}>
                     <Pressable
@@ -704,6 +737,7 @@ function NewGameStepperScreen({ navigation }: Props) {
                   </View>
                   <Text style={styles.helperText}>{t('newGame.unitPerFanHelp')}</Text>
                   {unitPerFanError ? <Text style={styles.inlineErrorText}>{unitPerFanError}</Text> : null}
+                  </View>
                 </View>
               )}
 
@@ -837,7 +871,7 @@ function NewGameStepperScreen({ navigation }: Props) {
                     <>
                       <Text style={styles.helperText}>
                         {`${t('newGame.realtime.effectiveFan')} = ${
-                          capFanEnabled ? `min(${sampleFan}, ${parsedCapFan ?? capFan})` : `${sampleFan}`
+                          capFanEnabled ? `min(${sampleFan}, ${previewCapFan ?? capFan})` : `${sampleFan}`
                         } = ${sampleEffectiveFan}`}
                       </Text>
                       <Text style={styles.helperTextSubLine}>
@@ -845,6 +879,7 @@ function NewGameStepperScreen({ navigation }: Props) {
                           parsedUnitPerFan ?? unitPerFan
                         } = ${sampleBaseAmount}`}
                       </Text>
+                      <Text style={styles.helperTextSubLine}>{t('newGame.realtime.reminder')}</Text>
                     </>
                   ) : null}
                 </View>

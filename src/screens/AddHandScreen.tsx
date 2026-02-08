@@ -96,6 +96,11 @@ function AddHandScreen({ navigation, route }: Props) {
       : Math.min(liveFanValue, capFan)
     : null;
   const liveBaseAmount = liveEffectiveFan !== null ? liveEffectiveFan * unitPerFan : null;
+  const liveZimoPerLoser = liveBaseAmount !== null ? liveBaseAmount * 2 : null;
+  const liveDiscarderPays =
+    liveBaseAmount !== null ? (hkGunMode === 'fullGun' ? liveBaseAmount * 4 : liveBaseAmount * 2) : null;
+  const liveOthersPay =
+    liveBaseAmount !== null && hkGunMode === 'halfGun' ? liveBaseAmount : null;
 
   const loadBundle = useCallback(async () => {
     try {
@@ -328,6 +333,27 @@ function AddHandScreen({ navigation, route }: Props) {
                   currencyCode,
                 )}`}
               </Text>
+              {settlementType === 'zimo' && liveZimoPerLoser !== null ? (
+                <Text style={styles.helperTextSubLine}>
+                  {`${t('addHand.realtime.split.zimo')} ${formatCurrencyAmount(liveZimoPerLoser, currencyCode)} x 3`}
+                </Text>
+              ) : null}
+              {settlementType === 'discard' && liveDiscarderPays !== null ? (
+                <>
+                  <Text style={styles.helperTextSubLine}>
+                    {`${t('addHand.realtime.split.discarder')} ${formatCurrencyAmount(
+                      liveDiscarderPays,
+                      currencyCode,
+                    )}`}
+                  </Text>
+                  {liveOthersPay !== null ? (
+                    <Text style={styles.helperTextSubLine}>
+                      {`${t('addHand.realtime.split.others')} ${formatCurrencyAmount(liveOthersPay, currencyCode)} x 2`}
+                    </Text>
+                  ) : null}
+                </>
+              ) : null}
+              <Text style={styles.helperTextSubLine}>{t('addHand.realtime.reminder')}</Text>
             </>
           ) : null}
           {showFanInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -345,7 +371,10 @@ function AddHandScreen({ navigation, route }: Props) {
                       styles.segmentedButtonSpacing,
                       settlementType === 'zimo' && styles.segmentedButtonActive,
                     ]}
-                    onPress={() => setSettlementType('zimo')}
+                    onPress={() => {
+                      setSettlementType('zimo');
+                      setDiscarderId(null);
+                    }}
                     disabled={saving}
                     accessibilityRole="button"
                     accessibilityState={{ disabled: saving, selected: settlementType === 'zimo' }}

@@ -1,3 +1,4 @@
+import { Ref } from 'react';
 import { StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
 import theme from '../theme/theme';
 
@@ -7,13 +8,15 @@ type TextFieldProps = {
   onChangeText: (text: string) => void;
   placeholder?: string;
   style?: ViewStyle;
+  inputRef?: Ref<TextInput>;
 };
 
-function TextField({ label, value, onChangeText, placeholder, style }: TextFieldProps) {
+function TextField({ label, value, onChangeText, placeholder, style, inputRef }: TextFieldProps) {
   return (
     <View style={[styles.container, style]}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
+        ref={inputRef}
         style={styles.input}
         value={value}
         onChangeText={onChangeText}

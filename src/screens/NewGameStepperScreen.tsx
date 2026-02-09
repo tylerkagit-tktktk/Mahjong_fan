@@ -1,30 +1,18 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMemo, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
 import BottomActionBar from '../components/BottomActionBar';
-import TextField from '../components/TextField';
 import Card from '../components/Card';
 import SegmentedControl from '../components/SegmentedControl';
 import StepperNumberInput from '../components/StepperNumberInput';
-import theme from '../theme/theme';
-import { RootStackParamList } from '../navigation/types';
+import TextField from '../components/TextField';
 import { createGameWithPlayers } from '../db/repo';
-import {
-  DEFAULT_CURRENCY_CODE,
-  CurrencyCode,
-  getCurrencyMeta,
-  formatCurrencyUnit,
-} from '../models/currency';
+import { DEBUG_FLAGS } from '../debug/debugFlags';
+import { useAppLanguage } from '../i18n/useAppLanguage';
+import { TranslationKey } from '../i18n/types';
+import { DEFAULT_CURRENCY_CODE, CurrencyCode, formatCurrencyUnit, getCurrencyMeta } from '../models/currency';
 import {
   getDefaultRules,
   HkGunMode,
@@ -34,12 +22,13 @@ import {
   serializeRules,
   Variant,
 } from '../models/rules';
-import { useAppLanguage } from '../i18n/useAppLanguage';
-import { TranslationKey } from '../i18n/types';
-import { DEBUG_FLAGS } from '../debug/debugFlags';
+import { RootStackParamList } from '../navigation/types';
+import theme from '../theme/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewGameStepper'>;
 type SeatMode = 'manual' | 'auto';
+type CapMode = 'none' | 'fanCap';
+
 const PLAYER_COUNT = 4;
 
 const GRID = {
@@ -89,10 +78,7 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const seatLabels = useMemo(
-    () => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')],
-    [t],
-  );
+  const seatLabels = useMemo(() => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')], [t]);
 
   const showMinFan = mode === 'TW' || (mode === 'HK' && hkScoringPreset === 'traditionalFan');
 
@@ -102,12 +88,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       : null;
   const unitPerFanError =
     mode === 'HK' && hkScoringPreset === 'customTable' && (unitPerFanTouched || submitAttempted)
-      ? getMinFanError(
-          unitPerFanInput,
-          UNIT_PER_FAN_MIN,
-          UNIT_PER_FAN_MAX,
-          t('newGame.unitPerFanValidation'),
-        )
+      ? getMinFanError(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX, t('newGame.unitPerFanValidation'))
       : null;
   const capFanError =
     mode === 'HK' &&
@@ -116,17 +97,13 @@ function NewGameStepperScreen({ navigation }: Props) {
     (capFanTouched || submitAttempted)
       ? getMinFanError(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX, t('newGame.capFanValidation'))
       : null;
+
   const minFanForHint = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX) ?? minFanToWin;
-  const capFanForHint = capFanEnabled
-    ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) ?? capFan
-    : null;
+  const capFanForHint = capFanEnabled ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) ?? capFan : null;
   const parsedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
   const previewCapFan = capFanEnabled ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) : null;
-  const sampleEffectiveFan =
-    previewCapFan !== null ? Math.min(sampleFan, previewCapFan) : sampleFan;
-  const sampleBaseAmount =
-    parsedUnitPerFan !== null ? sampleEffectiveFan * parsedUnitPerFan : null;
-  const titleRequiredMessage = t('newGame.requiredTitle');
+  const sampleEffectiveFan = previewCapFan !== null ? Math.min(sampleFan, previewCapFan) : sampleFan;
+  const sampleBaseAmount = parsedUnitPerFan !== null ? sampleEffectiveFan * parsedUnitPerFan : null;
 
   const handleSetPlayer = (index: number, value: string) => {
     setPlayers((prev) => {
@@ -159,8 +136,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       setPlayersError(t('newGame.autoSeatRequired'));
       return;
     }
-    const shuffled = shuffle(trimmed);
-    setAutoAssigned(shuffled);
+    setAutoAssigned(shuffle(trimmed));
     setPlayersError(null);
   };
 
@@ -170,11 +146,13 @@ function NewGameStepperScreen({ navigation }: Props) {
     if (loading) {
       return;
     }
+
     const trimmedTitle = title.trim();
     let nextTitleError: string | null = null;
     let nextPlayersError: string | null = null;
+
     if (!trimmedTitle) {
-      nextTitleError = titleRequiredMessage;
+      nextTitleError = t('newGame.requiredTitle');
     }
 
     let resolvedMinFan = minFanToWin;
@@ -186,6 +164,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       resolvedMinFan = parsedMinFan;
       setMinFanToWin(parsedMinFan);
     }
+
     let resolvedUnitPerFan = unitPerFan;
     if (mode === 'HK' && hkScoringPreset === 'customTable') {
       const validatedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
@@ -347,10 +326,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     >
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: Math.max(insets.bottom, GRID.x2) + 64 },
-        ]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, GRID.x2) + 64 }]}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
@@ -371,7 +347,7 @@ function NewGameStepperScreen({ navigation }: Props) {
 
         <Card style={styles.card}>
           <Text style={styles.sectionTitle}>{t('newGame.modeTitle')}</Text>
-          <SegmentedControl
+          <SegmentedControl<Variant>
             options={[
               { value: 'HK', label: t('newGame.mode.hk') },
               { value: 'TW', label: t('newGame.mode.tw') },
@@ -385,7 +361,7 @@ function NewGameStepperScreen({ navigation }: Props) {
 
         <Card style={styles.card}>
           <Text style={styles.sectionTitle}>{t('newGame.currencyTitle')}</Text>
-          <SegmentedControl
+          <SegmentedControl<CurrencyCode>
             options={[
               { value: 'HKD', label: t('currency.hkd') },
               { value: 'TWD', label: t('currency.twd') },
@@ -395,9 +371,7 @@ function NewGameStepperScreen({ navigation }: Props) {
             onChange={setCurrencyCode}
             disabled={loading}
           />
-          <Text style={styles.helperText}>
-            {`${t('newGame.currencySelectedPrefix')}${formatCurrencyUnit(currencyCode)}`}
-          </Text>
+          <Text style={styles.helperText}>{`${t('newGame.currencySelectedPrefix')}${formatCurrencyUnit(currencyCode)}`}</Text>
         </Card>
 
         <Card style={styles.card}>
@@ -405,7 +379,7 @@ function NewGameStepperScreen({ navigation }: Props) {
 
           {mode === 'HK' ? (
             <>
-              <SegmentedControl
+              <SegmentedControl<HkScoringPreset>
                 options={[
                   { value: 'traditionalFan', label: t('newGame.hkPreset.traditional') },
                   { value: 'customTable', label: t('newGame.hkPreset.custom') },
@@ -418,7 +392,7 @@ function NewGameStepperScreen({ navigation }: Props) {
               {hkScoringPreset === 'traditionalFan' ? (
                 <View style={styles.blockSpacing}>
                   <Text style={styles.inputLabel}>{t('newGame.hkGunModeLabel')}</Text>
-                  <SegmentedControl
+                  <SegmentedControl<HkGunMode>
                     options={[
                       { value: 'halfGun', label: t('newGame.hkGunMode.half') },
                       { value: 'fullGun', label: t('newGame.hkGunMode.full') },
@@ -430,7 +404,7 @@ function NewGameStepperScreen({ navigation }: Props) {
 
                   <View style={styles.blockSpacing}>
                     <Text style={styles.inputLabel}>{t('newGame.hkStakePresetLabel')}</Text>
-                    <SegmentedControl
+                    <SegmentedControl<HkStakePreset>
                       options={[
                         { value: 'TWO_FIVE_CHICKEN', label: t('newGame.hkStakePreset.twoFiveChicken') },
                         { value: 'FIVE_ONE', label: t('newGame.hkStakePreset.fiveOne') },
@@ -443,20 +417,16 @@ function NewGameStepperScreen({ navigation }: Props) {
                     <Text style={styles.helperText}>
                       {`${t('newGame.hkStakePreset.baseFromMinFanPrefix')}${minFanForHint}${t('newGame.hkStakePreset.baseFromMinFanSuffix')}`}
                     </Text>
-                    {getStakePresetHintLines(
-                      hkStakePreset,
-                      hkGunMode,
-                      minFanForHint,
-                      capFanForHint,
-                      t,
-                    ).map((line, index) => (
-                      <Text
-                        key={`${hkStakePreset}-${hkGunMode}-${index}`}
-                        style={index === 0 ? styles.helperText : styles.helperTextSubLine}
-                      >
-                        {line}
-                      </Text>
-                    ))}
+                    {getStakePresetHintLines(hkStakePreset, hkGunMode, minFanForHint, capFanForHint, t).map(
+                      (line, index) => (
+                        <Text
+                          key={`${hkStakePreset}-${hkGunMode}-${index}`}
+                          style={index === 0 ? styles.helperText : styles.helperTextSubLine}
+                        >
+                          {line}
+                        </Text>
+                      ),
+                    )}
                   </View>
 
                   <View style={styles.blockSpacing}>
@@ -479,14 +449,14 @@ function NewGameStepperScreen({ navigation }: Props) {
                       hasError={Boolean(minFanError)}
                     />
                   </View>
+
                   <Text style={styles.helperText}>{t('newGame.hkThresholdHelp')}</Text>
                   {minFanError ? <Text style={styles.inlineErrorText}>{minFanError}</Text> : null}
-
                 </View>
               ) : (
                 <View style={styles.blockSpacing}>
                   <Text style={styles.inputLabel}>{t('newGame.hkGunModeLabel')}</Text>
-                  <SegmentedControl
+                  <SegmentedControl<HkGunMode>
                     options={[
                       { value: 'halfGun', label: t('newGame.hkGunMode.half') },
                       { value: 'fullGun', label: t('newGame.hkGunMode.full') },
@@ -497,45 +467,45 @@ function NewGameStepperScreen({ navigation }: Props) {
                   />
 
                   <View style={styles.blockSpacing}>
-                  <Text style={styles.inputLabel}>{t('newGame.unitPerFanLabel')}</Text>
-                  <StepperNumberInput
-                    valueText={unitPerFanInput}
-                    onChangeText={(value) => setUnitPerFanInput(value.replace(/[^0-9]/g, ''))}
-                    onBlur={() => {
-                      setUnitPerFanTouched(true);
-                      const parsed = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
-                      if (parsed !== null) {
-                        setUnitPerFan(parsed);
-                        setUnitPerFanInput(String(parsed));
-                      }
-                    }}
-                    onIncrement={() => adjustUnitPerFan(1)}
-                    onDecrement={() => adjustUnitPerFan(-1)}
-                    placeholder={`${UNIT_PER_FAN_MIN}-${UNIT_PER_FAN_MAX}`}
-                    editable={!loading}
-                    hasError={Boolean(unitPerFanError)}
-                  />
-                  <Text style={styles.helperText}>{t('newGame.unitPerFanHelp')}</Text>
-                  {unitPerFanError ? <Text style={styles.inlineErrorText}>{unitPerFanError}</Text> : null}
+                    <Text style={styles.inputLabel}>{t('newGame.unitPerFanLabel')}</Text>
+                    <StepperNumberInput
+                      valueText={unitPerFanInput}
+                      onChangeText={(value) => setUnitPerFanInput(value.replace(/[^0-9]/g, ''))}
+                      onBlur={() => {
+                        setUnitPerFanTouched(true);
+                        const parsed = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+                        if (parsed !== null) {
+                          setUnitPerFan(parsed);
+                          setUnitPerFanInput(String(parsed));
+                        }
+                      }}
+                      onIncrement={() => adjustUnitPerFan(1)}
+                      onDecrement={() => adjustUnitPerFan(-1)}
+                      placeholder={`${UNIT_PER_FAN_MIN}-${UNIT_PER_FAN_MAX}`}
+                      editable={!loading}
+                      hasError={Boolean(unitPerFanError)}
+                    />
+                    <Text style={styles.helperText}>{t('newGame.unitPerFanHelp')}</Text>
+                    {unitPerFanError ? <Text style={styles.inlineErrorText}>{unitPerFanError}</Text> : null}
                   </View>
                 </View>
               )}
 
               <View style={styles.blockSpacing}>
                 <Text style={styles.inputLabel}>{t('newGame.capModeLabel')}</Text>
-                <SegmentedControl
+                <SegmentedControl<CapMode>
                   options={[
                     { value: 'none', label: t('newGame.capMode.none') },
                     { value: 'fanCap', label: t('newGame.capMode.fanCap') },
                   ]}
                   value={capFanEnabled ? 'fanCap' : 'none'}
-                  onChange={(value) => {
-                    if (value === 'none') {
+                  onChange={(next) => {
+                    if (next === 'none') {
                       setCapFanEnabled(false);
                       setCapFanTouched(false);
-                      return;
+                    } else {
+                      setCapFanEnabled(true);
                     }
-                    setCapFanEnabled(true);
                   }}
                   disabled={loading}
                 />
@@ -575,11 +545,7 @@ function NewGameStepperScreen({ navigation }: Props) {
                   <StepperNumberInput
                     valueText={String(sampleFan)}
                     onChangeText={(value) => {
-                      const parsed = parseMinFan(
-                        value.replace(/[^0-9]/g, ''),
-                        SAMPLE_FAN_MIN,
-                        SAMPLE_FAN_MAX,
-                      );
+                      const parsed = parseMinFan(value.replace(/[^0-9]/g, ''), SAMPLE_FAN_MIN, SAMPLE_FAN_MAX);
                       if (parsed !== null) {
                         setSampleFan(parsed);
                       }
@@ -592,14 +558,10 @@ function NewGameStepperScreen({ navigation }: Props) {
                   {sampleBaseAmount !== null ? (
                     <>
                       <Text style={styles.helperText}>
-                        {`${t('newGame.realtime.effectiveFan')} = ${
-                          capFanEnabled ? `min(${sampleFan}, ${previewCapFan ?? capFan})` : `${sampleFan}`
-                        } = ${sampleEffectiveFan}`}
+                        {`${t('newGame.realtime.effectiveFan')} = ${capFanEnabled ? `min(${sampleFan}, ${previewCapFan ?? capFan})` : `${sampleFan}`} = ${sampleEffectiveFan}`}
                       </Text>
                       <Text style={styles.helperTextSubLine}>
-                        {`${t('newGame.realtime.baseAmount')} = ${sampleEffectiveFan} x ${
-                          parsedUnitPerFan ?? unitPerFan
-                        } = ${sampleBaseAmount}`}
+                        {`${t('newGame.realtime.baseAmount')} = ${sampleEffectiveFan} x ${parsedUnitPerFan ?? unitPerFan} = ${sampleBaseAmount}`}
                       </Text>
                       <Text style={styles.helperTextSubLine}>{t('newGame.realtime.reminder')}</Text>
                     </>
@@ -641,7 +603,7 @@ function NewGameStepperScreen({ navigation }: Props) {
           <Text style={styles.sectionTitle}>{t('newGame.players')}</Text>
 
           <Text style={styles.inputLabel}>{t('newGame.seatModeTitle')}</Text>
-          <SegmentedControl
+          <SegmentedControl<SeatMode>
             options={[
               { value: 'manual', label: t('newGame.seatMode.manual') },
               { value: 'auto', label: t('newGame.seatMode.auto') },
@@ -796,6 +758,7 @@ function getStakePresetHintLines(
       .replaceAll('{capZimo}', formatMoney(capZimo))
       .replaceAll('{capDiscard}', formatMoney(capDiscard))
       .replaceAll('{capOthers}', formatMoney(capOthers ?? 0));
+
   if (preset === 'TWO_FIVE_CHICKEN') {
     const template =
       gunMode === 'halfGun'
@@ -818,7 +781,10 @@ function getStakePresetHintLines(
 }
 
 function splitHintLines(hint: string): string[] {
-  const parts = hint.split('|').map((part) => part.trim()).filter(Boolean);
+  const parts = hint
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean);
   return parts.length > 0 ? parts : [hint];
 }
 
@@ -905,11 +871,6 @@ const styles = StyleSheet.create({
   inlineErrorText: {
     marginTop: GRID.x1,
     color: theme.colors.danger,
-    fontSize: theme.fontSize.sm,
-  },
-  comingSoonText: {
-    marginTop: GRID.x1,
-    color: theme.colors.textSecondary,
     fontSize: theme.fontSize.sm,
   },
   playersList: {

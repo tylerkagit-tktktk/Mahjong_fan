@@ -2,6 +2,7 @@ import { RulesV1 } from '../../models/rules';
 
 export type SeatMode = 'manual' | 'auto';
 export type CapMode = 'none' | 'fanCap';
+export type StartingDealerMode = 'random' | 'manual';
 
 export type InvalidTarget =
   | { kind: 'title' }
@@ -11,12 +12,14 @@ export type InvalidTarget =
   | { kind: 'minFan' }
   | { kind: 'unitPerFan' }
   | { kind: 'capFan' }
-  | { kind: 'scoring' };
+  | { kind: 'scoring' }
+  | { kind: 'startingDealer' };
 
 export type PreparedCreateContext = {
   gameId: string;
   trimmedTitle: string;
   resolvedPlayers: string[];
+  startingDealerSourceIndex: number;
   playerInputs: Array<{
     id: string;
     gameId: string;

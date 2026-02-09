@@ -1,6 +1,16 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMemo, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
 import BottomActionBar from '../components/BottomActionBar';
@@ -28,6 +38,15 @@ import theme from '../theme/theme';
 type Props = NativeStackScreenProps<RootStackParamList, 'NewGameStepper'>;
 type SeatMode = 'manual' | 'auto';
 type CapMode = 'none' | 'fanCap';
+type InvalidTarget =
+  | { kind: 'title' }
+  | { kind: 'manualPlayer'; index: number }
+  | { kind: 'autoPlayer'; index: number }
+  | { kind: 'players' }
+  | { kind: 'minFan' }
+  | { kind: 'unitPerFan' }
+  | { kind: 'capFan' }
+  | { kind: 'scoring' };
 type PreparedCreateContext = {
   gameId: string;
   trimmedTitle: string;
@@ -39,6 +58,11 @@ type PreparedCreateContext = {
     seatIndex: number;
   }>;
   rules: RulesV1;
+};
+
+type ConfirmField = {
+  label: string;
+  value: string;
 };
 
 const PLAYER_COUNT = 4;
@@ -89,6 +113,21 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [playersError, setPlayersError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [pendingPayload, setPendingPayload] = useState<PreparedCreateContext | null>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const titleInputRef = useRef<TextInput | null>(null);
+  const manualPlayerRefs = useRef<Array<TextInput | null>>([]);
+  const autoPlayerRefs = useRef<Array<TextInput | null>>([]);
+  const minFanInputRef = useRef<TextInput | null>(null);
+  const unitPerFanInputRef = useRef<TextInput | null>(null);
+  const capFanInputRef = useRef<TextInput | null>(null);
+  const sectionY = useRef<{ title: number; scoring: number; players: number }>({
+    title: 0,
+    scoring: 0,
+    players: 0,
+  });
 
   const seatLabels = useMemo(() => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')], [t]);
 
@@ -116,6 +155,12 @@ function NewGameStepperScreen({ navigation }: Props) {
   const previewCapFan = capFanEnabled ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) : null;
   const sampleEffectiveFan = previewCapFan !== null ? Math.min(sampleFan, previewCapFan) : sampleFan;
   const sampleBaseAmount = parsedUnitPerFan !== null ? sampleEffectiveFan * parsedUnitPerFan : null;
+  const sampleHalfZimoEach = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
+  const sampleHalfDiscarder = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
+  const sampleHalfOthersEach = sampleBaseAmount !== null ? sampleBaseAmount : null;
+  const sampleFullZimoEach = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
+  const sampleFullDiscarder = sampleBaseAmount !== null ? sampleBaseAmount * 4 : null;
+  const currencySymbol = getCurrencyMeta(currencyCode).symbol;
 
   const handleSetPlayer = (index: number, value: string) => {
     setPlayers((prev) => {
@@ -152,7 +197,56 @@ function NewGameStepperScreen({ navigation }: Props) {
     setPlayersError(null);
   };
 
-  const prepareCreateContext = (): PreparedCreateContext | null => {
+  const scrollToY = (y: number) => {
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+  };
+
+  const focusInvalidTarget = (target: InvalidTarget) => {
+    if (target.kind === 'title') {
+      scrollToY(sectionY.current.title);
+      setTimeout(() => titleInputRef.current?.focus(), 120);
+      return;
+    }
+    if (target.kind === 'manualPlayer') {
+      scrollToY(sectionY.current.players);
+      setTimeout(() => manualPlayerRefs.current[target.index]?.focus(), 120);
+      return;
+    }
+    if (target.kind === 'autoPlayer') {
+      scrollToY(sectionY.current.players);
+      setTimeout(() => autoPlayerRefs.current[target.index]?.focus(), 120);
+      return;
+    }
+    if (target.kind === 'players') {
+      scrollToY(sectionY.current.players);
+      setTimeout(() => {
+        if (seatMode === 'manual') {
+          manualPlayerRefs.current[0]?.focus();
+        } else {
+          autoPlayerRefs.current[0]?.focus();
+        }
+      }, 120);
+      return;
+    }
+    if (target.kind === 'minFan') {
+      scrollToY(sectionY.current.scoring);
+      setTimeout(() => minFanInputRef.current?.focus(), 120);
+      return;
+    }
+    if (target.kind === 'unitPerFan') {
+      scrollToY(sectionY.current.scoring);
+      setTimeout(() => unitPerFanInputRef.current?.focus(), 120);
+      return;
+    }
+    if (target.kind === 'capFan') {
+      scrollToY(sectionY.current.scoring);
+      setTimeout(() => capFanInputRef.current?.focus(), 120);
+      return;
+    }
+    scrollToY(sectionY.current.scoring);
+  };
+
+  const validateAndResolveCreatePayload = (): PreparedCreateContext | null => {
     setFormError(null);
     setSubmitAttempted(true);
     if (loading) {
@@ -162,15 +256,18 @@ function NewGameStepperScreen({ navigation }: Props) {
     const trimmedTitle = title.trim();
     let nextTitleError: string | null = null;
     let nextPlayersError: string | null = null;
+    let invalidTarget: InvalidTarget | null = null;
 
     if (!trimmedTitle) {
       nextTitleError = t('newGame.requiredTitle');
+      invalidTarget = { kind: 'title' };
     }
 
     let resolvedMinFan = minFanToWin;
     if (showMinFan) {
       const parsedMinFan = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
       if (parsedMinFan === null) {
+        focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
         return null;
       }
       resolvedMinFan = parsedMinFan;
@@ -181,6 +278,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     if (mode === 'HK' && hkScoringPreset === 'customTable') {
       const validatedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
       if (validatedUnitPerFan === null) {
+        focusInvalidTarget(invalidTarget ?? { kind: 'unitPerFan' });
         return null;
       }
       resolvedUnitPerFan = validatedUnitPerFan;
@@ -199,6 +297,9 @@ function NewGameStepperScreen({ navigation }: Props) {
         } else {
           const missingSeats = missingIndexes.map((index) => `${seatLabels[index]}${t('newGame.playerSeatSuffix')}`);
           nextPlayersError = `${t('newGame.requiredPlayersListPrefix')}${missingSeats.join('，')}${t('newGame.requiredPlayersListSuffix')}`;
+        }
+        if (!invalidTarget) {
+          invalidTarget = { kind: 'manualPlayer', index: missingIndexes[0] };
         }
       }
     } else {
@@ -219,8 +320,14 @@ function NewGameStepperScreen({ navigation }: Props) {
               : `${missingOrderPlayers.slice(0, -1).join('、')}及${missingOrderPlayers[missingOrderPlayers.length - 1]}`;
           nextPlayersError = `${t('newGame.requiredPlayersListPrefix')}${joined}${t('newGame.playerOrderSuffix')}`;
         }
+        if (!invalidTarget) {
+          invalidTarget = { kind: 'autoPlayer', index: missingIndexes[0] };
+        }
       } else if (!autoAssigned) {
         nextPlayersError = t('newGame.autoSeatNeedConfirm');
+        if (!invalidTarget) {
+          invalidTarget = { kind: 'players' };
+        }
       } else {
         resolvedPlayers = [...autoAssigned];
       }
@@ -229,6 +336,9 @@ function NewGameStepperScreen({ navigation }: Props) {
     setTitleError(nextTitleError);
     setPlayersError(nextPlayersError);
     if (nextTitleError || nextPlayersError) {
+      if (invalidTarget) {
+        focusInvalidTarget(invalidTarget);
+      }
       return null;
     }
 
@@ -254,6 +364,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       if (capFanEnabled) {
         const validatedCapFan = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
         if (validatedCapFan === null) {
+          focusInvalidTarget({ kind: 'capFan' });
           return null;
         }
         parsedCapFan = validatedCapFan;
@@ -290,7 +401,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     };
   };
 
-  const executeCreateGame = async (context: PreparedCreateContext) => {
+  const executeCreateGame = async (context: PreparedCreateContext): Promise<boolean> => {
     try {
       setLoading(true);
       await createGameWithPlayers(
@@ -306,16 +417,19 @@ function NewGameStepperScreen({ navigation }: Props) {
         context.playerInputs,
       );
       navigation.replace('GameDashboard', { gameId: context.gameId });
+      return true;
     } catch (err) {
       console.error('[DB] createGame failed', err);
       setFormError(t('errors.createGame'));
+      return false;
     } finally {
       setLoading(false);
     }
   };
 
-  const buildConfirmMessage = (context: PreparedCreateContext): string => {
-    const lines: string[] = [];
+  const buildConfirmSections = (
+    context: PreparedCreateContext,
+  ): { game: ConfirmField[]; scoring: ConfirmField[]; players: ConfirmField[] } => {
     const modeLabel =
       context.rules.mode === 'HK'
         ? t('newGame.mode.hk')
@@ -323,89 +437,105 @@ function NewGameStepperScreen({ navigation }: Props) {
         ? t('newGame.mode.tw')
         : t('newGame.mode.pma');
 
-    lines.push(`${t('newGame.confirm.gameTitle')}: ${context.trimmedTitle}`);
-    lines.push(`${t('newGame.confirm.players')}: ${context.resolvedPlayers.join(' / ')}`);
-    lines.push(`${t('newGame.confirm.mode')}: ${modeLabel}`);
-    lines.push(
-      `${t('newGame.confirm.currency')}: ${formatCurrencyUnit(context.rules.currencyCode)}`,
-    );
+    const gameFields: ConfirmField[] = [
+      { label: t('newGame.confirmModal.field.title'), value: context.trimmedTitle },
+      { label: t('newGame.confirmModal.field.mode'), value: modeLabel },
+      { label: t('newGame.confirmModal.field.currency'), value: formatCurrencyUnit(context.rules.currencyCode) },
+    ];
+
+    const scoringFields: ConfirmField[] = [];
 
     if (context.rules.mode === 'HK' && context.rules.hk) {
-      lines.push(
-        `${t('newGame.confirm.hkScoring')}: ${
+      scoringFields.push({
+        label: t('newGame.confirmModal.field.scoringMethod'),
+        value:
           context.rules.hk.scoringPreset === 'customTable'
             ? t('newGame.hkPreset.custom')
-            : t('newGame.hkPreset.traditional')
-        }`,
-      );
-      lines.push(
-        `${t('newGame.confirm.hkGunMode')}: ${
-          context.rules.hk.gunMode === 'halfGun'
-            ? t('newGame.hkGunMode.half')
-            : t('newGame.hkGunMode.full')
-        }`,
-      );
-      lines.push(
-        `${t('newGame.confirm.hkStakePreset')}: ${
+            : t('newGame.hkPreset.traditional'),
+      });
+      scoringFields.push({
+        label: t('newGame.confirmModal.field.gunMode'),
+        value: context.rules.hk.gunMode === 'halfGun' ? t('newGame.hkGunMode.half') : t('newGame.hkGunMode.full'),
+      });
+      scoringFields.push({
+        label: t('newGame.confirmModal.field.stakePreset'),
+        value:
           context.rules.hk.stakePreset === 'TWO_FIVE_CHICKEN'
             ? t('newGame.hkStakePreset.twoFiveChicken')
             : context.rules.hk.stakePreset === 'FIVE_ONE'
             ? t('newGame.hkStakePreset.fiveOne')
-            : t('newGame.hkStakePreset.oneTwo')
-        }`,
-      );
-      lines.push(
-        `${t('newGame.confirm.cap')}: ${
+            : t('newGame.hkStakePreset.oneTwo'),
+      });
+      scoringFields.push({
+        label: t('newGame.confirmModal.field.capFan'),
+        value:
           context.rules.hk.capFan === null
             ? t('newGame.capMode.none')
-            : `${t('newGame.capMode.fanCap')} ${context.rules.hk.capFan}`
-        }`,
-      );
+            : `${t('newGame.capMode.fanCap')} ${context.rules.hk.capFan}`,
+      });
       if (context.rules.hk.scoringPreset === 'customTable') {
-        lines.push(
-          `${t('newGame.confirm.unitPerFan')}: ${context.rules.hk.unitPerFan ?? 1}`,
-        );
+        scoringFields.push({
+          label: t('newGame.confirmModal.field.unitPerFan'),
+          value: String(context.rules.hk.unitPerFan ?? 1),
+        });
       } else {
-        lines.push(
-          `${t('newGame.confirm.minFan')}: ${context.rules.minFanToWin ?? minFanToWin}`,
-        );
+        scoringFields.push({
+          label: t('newGame.confirmModal.field.minFan'),
+          value: String(context.rules.minFanToWin ?? minFanToWin),
+        });
       }
     }
 
     if (context.rules.mode === 'TW') {
-      lines.push(`${t('newGame.confirm.twMinFan')}: ${context.rules.minFanToWin ?? minFanToWin}`);
+      scoringFields.push({
+        label: t('newGame.confirmModal.field.twMinFan'),
+        value: String(context.rules.minFanToWin ?? minFanToWin),
+      });
     }
 
     if (context.rules.mode === 'PMA') {
-      lines.push(`${t('newGame.confirm.pma')}: ${t('newGame.pmaDescription')}`);
+      scoringFields.push({
+        label: t('newGame.confirmModal.field.pmaMode'),
+        value: t('newGame.pmaDescription'),
+      });
     }
 
-    return lines.join('\n');
+    const playerLabels: TranslationKey[] = [
+      'newGame.confirmModal.field.playersEast',
+      'newGame.confirmModal.field.playersSouth',
+      'newGame.confirmModal.field.playersWest',
+      'newGame.confirmModal.field.playersNorth',
+    ];
+    const playerFields: ConfirmField[] = context.resolvedPlayers.map((player, index) => ({
+      label: t(playerLabels[index]),
+      value: player,
+    }));
+
+    return { game: gameFields, scoring: scoringFields, players: playerFields };
   };
 
-  const handleCreate = () => {
-    const context = prepareCreateContext();
+  const handlePressCreate = () => {
+    const context = validateAndResolveCreatePayload();
     if (!context) {
       return;
     }
+    setPendingPayload(context);
+    setConfirmVisible(true);
+  };
 
-    Alert.alert(t('newGame.confirm.title'), buildConfirmMessage(context), [
-      {
-        text: t('newGame.confirm.cancel'),
-        style: 'cancel',
-      },
-      {
-        text: t('newGame.confirm.confirm'),
-        onPress: () => {
-          if (loading) {
-            return;
-          }
-          executeCreateGame(context).catch((error) => {
-            console.error('[NewGame] create after confirm failed', error);
-          });
-        },
-      },
-    ]);
+  const handleConfirmCreate = async () => {
+    if (!pendingPayload || loading || confirmBusy) {
+      return;
+    }
+    setConfirmBusy(true);
+    setConfirmVisible(false);
+    const success = await executeCreateGame(pendingPayload);
+    if (success) {
+      setPendingPayload(null);
+    } else {
+      setConfirmVisible(true);
+    }
+    setConfirmBusy(false);
   };
 
   const adjustMinFan = (delta: number) => {
@@ -434,6 +564,8 @@ function NewGameStepperScreen({ navigation }: Props) {
     setSampleFan(next);
   };
 
+  const confirmSections = pendingPayload ? buildConfirmSections(pendingPayload) : null;
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -441,6 +573,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       keyboardVerticalOffset={0}
     >
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, GRID.x2) + 64 }]}
         keyboardShouldPersistTaps="handled"
@@ -448,9 +581,15 @@ function NewGameStepperScreen({ navigation }: Props) {
       >
         <Text style={styles.pageTitle}>{t('newGame.title')}</Text>
 
-        <Card style={styles.card}>
+        <View
+          onLayout={(event) => {
+            sectionY.current.title = event.nativeEvent.layout.y;
+          }}
+        >
+          <Card style={styles.card}>
           <TextField
             label={t('newGame.gameTitle')}
+            inputRef={titleInputRef}
             value={title}
             onChangeText={(value) => {
               setTitle(value);
@@ -460,6 +599,7 @@ function NewGameStepperScreen({ navigation }: Props) {
           />
           {titleError ? <Text style={styles.inlineErrorText}>{titleError}</Text> : null}
         </Card>
+        </View>
 
         <Card style={styles.card}>
           <Text style={styles.sectionTitle}>{t('newGame.modeTitle')}</Text>
@@ -490,7 +630,12 @@ function NewGameStepperScreen({ navigation }: Props) {
           <Text style={styles.helperText}>{`${t('newGame.currencySelectedPrefix')}${formatCurrencyUnit(currencyCode)}`}</Text>
         </Card>
 
-        <Card style={styles.card}>
+        <View
+          onLayout={(event) => {
+            sectionY.current.scoring = event.nativeEvent.layout.y;
+          }}
+        >
+          <Card style={styles.card}>
           <Text style={styles.sectionTitle}>{t('newGame.scoringMethod')}</Text>
 
           {mode === 'HK' ? (
@@ -533,7 +678,14 @@ function NewGameStepperScreen({ navigation }: Props) {
                     <Text style={styles.helperText}>
                       {`${t('newGame.hkStakePreset.baseFromMinFanPrefix')}${minFanForHint}${t('newGame.hkStakePreset.baseFromMinFanSuffix')}`}
                     </Text>
-                    {getStakePresetHintLines(hkStakePreset, hkGunMode, minFanForHint, capFanForHint, t).map(
+                    {getStakePresetHintLines(
+                      hkStakePreset,
+                      hkGunMode,
+                      minFanForHint,
+                      capFanForHint,
+                      currencySymbol,
+                      t,
+                    ).map(
                       (line, index) => (
                         <Text
                           key={`${hkStakePreset}-${hkGunMode}-${index}`}
@@ -548,6 +700,7 @@ function NewGameStepperScreen({ navigation }: Props) {
                   <View style={styles.blockSpacing}>
                     <Text style={styles.inputLabel}>{t('newGame.minFanThresholdLabel')}</Text>
                     <StepperNumberInput
+                      inputRef={minFanInputRef}
                       valueText={minFanInput}
                       onChangeText={(value) => setMinFanInput(value.replace(/[^0-9]/g, ''))}
                       onBlur={() => {
@@ -585,6 +738,7 @@ function NewGameStepperScreen({ navigation }: Props) {
                   <View style={styles.blockSpacing}>
                     <Text style={styles.inputLabel}>{t('newGame.unitPerFanLabel')}</Text>
                     <StepperNumberInput
+                      inputRef={unitPerFanInputRef}
                       valueText={unitPerFanInput}
                       onChangeText={(value) => setUnitPerFanInput(value.replace(/[^0-9]/g, ''))}
                       onBlur={() => {
@@ -630,6 +784,7 @@ function NewGameStepperScreen({ navigation }: Props) {
                     <View style={styles.blockSpacing}>
                       <Text style={styles.inputLabel}>{t('newGame.capFanLabel')}</Text>
                       <StepperNumberInput
+                        inputRef={capFanInputRef}
                         valueText={capFanInput}
                         onChangeText={(value) => setCapFanInput(value.replace(/[^0-9]/g, ''))}
                         onBlur={() => {
@@ -674,12 +829,19 @@ function NewGameStepperScreen({ navigation }: Props) {
                   {sampleBaseAmount !== null ? (
                     <>
                       <Text style={styles.helperText}>
-                        {`${t('newGame.realtime.effectiveFan')} = ${capFanEnabled ? `min(${sampleFan}, ${previewCapFan ?? capFan})` : `${sampleFan}`} = ${sampleEffectiveFan}`}
+                        {`${t('newGame.realtime.effectiveFan')} = ${sampleEffectiveFan}`}
                       </Text>
                       <Text style={styles.helperTextSubLine}>
-                        {`${t('newGame.realtime.baseAmount')} = ${sampleEffectiveFan} x ${parsedUnitPerFan ?? unitPerFan} = ${sampleBaseAmount}`}
+                        {t('newGame.realtime.halfGun')
+                          .replaceAll('{zimoEach}', `${currencySymbol}${String(sampleHalfZimoEach ?? 0)}`)
+                          .replaceAll('{discarder}', `${currencySymbol}${String(sampleHalfDiscarder ?? 0)}`)
+                          .replaceAll('{othersEach}', `${currencySymbol}${String(sampleHalfOthersEach ?? 0)}`)}
                       </Text>
-                      <Text style={styles.helperTextSubLine}>{t('newGame.realtime.reminder')}</Text>
+                      <Text style={styles.helperTextSubLine}>
+                        {t('newGame.realtime.fullGun')
+                          .replaceAll('{zimoEach}', `${currencySymbol}${String(sampleFullZimoEach ?? 0)}`)
+                          .replaceAll('{discarder}', `${currencySymbol}${String(sampleFullDiscarder ?? 0)}`)}
+                      </Text>
                     </>
                   ) : null}
                 </View>
@@ -714,8 +876,14 @@ function NewGameStepperScreen({ navigation }: Props) {
 
           {mode === 'PMA' ? <Text style={styles.helperText}>{t('newGame.pmaDescription')}</Text> : null}
         </Card>
+        </View>
 
-        <Card style={styles.card}>
+        <View
+          onLayout={(event) => {
+            sectionY.current.players = event.nativeEvent.layout.y;
+          }}
+        >
+          <Card style={styles.card}>
           <Text style={styles.sectionTitle}>{t('newGame.players')}</Text>
 
           <Text style={styles.inputLabel}>{t('newGame.seatModeTitle')}</Text>
@@ -740,6 +908,9 @@ function NewGameStepperScreen({ navigation }: Props) {
                     <Text style={styles.seatChipText}>{label}</Text>
                   </View>
                   <TextInput
+                    ref={(ref) => {
+                      manualPlayerRefs.current[index] = ref;
+                    }}
                     style={styles.playerInput}
                     value={players[index]}
                     onChangeText={(value) => handleSetPlayer(index, value)}
@@ -762,6 +933,9 @@ function NewGameStepperScreen({ navigation }: Props) {
                     <Text style={styles.seatChipText}>{index + 1}</Text>
                   </View>
                   <TextInput
+                    ref={(ref) => {
+                      autoPlayerRefs.current[index] = ref;
+                    }}
                     style={styles.playerInput}
                     value={value}
                     onChangeText={(next) => handleSetAutoName(index, next)}
@@ -797,6 +971,7 @@ function NewGameStepperScreen({ navigation }: Props) {
           )}
           {playersError ? <Text style={styles.inlineErrorText}>{playersError}</Text> : null}
         </Card>
+        </View>
 
         {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
         {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
@@ -804,11 +979,89 @@ function NewGameStepperScreen({ navigation }: Props) {
 
       <BottomActionBar
         primaryLabel={loading ? t('newGame.creating') : t('newGame.create')}
-        onPrimaryPress={handleCreate}
+        onPrimaryPress={handlePressCreate}
         secondaryLabel={t('common.back')}
         onSecondaryPress={() => navigation.goBack()}
-        disabled={loading}
+        disabled={loading || confirmBusy}
       />
+
+      <Modal
+        visible={confirmVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!confirmBusy) {
+            setConfirmVisible(false);
+          }
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => {
+              if (!confirmBusy) {
+                setConfirmVisible(false);
+              }
+            }}
+            disabled={confirmBusy}
+          />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>{t('newGame.confirmModal.title')}</Text>
+            <Text style={styles.modalSubtitle}>{t('newGame.confirmModal.subtitle')}</Text>
+            <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+              {confirmSections ? (
+                <>
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>{t('newGame.confirmModal.section.game')}</Text>
+                    {confirmSections.game.map((field) => (
+                      <View key={`game-${field.label}`} style={styles.modalFieldRow}>
+                        <Text style={styles.modalFieldLabel}>{field.label}</Text>
+                        <Text style={styles.modalFieldValue}>{field.value}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>{t('newGame.confirmModal.section.scoring')}</Text>
+                    {confirmSections.scoring.map((field) => (
+                      <View key={`scoring-${field.label}`} style={styles.modalFieldRow}>
+                        <Text style={styles.modalFieldLabel}>{field.label}</Text>
+                        <Text style={styles.modalFieldValue}>{field.value}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>{t('newGame.confirmModal.section.players')}</Text>
+                    {confirmSections.players.map((field) => (
+                      <View key={`players-${field.label}`} style={styles.modalFieldRow}>
+                        <Text style={styles.modalFieldLabel}>{field.label}</Text>
+                        <Text style={styles.modalFieldValue}>{field.value}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <AppButton
+                label={t('newGame.confirmModal.action.backToEdit')}
+                variant="secondary"
+                onPress={() => setConfirmVisible(false)}
+                disabled={confirmBusy}
+              />
+              <View style={styles.modalActionGap} />
+              <AppButton
+                label={confirmBusy ? t('newGame.creating') : t('newGame.confirmModal.action.confirmCreate')}
+                onPress={() => {
+                  handleConfirmCreate().catch((error) => {
+                    console.error('[NewGame] confirm create failed', error);
+                  });
+                }}
+                disabled={confirmBusy}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -847,6 +1100,7 @@ function getStakePresetHintLines(
   gunMode: HkGunMode,
   minFan: number,
   capFan: number | null,
+  currencySymbol: string,
   t: (key: TranslationKey) => string,
 ): string[] {
   const fanText = String(minFan);
@@ -868,12 +1122,12 @@ function getStakePresetHintLines(
     template
       .replaceAll('{fan}', fanText)
       .replaceAll('{capFan}', capFanText)
-      .replaceAll('{startZimo}', formatMoney(startZimo))
-      .replaceAll('{startDiscard}', formatMoney(startDiscard))
-      .replaceAll('{startOthers}', formatMoney(startOthers ?? 0))
-      .replaceAll('{capZimo}', formatMoney(capZimo))
-      .replaceAll('{capDiscard}', formatMoney(capDiscard))
-      .replaceAll('{capOthers}', formatMoney(capOthers ?? 0));
+      .replaceAll('{startZimo}', `${currencySymbol}${formatMoney(startZimo)}`)
+      .replaceAll('{startDiscard}', `${currencySymbol}${formatMoney(startDiscard)}`)
+      .replaceAll('{startOthers}', `${currencySymbol}${formatMoney(startOthers ?? 0)}`)
+      .replaceAll('{capZimo}', `${currencySymbol}${formatMoney(capZimo)}`)
+      .replaceAll('{capDiscard}', `${currencySymbol}${formatMoney(capDiscard)}`)
+      .replaceAll('{capOthers}', `${currencySymbol}${formatMoney(capOthers ?? 0)}`);
 
   if (preset === 'TWO_FIVE_CHICKEN') {
     const template =
@@ -1040,6 +1294,67 @@ const styles = StyleSheet.create({
   },
   debugSpacer: {
     height: 800,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'center',
+    paddingHorizontal: GRID.x2,
+    paddingVertical: GRID.x3,
+  },
+  modalCard: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.lg,
+    padding: GRID.x2,
+    maxHeight: '80%',
+  },
+  modalTitle: {
+    fontSize: theme.fontSize.lg,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+  modalSubtitle: {
+    marginTop: GRID.x1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.textSecondary,
+  },
+  modalScroll: {
+    marginTop: GRID.x2,
+    maxHeight: 380,
+  },
+  modalScrollContent: {
+    paddingBottom: GRID.x1,
+  },
+  modalSection: {
+    marginBottom: GRID.x2,
+  },
+  modalSectionTitle: {
+    fontSize: theme.fontSize.md,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+    marginBottom: GRID.x1,
+  },
+  modalFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: GRID.x1,
+  },
+  modalFieldLabel: {
+    width: 112,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.textSecondary,
+  },
+  modalFieldValue: {
+    flex: 1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.textPrimary,
+    lineHeight: 20,
+  },
+  modalActions: {
+    marginTop: GRID.x1_5,
+  },
+  modalActionGap: {
+    height: GRID.x1,
   },
 });
 

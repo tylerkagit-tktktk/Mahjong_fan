@@ -20,6 +20,19 @@ function rowsToArray<T>(result: SQLite.ResultSet): T[] {
   return items;
 }
 
+function normalizeHands(result: SQLite.ResultSet): Hand[] {
+  const items = rowsToArray<
+    Omit<Hand, 'isDraw'> & {
+      isDraw: number | boolean;
+    }
+  >(result);
+
+  return items.map((hand) => ({
+    ...hand,
+    isDraw: Boolean(hand.isDraw),
+  }));
+}
+
 type SqlParam = string | number | null;
 
 type TxExecute = (statement: string, params?: SqlParam[]) => Promise<SQLite.ResultSet>;
@@ -72,7 +85,7 @@ export async function createGameWithPlayers(
 
     await runExplicitWriteTransaction('createGameWithPlayers', async (executeTx) => {
       await executeTx(
-        'INSERT INTO games (id, title, createdAt, currencySymbol, variant, rulesJson, languageOverride) VALUES (?, ?, ?, ?, ?, ?, ?);',
+        'INSERT INTO games (id, title, createdAt, currencySymbol, variant, rulesJson, startingDealerSeatIndex, languageOverride) VALUES (?, ?, ?, ?, ?, ?, ?, ?);',
         [
           game.id,
           game.title,
@@ -80,6 +93,7 @@ export async function createGameWithPlayers(
           game.currencySymbol,
           game.variant,
           game.rulesJson,
+          game.startingDealerSeatIndex ?? 0,
           game.languageOverride ?? null,
         ],
       );
@@ -135,7 +149,7 @@ export async function getGameBundle(gameId: string): Promise<GameBundle> {
     return {
       game: games[0],
       players: rowsToArray<Player>(playersResult),
-      hands: rowsToArray<Hand>(handsResult),
+      hands: normalizeHands(handsResult),
     };
   } catch (error) {
     const wrapped = normalizeError(error, 'getGameBundle failed');
@@ -174,12 +188,15 @@ export async function insertHand(handInput: NewHandInput): Promise<Hand> {
       const createdAt = handInput.createdAt ?? Date.now();
 
       await executeTx(
-        `INSERT INTO hands (id, gameId, handIndex, type, winnerPlayerId, discarderPlayerId, inputValue, computedJson, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        `INSERT INTO hands (id, gameId, handIndex, dealerSeatIndex, isDraw, winnerSeatIndex, type, winnerPlayerId, discarderPlayerId, inputValue, computedJson, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           handInput.id,
           handInput.gameId,
           nextIndex,
+          handInput.dealerSeatIndex,
+          handInput.isDraw ? 1 : 0,
+          handInput.winnerSeatIndex ?? null,
           handInput.type,
           handInput.winnerPlayerId ?? null,
           handInput.discarderPlayerId ?? null,
@@ -193,6 +210,9 @@ export async function insertHand(handInput: NewHandInput): Promise<Hand> {
         id: handInput.id,
         gameId: handInput.gameId,
         handIndex: nextIndex,
+        dealerSeatIndex: handInput.dealerSeatIndex,
+        isDraw: Boolean(handInput.isDraw),
+        winnerSeatIndex: handInput.winnerSeatIndex ?? null,
         type: handInput.type,
         winnerPlayerId: handInput.winnerPlayerId ?? null,
         discarderPlayerId: handInput.discarderPlayerId ?? null,
@@ -255,9 +275,7 @@ function normalizeError(error: unknown, context: string): Error {
     return bug;
   }
   const message = error ? String(error) : `[DB] unknown error in ${context}`;
-  try {
-    return new Error(message, { cause: error });
-  } catch {
-    return new Error(message);
-  }
+  const wrapped = new Error(message);
+  (wrapped as Error & { cause?: unknown }).cause = error;
+  return wrapped;
 }

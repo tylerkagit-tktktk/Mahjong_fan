@@ -17,6 +17,7 @@ export type Game = {
   currencySymbol: string;
   variant: string;
   rulesJson: string;
+  startingDealerSeatIndex: number;
   languageOverride?: string | null;
 };
 
@@ -31,6 +32,9 @@ export type Hand = {
   id: string;
   gameId: string;
   handIndex: number;
+  dealerSeatIndex: number;
+  isDraw: boolean;
+  winnerSeatIndex?: number | null;
   type: string;
   winnerPlayerId?: string | null;
   discarderPlayerId?: string | null;

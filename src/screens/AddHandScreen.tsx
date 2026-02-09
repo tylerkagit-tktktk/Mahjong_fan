@@ -20,6 +20,7 @@ import { getGameBundle, insertHand } from '../db/repo';
 import { GameBundle } from '../models/db';
 import { parseRules, Variant } from '../models/rules';
 import { computeCustomPayout, HkSettlementType } from '../models/hkStakes';
+import { getDealerSeatIndexForNextHand } from '../models/dealer';
 import {
   CurrencyCode,
   DEFAULT_CURRENCY_CODE,
@@ -85,6 +86,12 @@ function AddHandScreen({ navigation, route }: Props) {
     : t('addHand.inputHint');
 
   const inputRegex = useMemo(() => (isPma ? /[^0-9.-]/g : /[^0-9.-]/g), [isPma]);
+  const currentDealerSeatIndex = useMemo(() => {
+    if (!bundle) {
+      return 0;
+    }
+    return getDealerSeatIndexForNextHand(bundle.game.startingDealerSeatIndex ?? 0, bundle.hands);
+  }, [bundle]);
   const liveFanValue = Number(inputValue.trim());
   const liveFanValid = Number.isInteger(liveFanValue) && liveFanValue >= 1;
   const liveEffectiveFan = liveFanValid
@@ -137,7 +144,9 @@ function AddHandScreen({ navigation, route }: Props) {
           throw bug;
         }
         console.error('[AddHand] step getGameBundle failed', err ?? 'falsy', new Error('trace').stack);
-        throw new Error('AddHand step getGameBundle failed', { cause: err });
+        const wrapped = new Error('AddHand step getGameBundle failed');
+        (wrapped as Error & { cause?: unknown }).cause = err;
+        throw wrapped;
       }
 
       const parsedRules = parseRules(data.game.rulesJson, normalizeVariant(data.game.variant));
@@ -187,6 +196,10 @@ function AddHandScreen({ navigation, route }: Props) {
     setError(null);
     try {
       setSaving(true);
+      if (!bundle) {
+        setError(t('errors.loadGame'));
+        return;
+      }
       const numericValue = inputValue.trim().length === 0 ? null : Number(inputValue);
 
       if (isPma && (numericValue === null || Number.isNaN(numericValue))) {
@@ -216,6 +229,14 @@ function AddHandScreen({ navigation, route }: Props) {
 
       try {
         setBreadcrumb('AddHand: before insertHand', { gameId, handType, mode });
+        const winnerSeatIndex = winnerId
+          ? bundle?.players.find((player) => player.id === winnerId)?.seatIndex ?? null
+          : null;
+        if (winnerId && winnerSeatIndex === null) {
+          setError(t('errors.selectWinner'));
+          return;
+        }
+        const handIsDraw = handType === 'draw';
         const customPayout = isHkCustom
           ? computeCustomPayout({
               fan: Number(numericValue),
@@ -236,6 +257,9 @@ function AddHandScreen({ navigation, route }: Props) {
         await insertHand({
           id: makeId('hand'),
           gameId,
+          dealerSeatIndex: currentDealerSeatIndex,
+          isDraw: handIsDraw,
+          winnerSeatIndex,
           type: isPma ? 'amount' : isHkCustom ? 'fan' : handType,
           winnerPlayerId: isPma ? null : winnerId,
           discarderPlayerId:
@@ -249,6 +273,9 @@ function AddHandScreen({ navigation, route }: Props) {
                   unitPerFan,
                   gunMode: hkGunMode,
                   settlementType,
+                  dealerSeatIndex: currentDealerSeatIndex,
+                  isDraw: handIsDraw,
+                  winnerSeatIndex,
                   zimoPerPlayer: customPayout.zimoPerPlayer,
                   discarderPays: customPayout.discarderPays,
                   otherPlayersPay: customPayout.otherPlayersPay,
@@ -268,7 +295,9 @@ function AddHandScreen({ navigation, route }: Props) {
           throw bug;
         }
         console.error('[AddHand] step insertHand failed', err ?? 'falsy', new Error('trace').stack);
-        throw new Error('AddHand step insertHand failed', { cause: err });
+        const wrapped = new Error('AddHand step insertHand failed');
+        (wrapped as Error & { cause?: unknown }).cause = err;
+        throw wrapped;
       }
       setBreadcrumb('AddHand: before goBack');
       navigation.goBack();

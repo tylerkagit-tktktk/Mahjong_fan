@@ -3,7 +3,6 @@ import { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,8 +11,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
+import BottomActionBar from '../components/BottomActionBar';
 import TextField from '../components/TextField';
 import Card from '../components/Card';
+import SegmentedControl from '../components/SegmentedControl';
+import StepperNumberInput from '../components/StepperNumberInput';
 import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { createGameWithPlayers } from '../db/repo';
@@ -46,7 +48,6 @@ const GRID = {
   x2: 16,
   x3: 24,
 } as const;
-const HIT_SLOP = { top: GRID.x1, right: GRID.x1, bottom: GRID.x1, left: GRID.x1 } as const;
 
 const MIN_FAN_MIN = 0;
 const MIN_FAN_MAX = 13;
@@ -370,88 +371,30 @@ function NewGameStepperScreen({ navigation }: Props) {
 
         <Card style={styles.card}>
           <Text style={styles.sectionTitle}>{t('newGame.modeTitle')}</Text>
-          <View style={styles.segmentedRow}>
-            <Pressable
-              style={[styles.segmentedButton, styles.segmentedButtonSpacing, mode === 'HK' && styles.segmentedButtonActive]}
-              onPress={() => setMode('HK')}
-              disabled={loading}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: loading, selected: mode === 'HK' }}
-              hitSlop={HIT_SLOP}
-            >
-              <Text style={[styles.segmentedText, mode === 'HK' && styles.segmentedTextActive]}>{t('newGame.mode.hk')}</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.segmentedButton, styles.segmentedButtonSpacing, mode === 'TW' && styles.segmentedButtonActive]}
-              onPress={() => setMode('TW')}
-              disabled={loading}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: loading, selected: mode === 'TW' }}
-              hitSlop={HIT_SLOP}
-            >
-              <Text style={[styles.segmentedText, mode === 'TW' && styles.segmentedTextActive]}>{t('newGame.mode.tw')}</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.segmentedButton, mode === 'PMA' && styles.segmentedButtonActive]}
-              onPress={() => setMode('PMA')}
-              disabled={loading}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: loading, selected: mode === 'PMA' }}
-              hitSlop={HIT_SLOP}
-            >
-              <Text style={[styles.segmentedText, mode === 'PMA' && styles.segmentedTextActive]}>{t('newGame.mode.pma')}</Text>
-            </Pressable>
-          </View>
+          <SegmentedControl
+            options={[
+              { value: 'HK', label: t('newGame.mode.hk') },
+              { value: 'TW', label: t('newGame.mode.tw') },
+              { value: 'PMA', label: t('newGame.mode.pma') },
+            ]}
+            value={mode}
+            onChange={setMode}
+            disabled={loading}
+          />
         </Card>
 
         <Card style={styles.card}>
           <Text style={styles.sectionTitle}>{t('newGame.currencyTitle')}</Text>
-          <View style={styles.segmentedRow}>
-            <Pressable
-              style={[
-                styles.segmentedButton,
-                styles.segmentedButtonSpacing,
-                currencyCode === 'HKD' && styles.segmentedButtonActive,
-              ]}
-              onPress={() => setCurrencyCode('HKD')}
-              disabled={loading}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: loading, selected: currencyCode === 'HKD' }}
-              hitSlop={HIT_SLOP}
-            >
-              <Text style={[styles.segmentedText, currencyCode === 'HKD' && styles.segmentedTextActive]}>
-                {t('currency.hkd')}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.segmentedButton,
-                styles.segmentedButtonSpacing,
-                currencyCode === 'TWD' && styles.segmentedButtonActive,
-              ]}
-              onPress={() => setCurrencyCode('TWD')}
-              disabled={loading}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: loading, selected: currencyCode === 'TWD' }}
-              hitSlop={HIT_SLOP}
-            >
-              <Text style={[styles.segmentedText, currencyCode === 'TWD' && styles.segmentedTextActive]}>
-                {t('currency.twd')}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[styles.segmentedButton, currencyCode === 'CNY' && styles.segmentedButtonActive]}
-              onPress={() => setCurrencyCode('CNY')}
-              disabled={loading}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: loading, selected: currencyCode === 'CNY' }}
-              hitSlop={HIT_SLOP}
-            >
-              <Text style={[styles.segmentedText, currencyCode === 'CNY' && styles.segmentedTextActive]}>
-                {t('currency.cny')}
-              </Text>
-            </Pressable>
-          </View>
+          <SegmentedControl
+            options={[
+              { value: 'HKD', label: t('currency.hkd') },
+              { value: 'TWD', label: t('currency.twd') },
+              { value: 'CNY', label: t('currency.cny') },
+            ]}
+            value={currencyCode}
+            onChange={setCurrencyCode}
+            disabled={loading}
+          />
           <Text style={styles.helperText}>
             {`${t('newGame.currencySelectedPrefix')}${formatCurrencyUnit(currencyCode)}`}
           </Text>
@@ -462,139 +405,41 @@ function NewGameStepperScreen({ navigation }: Props) {
 
           {mode === 'HK' ? (
             <>
-              <View style={styles.segmentedRow}>
-                <Pressable
-                  style={[styles.segmentedButton, styles.segmentedButtonSpacing, hkScoringPreset === 'traditionalFan' && styles.segmentedButtonActive]}
-                  onPress={() => setHkScoringPreset('traditionalFan')}
-                  disabled={loading}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: loading, selected: hkScoringPreset === 'traditionalFan' }}
-                  hitSlop={HIT_SLOP}
-                >
-                  <Text style={[styles.segmentedText, hkScoringPreset === 'traditionalFan' && styles.segmentedTextActive]}>
-                    {t('newGame.hkPreset.traditional')}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.segmentedButton, hkScoringPreset === 'customTable' && styles.segmentedButtonActive]}
-                  onPress={() => setHkScoringPreset('customTable')}
-                  disabled={loading}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: loading, selected: hkScoringPreset === 'customTable' }}
-                  hitSlop={HIT_SLOP}
-                >
-                  <Text style={[styles.segmentedText, hkScoringPreset === 'customTable' && styles.segmentedTextActive]}>
-                    {t('newGame.hkPreset.custom')}
-                  </Text>
-                </Pressable>
-              </View>
+              <SegmentedControl
+                options={[
+                  { value: 'traditionalFan', label: t('newGame.hkPreset.traditional') },
+                  { value: 'customTable', label: t('newGame.hkPreset.custom') },
+                ]}
+                value={hkScoringPreset}
+                onChange={setHkScoringPreset}
+                disabled={loading}
+              />
 
               {hkScoringPreset === 'traditionalFan' ? (
                 <View style={styles.blockSpacing}>
                   <Text style={styles.inputLabel}>{t('newGame.hkGunModeLabel')}</Text>
-                  <View style={styles.segmentedRow}>
-                    <Pressable
-                      style={[
-                        styles.segmentedButton,
-                        styles.segmentedButtonSpacing,
-                        hkGunMode === 'halfGun' && styles.segmentedButtonActive,
-                      ]}
-                      onPress={() => setHkGunMode('halfGun')}
-                      disabled={loading}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: loading, selected: hkGunMode === 'halfGun' }}
-                      hitSlop={HIT_SLOP}
-                    >
-                      <Text style={[styles.segmentedText, hkGunMode === 'halfGun' && styles.segmentedTextActive]}>
-                        {t('newGame.hkGunMode.half')}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.segmentedButton, hkGunMode === 'fullGun' && styles.segmentedButtonActive]}
-                      onPress={() => setHkGunMode('fullGun')}
-                      disabled={loading}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: loading, selected: hkGunMode === 'fullGun' }}
-                      hitSlop={HIT_SLOP}
-                    >
-                      <Text style={[styles.segmentedText, hkGunMode === 'fullGun' && styles.segmentedTextActive]}>
-                        {t('newGame.hkGunMode.full')}
-                      </Text>
-                    </Pressable>
-                  </View>
+                  <SegmentedControl
+                    options={[
+                      { value: 'halfGun', label: t('newGame.hkGunMode.half') },
+                      { value: 'fullGun', label: t('newGame.hkGunMode.full') },
+                    ]}
+                    value={hkGunMode}
+                    onChange={setHkGunMode}
+                    disabled={loading}
+                  />
 
                   <View style={styles.blockSpacing}>
                     <Text style={styles.inputLabel}>{t('newGame.hkStakePresetLabel')}</Text>
-                    <View style={styles.segmentedRow}>
-                      <Pressable
-                        style={[
-                          styles.segmentedButton,
-                          styles.segmentedButtonSpacing,
-                          hkStakePreset === 'TWO_FIVE_CHICKEN' && styles.segmentedButtonActive,
-                        ]}
-                        onPress={() => setHkStakePreset('TWO_FIVE_CHICKEN')}
-                        disabled={loading}
-                        accessibilityRole="button"
-                        accessibilityState={{
-                          disabled: loading,
-                          selected: hkStakePreset === 'TWO_FIVE_CHICKEN',
-                        }}
-                        hitSlop={HIT_SLOP}
-                      >
-                        <Text
-                          style={[
-                            styles.segmentedText,
-                            hkStakePreset === 'TWO_FIVE_CHICKEN' && styles.segmentedTextActive,
-                          ]}
-                        >
-                          {t('newGame.hkStakePreset.twoFiveChicken')}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={[
-                          styles.segmentedButton,
-                          styles.segmentedButtonSpacing,
-                          hkStakePreset === 'FIVE_ONE' && styles.segmentedButtonActive,
-                        ]}
-                        onPress={() => setHkStakePreset('FIVE_ONE')}
-                        disabled={loading}
-                        accessibilityRole="button"
-                        accessibilityState={{
-                          disabled: loading,
-                          selected: hkStakePreset === 'FIVE_ONE',
-                        }}
-                        hitSlop={HIT_SLOP}
-                      >
-                        <Text
-                          style={[
-                            styles.segmentedText,
-                            hkStakePreset === 'FIVE_ONE' && styles.segmentedTextActive,
-                          ]}
-                        >
-                          {t('newGame.hkStakePreset.fiveOne')}
-                        </Text>
-                      </Pressable>
-                      <Pressable
-                        style={[
-                          styles.segmentedButton,
-                          hkStakePreset === 'ONE_TWO' && styles.segmentedButtonActive,
-                        ]}
-                        onPress={() => setHkStakePreset('ONE_TWO')}
-                        disabled={loading}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: loading, selected: hkStakePreset === 'ONE_TWO' }}
-                        hitSlop={HIT_SLOP}
-                      >
-                        <Text
-                          style={[
-                            styles.segmentedText,
-                            hkStakePreset === 'ONE_TWO' && styles.segmentedTextActive,
-                          ]}
-                        >
-                          {t('newGame.hkStakePreset.oneTwo')}
-                        </Text>
-                      </Pressable>
-                    </View>
+                    <SegmentedControl
+                      options={[
+                        { value: 'TWO_FIVE_CHICKEN', label: t('newGame.hkStakePreset.twoFiveChicken') },
+                        { value: 'FIVE_ONE', label: t('newGame.hkStakePreset.fiveOne') },
+                        { value: 'ONE_TWO', label: t('newGame.hkStakePreset.oneTwo') },
+                      ]}
+                      value={hkStakePreset}
+                      onChange={setHkStakePreset}
+                      disabled={loading}
+                    />
                     <Text style={styles.helperText}>
                       {`${t('newGame.hkStakePreset.baseFromMinFanPrefix')}${minFanForHint}${t('newGame.hkStakePreset.baseFromMinFanSuffix')}`}
                     </Text>
@@ -616,45 +461,23 @@ function NewGameStepperScreen({ navigation }: Props) {
 
                   <View style={styles.blockSpacing}>
                     <Text style={styles.inputLabel}>{t('newGame.minFanThresholdLabel')}</Text>
-                    <View style={styles.minFanRow}>
-                      <Pressable
-                        style={[styles.adjustButton, styles.adjustButtonLeft]}
-                        onPress={() => adjustMinFan(-1)}
-                        disabled={loading}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: loading }}
-                        hitSlop={HIT_SLOP}
-                      >
-                        <Text style={styles.adjustText}>-</Text>
-                      </Pressable>
-                      <TextInput
-                        style={[styles.minFanInput, minFanError ? styles.minFanInputError : null]}
-                        keyboardType="number-pad"
-                        value={minFanInput}
-                        onChangeText={(value) => setMinFanInput(value.replace(/[^0-9]/g, ''))}
-                        onBlur={() => {
-                          setMinFanTouched(true);
-                          const parsed = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
-                          if (parsed !== null) {
-                            setMinFanToWin(parsed);
-                            setMinFanInput(String(parsed));
-                          }
-                        }}
-                        placeholder={`${MIN_FAN_MIN}-${MIN_FAN_MAX}`}
-                        placeholderTextColor={theme.colors.textSecondary}
-                        editable={!loading}
-                      />
-                      <Pressable
-                        style={[styles.adjustButton, styles.adjustButtonRight]}
-                        onPress={() => adjustMinFan(1)}
-                        disabled={loading}
-                        accessibilityRole="button"
-                        accessibilityState={{ disabled: loading }}
-                        hitSlop={HIT_SLOP}
-                      >
-                        <Text style={styles.adjustText}>+</Text>
-                      </Pressable>
-                    </View>
+                    <StepperNumberInput
+                      valueText={minFanInput}
+                      onChangeText={(value) => setMinFanInput(value.replace(/[^0-9]/g, ''))}
+                      onBlur={() => {
+                        setMinFanTouched(true);
+                        const parsed = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
+                        if (parsed !== null) {
+                          setMinFanToWin(parsed);
+                          setMinFanInput(String(parsed));
+                        }
+                      }}
+                      onIncrement={() => adjustMinFan(1)}
+                      onDecrement={() => adjustMinFan(-1)}
+                      placeholder={`${MIN_FAN_MIN}-${MIN_FAN_MAX}`}
+                      editable={!loading}
+                      hasError={Boolean(minFanError)}
+                    />
                   </View>
                   <Text style={styles.helperText}>{t('newGame.hkThresholdHelp')}</Text>
                   {minFanError ? <Text style={styles.inlineErrorText}>{minFanError}</Text> : null}
@@ -663,78 +486,35 @@ function NewGameStepperScreen({ navigation }: Props) {
               ) : (
                 <View style={styles.blockSpacing}>
                   <Text style={styles.inputLabel}>{t('newGame.hkGunModeLabel')}</Text>
-                  <View style={styles.segmentedRow}>
-                    <Pressable
-                      style={[
-                        styles.segmentedButton,
-                        styles.segmentedButtonSpacing,
-                        hkGunMode === 'halfGun' && styles.segmentedButtonActive,
-                      ]}
-                      onPress={() => setHkGunMode('halfGun')}
-                      disabled={loading}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: loading, selected: hkGunMode === 'halfGun' }}
-                      hitSlop={HIT_SLOP}
-                    >
-                      <Text style={[styles.segmentedText, hkGunMode === 'halfGun' && styles.segmentedTextActive]}>
-                        {t('newGame.hkGunMode.half')}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.segmentedButton, hkGunMode === 'fullGun' && styles.segmentedButtonActive]}
-                      onPress={() => setHkGunMode('fullGun')}
-                      disabled={loading}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: loading, selected: hkGunMode === 'fullGun' }}
-                      hitSlop={HIT_SLOP}
-                    >
-                      <Text style={[styles.segmentedText, hkGunMode === 'fullGun' && styles.segmentedTextActive]}>
-                        {t('newGame.hkGunMode.full')}
-                      </Text>
-                    </Pressable>
-                  </View>
+                  <SegmentedControl
+                    options={[
+                      { value: 'halfGun', label: t('newGame.hkGunMode.half') },
+                      { value: 'fullGun', label: t('newGame.hkGunMode.full') },
+                    ]}
+                    value={hkGunMode}
+                    onChange={setHkGunMode}
+                    disabled={loading}
+                  />
 
                   <View style={styles.blockSpacing}>
                   <Text style={styles.inputLabel}>{t('newGame.unitPerFanLabel')}</Text>
-                  <View style={styles.minFanRow}>
-                    <Pressable
-                      style={[styles.adjustButton, styles.adjustButtonLeft]}
-                      onPress={() => adjustUnitPerFan(-1)}
-                      disabled={loading}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: loading }}
-                      hitSlop={HIT_SLOP}
-                    >
-                      <Text style={styles.adjustText}>-</Text>
-                    </Pressable>
-                    <TextInput
-                      style={[styles.minFanInput, unitPerFanError ? styles.minFanInputError : null]}
-                      keyboardType="number-pad"
-                      value={unitPerFanInput}
-                      onChangeText={(value) => setUnitPerFanInput(value.replace(/[^0-9]/g, ''))}
-                      onBlur={() => {
-                        setUnitPerFanTouched(true);
-                        const parsed = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
-                        if (parsed !== null) {
-                          setUnitPerFan(parsed);
-                          setUnitPerFanInput(String(parsed));
-                        }
-                      }}
-                      placeholder={`${UNIT_PER_FAN_MIN}-${UNIT_PER_FAN_MAX}`}
-                      placeholderTextColor={theme.colors.textSecondary}
-                      editable={!loading}
-                    />
-                    <Pressable
-                      style={[styles.adjustButton, styles.adjustButtonRight]}
-                      onPress={() => adjustUnitPerFan(1)}
-                      disabled={loading}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: loading }}
-                      hitSlop={HIT_SLOP}
-                    >
-                      <Text style={styles.adjustText}>+</Text>
-                    </Pressable>
-                  </View>
+                  <StepperNumberInput
+                    valueText={unitPerFanInput}
+                    onChangeText={(value) => setUnitPerFanInput(value.replace(/[^0-9]/g, ''))}
+                    onBlur={() => {
+                      setUnitPerFanTouched(true);
+                      const parsed = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+                      if (parsed !== null) {
+                        setUnitPerFan(parsed);
+                        setUnitPerFanInput(String(parsed));
+                      }
+                    }}
+                    onIncrement={() => adjustUnitPerFan(1)}
+                    onDecrement={() => adjustUnitPerFan(-1)}
+                    placeholder={`${UNIT_PER_FAN_MIN}-${UNIT_PER_FAN_MAX}`}
+                    editable={!loading}
+                    hasError={Boolean(unitPerFanError)}
+                  />
                   <Text style={styles.helperText}>{t('newGame.unitPerFanHelp')}</Text>
                   {unitPerFanError ? <Text style={styles.inlineErrorText}>{unitPerFanError}</Text> : null}
                   </View>
@@ -743,82 +523,43 @@ function NewGameStepperScreen({ navigation }: Props) {
 
               <View style={styles.blockSpacing}>
                 <Text style={styles.inputLabel}>{t('newGame.capModeLabel')}</Text>
-                <View style={styles.segmentedRow}>
-                  <Pressable
-                    style={[
-                      styles.segmentedButton,
-                      styles.segmentedButtonSpacing,
-                      !capFanEnabled && styles.segmentedButtonActive,
-                    ]}
-                    onPress={() => {
+                <SegmentedControl
+                  options={[
+                    { value: 'none', label: t('newGame.capMode.none') },
+                    { value: 'fanCap', label: t('newGame.capMode.fanCap') },
+                  ]}
+                  value={capFanEnabled ? 'fanCap' : 'none'}
+                  onChange={(value) => {
+                    if (value === 'none') {
                       setCapFanEnabled(false);
                       setCapFanTouched(false);
-                    }}
-                    disabled={loading}
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: loading, selected: !capFanEnabled }}
-                    hitSlop={HIT_SLOP}
-                  >
-                    <Text style={[styles.segmentedText, !capFanEnabled && styles.segmentedTextActive]}>
-                      {t('newGame.capMode.none')}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.segmentedButton, capFanEnabled && styles.segmentedButtonActive]}
-                    onPress={() => setCapFanEnabled(true)}
-                    disabled={loading}
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: loading, selected: capFanEnabled }}
-                    hitSlop={HIT_SLOP}
-                  >
-                    <Text style={[styles.segmentedText, capFanEnabled && styles.segmentedTextActive]}>
-                      {t('newGame.capMode.fanCap')}
-                    </Text>
-                  </Pressable>
-                </View>
+                      return;
+                    }
+                    setCapFanEnabled(true);
+                  }}
+                  disabled={loading}
+                />
                 {capFanEnabled ? (
                   <>
                     <View style={styles.blockSpacing}>
                       <Text style={styles.inputLabel}>{t('newGame.capFanLabel')}</Text>
-                      <View style={styles.minFanRow}>
-                        <Pressable
-                          style={[styles.adjustButton, styles.adjustButtonLeft]}
-                          onPress={() => adjustCapFan(-1)}
-                          disabled={loading}
-                          accessibilityRole="button"
-                          accessibilityState={{ disabled: loading }}
-                          hitSlop={HIT_SLOP}
-                        >
-                          <Text style={styles.adjustText}>-</Text>
-                        </Pressable>
-                        <TextInput
-                          style={[styles.minFanInput, capFanError ? styles.minFanInputError : null]}
-                          keyboardType="number-pad"
-                          value={capFanInput}
-                          onChangeText={(value) => setCapFanInput(value.replace(/[^0-9]/g, ''))}
-                          onBlur={() => {
-                            setCapFanTouched(true);
-                            const parsed = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
-                            if (parsed !== null) {
-                              setCapFan(parsed);
-                              setCapFanInput(String(parsed));
-                            }
-                          }}
-                          placeholder={`${CAP_FAN_MIN}-${CAP_FAN_MAX}`}
-                          placeholderTextColor={theme.colors.textSecondary}
-                          editable={!loading}
-                        />
-                        <Pressable
-                          style={[styles.adjustButton, styles.adjustButtonRight]}
-                          onPress={() => adjustCapFan(1)}
-                          disabled={loading}
-                          accessibilityRole="button"
-                          accessibilityState={{ disabled: loading }}
-                          hitSlop={HIT_SLOP}
-                        >
-                          <Text style={styles.adjustText}>+</Text>
-                        </Pressable>
-                      </View>
+                      <StepperNumberInput
+                        valueText={capFanInput}
+                        onChangeText={(value) => setCapFanInput(value.replace(/[^0-9]/g, ''))}
+                        onBlur={() => {
+                          setCapFanTouched(true);
+                          const parsed = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
+                          if (parsed !== null) {
+                            setCapFan(parsed);
+                            setCapFanInput(String(parsed));
+                          }
+                        }}
+                        onIncrement={() => adjustCapFan(1)}
+                        onDecrement={() => adjustCapFan(-1)}
+                        placeholder={`${CAP_FAN_MIN}-${CAP_FAN_MAX}`}
+                        editable={!loading}
+                        hasError={Boolean(capFanError)}
+                      />
                     </View>
                     <Text style={styles.helperText}>{t('newGame.capFanHelp')}</Text>
                     {capFanError ? <Text style={styles.inlineErrorText}>{capFanError}</Text> : null}
@@ -831,42 +572,23 @@ function NewGameStepperScreen({ navigation }: Props) {
               {hkScoringPreset === 'customTable' ? (
                 <View style={styles.blockSpacing}>
                   <Text style={styles.inputLabel}>{t('newGame.sampleFanLabel')}</Text>
-                  <View style={styles.minFanRow}>
-                    <Pressable
-                      style={[styles.adjustButton, styles.adjustButtonLeft]}
-                      onPress={() => adjustSampleFan(-1)}
-                      disabled={loading}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: loading }}
-                      hitSlop={HIT_SLOP}
-                    >
-                      <Text style={styles.adjustText}>-</Text>
-                    </Pressable>
-                    <TextInput
-                      style={styles.minFanInput}
-                      keyboardType="number-pad"
-                      value={String(sampleFan)}
-                      onChangeText={(value) => {
-                        const parsed = parseMinFan(value.replace(/[^0-9]/g, ''), SAMPLE_FAN_MIN, SAMPLE_FAN_MAX);
-                        if (parsed !== null) {
-                          setSampleFan(parsed);
-                        }
-                      }}
-                      placeholder={`${SAMPLE_FAN_MIN}-${SAMPLE_FAN_MAX}`}
-                      placeholderTextColor={theme.colors.textSecondary}
-                      editable={!loading}
-                    />
-                    <Pressable
-                      style={[styles.adjustButton, styles.adjustButtonRight]}
-                      onPress={() => adjustSampleFan(1)}
-                      disabled={loading}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: loading }}
-                      hitSlop={HIT_SLOP}
-                    >
-                      <Text style={styles.adjustText}>+</Text>
-                    </Pressable>
-                  </View>
+                  <StepperNumberInput
+                    valueText={String(sampleFan)}
+                    onChangeText={(value) => {
+                      const parsed = parseMinFan(
+                        value.replace(/[^0-9]/g, ''),
+                        SAMPLE_FAN_MIN,
+                        SAMPLE_FAN_MAX,
+                      );
+                      if (parsed !== null) {
+                        setSampleFan(parsed);
+                      }
+                    }}
+                    onIncrement={() => adjustSampleFan(1)}
+                    onDecrement={() => adjustSampleFan(-1)}
+                    placeholder={`${SAMPLE_FAN_MIN}-${SAMPLE_FAN_MAX}`}
+                    editable={!loading}
+                  />
                   {sampleBaseAmount !== null ? (
                     <>
                       <Text style={styles.helperText}>
@@ -890,45 +612,23 @@ function NewGameStepperScreen({ navigation }: Props) {
           {mode === 'TW' ? (
             <View style={styles.blockSpacing}>
               <Text style={styles.inputLabel}>{t('newGame.minFanThresholdLabel')}</Text>
-              <View style={styles.minFanRow}>
-                <Pressable
-                  style={[styles.adjustButton, styles.adjustButtonLeft]}
-                  onPress={() => adjustMinFan(-1)}
-                  disabled={loading}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: loading }}
-                  hitSlop={HIT_SLOP}
-                >
-                  <Text style={styles.adjustText}>-</Text>
-                </Pressable>
-                <TextInput
-                  style={[styles.minFanInput, minFanError ? styles.minFanInputError : null]}
-                  keyboardType="number-pad"
-                  value={minFanInput}
-                  onChangeText={(value) => setMinFanInput(value.replace(/[^0-9]/g, ''))}
-                  onBlur={() => {
-                    setMinFanTouched(true);
-                    const parsed = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
-                    if (parsed !== null) {
-                      setMinFanToWin(parsed);
-                      setMinFanInput(String(parsed));
-                    }
-                  }}
-                  placeholder={`${MIN_FAN_MIN}-${MIN_FAN_MAX}`}
-                  placeholderTextColor={theme.colors.textSecondary}
-                  editable={!loading}
-                />
-                <Pressable
-                  style={[styles.adjustButton, styles.adjustButtonRight]}
-                  onPress={() => adjustMinFan(1)}
-                  disabled={loading}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: loading }}
-                  hitSlop={HIT_SLOP}
-                >
-                  <Text style={styles.adjustText}>+</Text>
-                </Pressable>
-              </View>
+              <StepperNumberInput
+                valueText={minFanInput}
+                onChangeText={(value) => setMinFanInput(value.replace(/[^0-9]/g, ''))}
+                onBlur={() => {
+                  setMinFanTouched(true);
+                  const parsed = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
+                  if (parsed !== null) {
+                    setMinFanToWin(parsed);
+                    setMinFanInput(String(parsed));
+                  }
+                }}
+                onIncrement={() => adjustMinFan(1)}
+                onDecrement={() => adjustMinFan(-1)}
+                placeholder={`${MIN_FAN_MIN}-${MIN_FAN_MAX}`}
+                editable={!loading}
+                hasError={Boolean(minFanError)}
+              />
               <Text style={styles.helperText}>{t('newGame.twThresholdHelp')}</Text>
               {minFanError ? <Text style={styles.inlineErrorText}>{minFanError}</Text> : null}
             </View>
@@ -941,36 +641,15 @@ function NewGameStepperScreen({ navigation }: Props) {
           <Text style={styles.sectionTitle}>{t('newGame.players')}</Text>
 
           <Text style={styles.inputLabel}>{t('newGame.seatModeTitle')}</Text>
-          <View style={styles.segmentedRow}>
-            <Pressable
-              style={[
-                styles.segmentedButton,
-                styles.segmentedButtonSpacing,
-                seatMode === 'manual' && styles.segmentedButtonActive,
-              ]}
-              onPress={() => handleSeatModeChange('manual')}
-              disabled={loading}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: loading, selected: seatMode === 'manual' }}
-              hitSlop={HIT_SLOP}
-            >
-              <Text style={[styles.segmentedText, seatMode === 'manual' && styles.segmentedTextActive]}>
-                {t('newGame.seatMode.manual')}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[styles.segmentedButton, seatMode === 'auto' && styles.segmentedButtonActive]}
-              onPress={() => handleSeatModeChange('auto')}
-              disabled={loading}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: loading, selected: seatMode === 'auto' }}
-              hitSlop={HIT_SLOP}
-            >
-              <Text style={[styles.segmentedText, seatMode === 'auto' && styles.segmentedTextActive]}>
-                {t('newGame.seatMode.auto')}
-              </Text>
-            </Pressable>
-          </View>
+          <SegmentedControl
+            options={[
+              { value: 'manual', label: t('newGame.seatMode.manual') },
+              { value: 'auto', label: t('newGame.seatMode.auto') },
+            ]}
+            value={seatMode}
+            onChange={handleSeatModeChange}
+            disabled={loading}
+          />
 
           {seatMode === 'manual' ? (
             <View style={styles.playersList}>
@@ -1045,20 +724,13 @@ function NewGameStepperScreen({ navigation }: Props) {
         {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
       </ScrollView>
 
-      <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, GRID.x2) }]}> 
-        <AppButton
-          label={loading ? t('newGame.creating') : t('newGame.create')}
-          onPress={handleCreate}
-          disabled={loading}
-        />
-        <AppButton
-          label={t('common.back')}
-          onPress={() => navigation.goBack()}
-          disabled={loading}
-          variant="secondary"
-          style={styles.secondaryAction}
-        />
-      </View>
+      <BottomActionBar
+        primaryLabel={loading ? t('newGame.creating') : t('newGame.create')}
+        onPrimaryPress={handleCreate}
+        secondaryLabel={t('common.back')}
+        onSecondaryPress={() => navigation.goBack()}
+        disabled={loading}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -1210,36 +882,6 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     marginBottom: GRID.x1_5,
   },
-  segmentedRow: {
-    flexDirection: 'row',
-  },
-  segmentedButton: {
-    flex: 1,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: GRID.x1,
-  },
-  segmentedButtonSpacing: {
-    marginRight: GRID.x1,
-  },
-  segmentedButtonActive: {
-    borderColor: theme.colors.primary,
-    backgroundColor: '#E6F5F5',
-  },
-  segmentedText: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: '500',
-    color: theme.colors.textPrimary,
-  },
-  segmentedTextActive: {
-    color: theme.colors.primary,
-    fontWeight: '700',
-  },
   blockSpacing: {
     marginTop: GRID.x1_5,
   },
@@ -1247,45 +889,6 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
     marginBottom: GRID.x1,
-  },
-  minFanRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  adjustButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.colors.surface,
-  },
-  adjustButtonLeft: {
-    marginRight: GRID.x1,
-  },
-  adjustButtonRight: {
-    marginLeft: GRID.x1,
-  },
-  adjustText: {
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-    fontSize: theme.fontSize.md,
-  },
-  minFanInput: {
-    flex: 1,
-    height: 44,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: GRID.x2,
-    fontSize: theme.fontSize.md,
-    color: theme.colors.textPrimary,
-    backgroundColor: theme.colors.surface,
-  },
-  minFanInputError: {
-    borderColor: theme.colors.danger,
   },
   helperText: {
     marginTop: GRID.x1,
@@ -1357,16 +960,6 @@ const styles = StyleSheet.create({
     marginBottom: GRID.x2,
     color: theme.colors.danger,
     fontSize: theme.fontSize.sm,
-  },
-  actionBar: {
-    paddingHorizontal: GRID.x2,
-    paddingTop: GRID.x1_5,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-    backgroundColor: theme.colors.background,
-  },
-  secondaryAction: {
-    marginTop: GRID.x1_5,
   },
   debugSpacer: {
     height: 800,

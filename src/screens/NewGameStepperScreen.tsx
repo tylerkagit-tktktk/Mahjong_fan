@@ -1,87 +1,38 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMemo, useRef, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AppButton from '../components/AppButton';
 import BottomActionBar from '../components/BottomActionBar';
-import Card from '../components/Card';
-import SegmentedControl from '../components/SegmentedControl';
-import StepperNumberInput from '../components/StepperNumberInput';
-import TextField from '../components/TextField';
 import { createGameWithPlayers } from '../db/repo';
 import { DEBUG_FLAGS } from '../debug/debugFlags';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { DEFAULT_CURRENCY_CODE, CurrencyCode, formatCurrencyUnit, getCurrencyMeta } from '../models/currency';
-import {
-  getDefaultRules,
-  HkGunMode,
-  HkScoringPreset,
-  HkStakePreset,
-  RulesV1,
-  serializeRules,
-  Variant,
-} from '../models/rules';
+import { getDefaultRules, HkGunMode, HkScoringPreset, HkStakePreset, RulesV1, serializeRules, Variant } from '../models/rules';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
+import {
+  CAP_FAN_MAX,
+  CAP_FAN_MIN,
+  GRID,
+  MIN_FAN_MAX,
+  MIN_FAN_MIN,
+  PLAYER_COUNT,
+  SAMPLE_FAN_MAX,
+  SAMPLE_FAN_MIN,
+  UNIT_PER_FAN_MAX,
+  UNIT_PER_FAN_MIN,
+} from './newGameStepper/constants';
+import { clamp, getMinFanError, getStakePresetHintLines, makeId, parseMinFan, shuffle } from './newGameStepper/helpers';
+import CreateConfirmModal from './newGameStepper/sections/CreateConfirmModal';
+import CurrencySection from './newGameStepper/sections/CurrencySection';
+import GameTitleSection from './newGameStepper/sections/GameTitleSection';
+import ModeSection from './newGameStepper/sections/ModeSection';
+import PlayersSection from './newGameStepper/sections/PlayersSection';
+import ScoringSection from './newGameStepper/sections/ScoringSection';
+import { ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateContext, SeatMode } from './newGameStepper/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewGameStepper'>;
-type SeatMode = 'manual' | 'auto';
-type CapMode = 'none' | 'fanCap';
-type InvalidTarget =
-  | { kind: 'title' }
-  | { kind: 'manualPlayer'; index: number }
-  | { kind: 'autoPlayer'; index: number }
-  | { kind: 'players' }
-  | { kind: 'minFan' }
-  | { kind: 'unitPerFan' }
-  | { kind: 'capFan' }
-  | { kind: 'scoring' };
-type PreparedCreateContext = {
-  gameId: string;
-  trimmedTitle: string;
-  resolvedPlayers: string[];
-  playerInputs: Array<{
-    id: string;
-    gameId: string;
-    name: string;
-    seatIndex: number;
-  }>;
-  rules: RulesV1;
-};
-
-type ConfirmField = {
-  label: string;
-  value: string;
-};
-
-const PLAYER_COUNT = 4;
-
-const GRID = {
-  x1: 8,
-  x1_5: 12,
-  x2: 16,
-  x3: 24,
-} as const;
-
-const MIN_FAN_MIN = 0;
-const MIN_FAN_MAX = 13;
-const UNIT_PER_FAN_MIN = 1;
-const UNIT_PER_FAN_MAX = 9999;
-const CAP_FAN_MIN = 1;
-const CAP_FAN_MAX = 20;
-const SAMPLE_FAN_MIN = 1;
-const SAMPLE_FAN_MAX = 20;
 
 function NewGameStepperScreen({ navigation }: Props) {
   const { t, language } = useAppLanguage();
@@ -116,6 +67,7 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [pendingPayload, setPendingPayload] = useState<PreparedCreateContext | null>(null);
+
   const scrollRef = useRef<ScrollView | null>(null);
   const titleInputRef = useRef<TextInput | null>(null);
   const manualPlayerRefs = useRef<Array<TextInput | null>>([]);
@@ -123,14 +75,9 @@ function NewGameStepperScreen({ navigation }: Props) {
   const minFanInputRef = useRef<TextInput | null>(null);
   const unitPerFanInputRef = useRef<TextInput | null>(null);
   const capFanInputRef = useRef<TextInput | null>(null);
-  const sectionY = useRef<{ title: number; scoring: number; players: number }>({
-    title: 0,
-    scoring: 0,
-    players: 0,
-  });
+  const sectionY = useRef<{ title: number; scoring: number; players: number }>({ title: 0, scoring: 0, players: 0 });
 
   const seatLabels = useMemo(() => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')], [t]);
-
   const showMinFan = mode === 'TW' || (mode === 'HK' && hkScoringPreset === 'traditionalFan');
 
   const minFanError =
@@ -187,7 +134,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     setSubmitAttempted(false);
   };
 
-  const confirmAutoSeat = () => {
+  const handleConfirmAutoSeat = () => {
     const trimmed = autoNames.map((name) => name.trim());
     if (trimmed.some((name) => name.length === 0)) {
       setPlayersError(t('newGame.autoSeatRequired'));
@@ -288,9 +235,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     let resolvedPlayers = [...players];
     if (seatMode === 'manual') {
       resolvedPlayers = resolvedPlayers.map((name) => name.trim());
-      const missingIndexes = resolvedPlayers
-        .map((name, index) => (name.length === 0 ? index : -1))
-        .filter((index) => index >= 0);
+      const missingIndexes = resolvedPlayers.map((name, index) => (name.length === 0 ? index : -1)).filter((index) => index >= 0);
       if (missingIndexes.length > 0) {
         if (missingIndexes.length === PLAYER_COUNT) {
           nextPlayersError = t('newGame.requiredPlayersAll');
@@ -304,9 +249,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       }
     } else {
       const trimmed = autoNames.map((name) => name.trim());
-      const missingIndexes = trimmed
-        .map((name, index) => (name.length === 0 ? index : -1))
-        .filter((index) => index >= 0);
+      const missingIndexes = trimmed.map((name, index) => (name.length === 0 ? index : -1)).filter((index) => index >= 0);
       if (missingIndexes.length > 0) {
         if (missingIndexes.length === PLAYER_COUNT) {
           nextPlayersError = t('newGame.requiredPlayersAll');
@@ -392,13 +335,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       rules.pma = { pricingMode: 'directAmount' };
     }
 
-    return {
-      gameId,
-      trimmedTitle,
-      resolvedPlayers,
-      playerInputs,
-      rules,
-    };
+    return { gameId, trimmedTitle, resolvedPlayers, playerInputs, rules };
   };
 
   const executeCreateGame = async (context: PreparedCreateContext): Promise<boolean> => {
@@ -427,15 +364,8 @@ function NewGameStepperScreen({ navigation }: Props) {
     }
   };
 
-  const buildConfirmSections = (
-    context: PreparedCreateContext,
-  ): { game: ConfirmField[]; scoring: ConfirmField[]; players: ConfirmField[] } => {
-    const modeLabel =
-      context.rules.mode === 'HK'
-        ? t('newGame.mode.hk')
-        : context.rules.mode === 'TW'
-        ? t('newGame.mode.tw')
-        : t('newGame.mode.pma');
+  const buildConfirmSections = (context: PreparedCreateContext): ConfirmSections => {
+    const modeLabel = context.rules.mode === 'HK' ? t('newGame.mode.hk') : context.rules.mode === 'TW' ? t('newGame.mode.tw') : t('newGame.mode.pma');
 
     const gameFields: ConfirmField[] = [
       { label: t('newGame.confirmModal.field.title'), value: context.trimmedTitle },
@@ -448,10 +378,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     if (context.rules.mode === 'HK' && context.rules.hk) {
       scoringFields.push({
         label: t('newGame.confirmModal.field.scoringMethod'),
-        value:
-          context.rules.hk.scoringPreset === 'customTable'
-            ? t('newGame.hkPreset.custom')
-            : t('newGame.hkPreset.traditional'),
+        value: context.rules.hk.scoringPreset === 'customTable' ? t('newGame.hkPreset.custom') : t('newGame.hkPreset.traditional'),
       });
       scoringFields.push({
         label: t('newGame.confirmModal.field.gunMode'),
@@ -468,36 +395,21 @@ function NewGameStepperScreen({ navigation }: Props) {
       });
       scoringFields.push({
         label: t('newGame.confirmModal.field.capFan'),
-        value:
-          context.rules.hk.capFan === null
-            ? t('newGame.capMode.none')
-            : `${t('newGame.capMode.fanCap')} ${context.rules.hk.capFan}`,
+        value: context.rules.hk.capFan === null ? t('newGame.capMode.none') : `${t('newGame.capMode.fanCap')} ${context.rules.hk.capFan}`,
       });
       if (context.rules.hk.scoringPreset === 'customTable') {
-        scoringFields.push({
-          label: t('newGame.confirmModal.field.unitPerFan'),
-          value: String(context.rules.hk.unitPerFan ?? 1),
-        });
+        scoringFields.push({ label: t('newGame.confirmModal.field.unitPerFan'), value: String(context.rules.hk.unitPerFan ?? 1) });
       } else {
-        scoringFields.push({
-          label: t('newGame.confirmModal.field.minFan'),
-          value: String(context.rules.minFanToWin ?? minFanToWin),
-        });
+        scoringFields.push({ label: t('newGame.confirmModal.field.minFan'), value: String(context.rules.minFanToWin ?? minFanToWin) });
       }
     }
 
     if (context.rules.mode === 'TW') {
-      scoringFields.push({
-        label: t('newGame.confirmModal.field.twMinFan'),
-        value: String(context.rules.minFanToWin ?? minFanToWin),
-      });
+      scoringFields.push({ label: t('newGame.confirmModal.field.twMinFan'), value: String(context.rules.minFanToWin ?? minFanToWin) });
     }
 
     if (context.rules.mode === 'PMA') {
-      scoringFields.push({
-        label: t('newGame.confirmModal.field.pmaMode'),
-        value: t('newGame.pmaDescription'),
-      });
+      scoringFields.push({ label: t('newGame.confirmModal.field.pmaMode'), value: t('newGame.pmaDescription') });
     }
 
     const playerLabels: TranslationKey[] = [
@@ -506,10 +418,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       'newGame.confirmModal.field.playersWest',
       'newGame.confirmModal.field.playersNorth',
     ];
-    const playerFields: ConfirmField[] = context.resolvedPlayers.map((player, index) => ({
-      label: t(playerLabels[index]),
-      value: player,
-    }));
+    const playerFields: ConfirmField[] = context.resolvedPlayers.map((player, index) => ({ label: t(playerLabels[index]), value: player }));
 
     return { game: gameFields, scoring: scoringFields, players: playerFields };
   };
@@ -565,13 +474,10 @@ function NewGameStepperScreen({ navigation }: Props) {
   };
 
   const confirmSections = pendingPayload ? buildConfirmSections(pendingPayload) : null;
+  const scoringHintLines = getStakePresetHintLines(hkStakePreset, hkGunMode, minFanForHint, capFanForHint, currencySymbol, t);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={0}
-    >
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
       <ScrollView
         ref={scrollRef}
         style={styles.scroll}
@@ -586,296 +492,152 @@ function NewGameStepperScreen({ navigation }: Props) {
             sectionY.current.title = event.nativeEvent.layout.y;
           }}
         >
-          <Card style={styles.card}>
-          <TextField
+          <GameTitleSection
             label={t('newGame.gameTitle')}
-            inputRef={titleInputRef}
             value={title}
+            placeholder={t('newGame.gameTitlePlaceholder')}
             onChangeText={(value) => {
               setTitle(value);
               setTitleError(null);
             }}
-            placeholder={t('newGame.gameTitlePlaceholder')}
+            inputRef={titleInputRef}
+            error={titleError}
           />
-          {titleError ? <Text style={styles.inlineErrorText}>{titleError}</Text> : null}
-        </Card>
         </View>
 
-        <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('newGame.modeTitle')}</Text>
-          <SegmentedControl<Variant>
-            options={[
-              { value: 'HK', label: t('newGame.mode.hk') },
-              { value: 'TW', label: t('newGame.mode.tw') },
-              { value: 'PMA', label: t('newGame.mode.pma') },
-            ]}
-            value={mode}
-            onChange={setMode}
-            disabled={loading}
-          />
-        </Card>
+        <ModeSection
+          title={t('newGame.modeTitle')}
+          value={mode}
+          onChange={setMode}
+          disabled={loading}
+          labels={{ hk: t('newGame.mode.hk'), tw: t('newGame.mode.tw'), pma: t('newGame.mode.pma') }}
+        />
 
-        <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('newGame.currencyTitle')}</Text>
-          <SegmentedControl<CurrencyCode>
-            options={[
-              { value: 'HKD', label: t('currency.hkd') },
-              { value: 'TWD', label: t('currency.twd') },
-              { value: 'CNY', label: t('currency.cny') },
-            ]}
-            value={currencyCode}
-            onChange={setCurrencyCode}
-            disabled={loading}
-          />
-          <Text style={styles.helperText}>{`${t('newGame.currencySelectedPrefix')}${formatCurrencyUnit(currencyCode)}`}</Text>
-        </Card>
+        <CurrencySection
+          title={t('newGame.currencyTitle')}
+          value={currencyCode}
+          onChange={setCurrencyCode}
+          disabled={loading}
+          labels={{ hkd: t('currency.hkd'), twd: t('currency.twd'), cny: t('currency.cny') }}
+          helperText={`${t('newGame.currencySelectedPrefix')}${formatCurrencyUnit(currencyCode)}`}
+        />
 
         <View
           onLayout={(event) => {
             sectionY.current.scoring = event.nativeEvent.layout.y;
           }}
         >
-          <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('newGame.scoringMethod')}</Text>
-
-          {mode === 'HK' ? (
-            <>
-              <SegmentedControl<HkScoringPreset>
-                options={[
-                  { value: 'traditionalFan', label: t('newGame.hkPreset.traditional') },
-                  { value: 'customTable', label: t('newGame.hkPreset.custom') },
-                ]}
-                value={hkScoringPreset}
-                onChange={setHkScoringPreset}
-                disabled={loading}
-              />
-
-              {hkScoringPreset === 'traditionalFan' ? (
-                <View style={styles.blockSpacing}>
-                  <Text style={styles.inputLabel}>{t('newGame.hkGunModeLabel')}</Text>
-                  <SegmentedControl<HkGunMode>
-                    options={[
-                      { value: 'halfGun', label: t('newGame.hkGunMode.half') },
-                      { value: 'fullGun', label: t('newGame.hkGunMode.full') },
-                    ]}
-                    value={hkGunMode}
-                    onChange={setHkGunMode}
-                    disabled={loading}
-                  />
-
-                  <View style={styles.blockSpacing}>
-                    <Text style={styles.inputLabel}>{t('newGame.hkStakePresetLabel')}</Text>
-                    <SegmentedControl<HkStakePreset>
-                      options={[
-                        { value: 'TWO_FIVE_CHICKEN', label: t('newGame.hkStakePreset.twoFiveChicken') },
-                        { value: 'FIVE_ONE', label: t('newGame.hkStakePreset.fiveOne') },
-                        { value: 'ONE_TWO', label: t('newGame.hkStakePreset.oneTwo') },
-                      ]}
-                      value={hkStakePreset}
-                      onChange={setHkStakePreset}
-                      disabled={loading}
-                    />
-                    <Text style={styles.helperText}>
-                      {`${t('newGame.hkStakePreset.baseFromMinFanPrefix')}${minFanForHint}${t('newGame.hkStakePreset.baseFromMinFanSuffix')}`}
-                    </Text>
-                    {getStakePresetHintLines(
-                      hkStakePreset,
-                      hkGunMode,
-                      minFanForHint,
-                      capFanForHint,
-                      currencySymbol,
-                      t,
-                    ).map(
-                      (line, index) => (
-                        <Text
-                          key={`${hkStakePreset}-${hkGunMode}-${index}`}
-                          style={index === 0 ? styles.helperText : styles.helperTextSubLine}
-                        >
-                          {line}
-                        </Text>
-                      ),
-                    )}
-                  </View>
-
-                  <View style={styles.blockSpacing}>
-                    <Text style={styles.inputLabel}>{t('newGame.minFanThresholdLabel')}</Text>
-                    <StepperNumberInput
-                      inputRef={minFanInputRef}
-                      valueText={minFanInput}
-                      onChangeText={(value) => setMinFanInput(value.replace(/[^0-9]/g, ''))}
-                      onBlur={() => {
-                        setMinFanTouched(true);
-                        const parsed = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
-                        if (parsed !== null) {
-                          setMinFanToWin(parsed);
-                          setMinFanInput(String(parsed));
-                        }
-                      }}
-                      onIncrement={() => adjustMinFan(1)}
-                      onDecrement={() => adjustMinFan(-1)}
-                      placeholder={`${MIN_FAN_MIN}-${MIN_FAN_MAX}`}
-                      editable={!loading}
-                      hasError={Boolean(minFanError)}
-                    />
-                  </View>
-
-                  <Text style={styles.helperText}>{t('newGame.hkThresholdHelp')}</Text>
-                  {minFanError ? <Text style={styles.inlineErrorText}>{minFanError}</Text> : null}
-                </View>
-              ) : (
-                <View style={styles.blockSpacing}>
-                  <Text style={styles.inputLabel}>{t('newGame.hkGunModeLabel')}</Text>
-                  <SegmentedControl<HkGunMode>
-                    options={[
-                      { value: 'halfGun', label: t('newGame.hkGunMode.half') },
-                      { value: 'fullGun', label: t('newGame.hkGunMode.full') },
-                    ]}
-                    value={hkGunMode}
-                    onChange={setHkGunMode}
-                    disabled={loading}
-                  />
-
-                  <View style={styles.blockSpacing}>
-                    <Text style={styles.inputLabel}>{t('newGame.unitPerFanLabel')}</Text>
-                    <StepperNumberInput
-                      inputRef={unitPerFanInputRef}
-                      valueText={unitPerFanInput}
-                      onChangeText={(value) => setUnitPerFanInput(value.replace(/[^0-9]/g, ''))}
-                      onBlur={() => {
-                        setUnitPerFanTouched(true);
-                        const parsed = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
-                        if (parsed !== null) {
-                          setUnitPerFan(parsed);
-                          setUnitPerFanInput(String(parsed));
-                        }
-                      }}
-                      onIncrement={() => adjustUnitPerFan(1)}
-                      onDecrement={() => adjustUnitPerFan(-1)}
-                      placeholder={`${UNIT_PER_FAN_MIN}-${UNIT_PER_FAN_MAX}`}
-                      editable={!loading}
-                      hasError={Boolean(unitPerFanError)}
-                    />
-                    <Text style={styles.helperText}>{t('newGame.unitPerFanHelp')}</Text>
-                    {unitPerFanError ? <Text style={styles.inlineErrorText}>{unitPerFanError}</Text> : null}
-                  </View>
-                </View>
-              )}
-
-              <View style={styles.blockSpacing}>
-                <Text style={styles.inputLabel}>{t('newGame.capModeLabel')}</Text>
-                <SegmentedControl<CapMode>
-                  options={[
-                    { value: 'none', label: t('newGame.capMode.none') },
-                    { value: 'fanCap', label: t('newGame.capMode.fanCap') },
-                  ]}
-                  value={capFanEnabled ? 'fanCap' : 'none'}
-                  onChange={(next) => {
-                    if (next === 'none') {
-                      setCapFanEnabled(false);
-                      setCapFanTouched(false);
-                    } else {
-                      setCapFanEnabled(true);
-                    }
-                  }}
-                  disabled={loading}
-                />
-                {capFanEnabled ? (
-                  <>
-                    <View style={styles.blockSpacing}>
-                      <Text style={styles.inputLabel}>{t('newGame.capFanLabel')}</Text>
-                      <StepperNumberInput
-                        inputRef={capFanInputRef}
-                        valueText={capFanInput}
-                        onChangeText={(value) => setCapFanInput(value.replace(/[^0-9]/g, ''))}
-                        onBlur={() => {
-                          setCapFanTouched(true);
-                          const parsed = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
-                          if (parsed !== null) {
-                            setCapFan(parsed);
-                            setCapFanInput(String(parsed));
-                          }
-                        }}
-                        onIncrement={() => adjustCapFan(1)}
-                        onDecrement={() => adjustCapFan(-1)}
-                        placeholder={`${CAP_FAN_MIN}-${CAP_FAN_MAX}`}
-                        editable={!loading}
-                        hasError={Boolean(capFanError)}
-                      />
-                    </View>
-                    <Text style={styles.helperText}>{t('newGame.capFanHelp')}</Text>
-                    {capFanError ? <Text style={styles.inlineErrorText}>{capFanError}</Text> : null}
-                  </>
-                ) : (
-                  <Text style={styles.helperText}>{t('newGame.capFanDisabledHelp')}</Text>
-                )}
-              </View>
-
-              {hkScoringPreset === 'customTable' ? (
-                <View style={styles.blockSpacing}>
-                  <Text style={styles.inputLabel}>{t('newGame.sampleFanLabel')}</Text>
-                  <StepperNumberInput
-                    valueText={String(sampleFan)}
-                    onChangeText={(value) => {
-                      const parsed = parseMinFan(value.replace(/[^0-9]/g, ''), SAMPLE_FAN_MIN, SAMPLE_FAN_MAX);
-                      if (parsed !== null) {
-                        setSampleFan(parsed);
-                      }
-                    }}
-                    onIncrement={() => adjustSampleFan(1)}
-                    onDecrement={() => adjustSampleFan(-1)}
-                    placeholder={`${SAMPLE_FAN_MIN}-${SAMPLE_FAN_MAX}`}
-                    editable={!loading}
-                  />
-                  {sampleBaseAmount !== null ? (
-                    <>
-                      <Text style={styles.helperText}>
-                        {`${t('newGame.realtime.effectiveFan')} = ${sampleEffectiveFan}`}
-                      </Text>
-                      <Text style={styles.helperTextSubLine}>
-                        {t('newGame.realtime.halfGun')
-                          .replaceAll('{zimoEach}', `${currencySymbol}${String(sampleHalfZimoEach ?? 0)}`)
-                          .replaceAll('{discarder}', `${currencySymbol}${String(sampleHalfDiscarder ?? 0)}`)
-                          .replaceAll('{othersEach}', `${currencySymbol}${String(sampleHalfOthersEach ?? 0)}`)}
-                      </Text>
-                      <Text style={styles.helperTextSubLine}>
-                        {t('newGame.realtime.fullGun')
-                          .replaceAll('{zimoEach}', `${currencySymbol}${String(sampleFullZimoEach ?? 0)}`)
-                          .replaceAll('{discarder}', `${currencySymbol}${String(sampleFullDiscarder ?? 0)}`)}
-                      </Text>
-                    </>
-                  ) : null}
-                </View>
-              ) : null}
-            </>
-          ) : null}
-
-          {mode === 'TW' ? (
-            <View style={styles.blockSpacing}>
-              <Text style={styles.inputLabel}>{t('newGame.minFanThresholdLabel')}</Text>
-              <StepperNumberInput
-                valueText={minFanInput}
-                onChangeText={(value) => setMinFanInput(value.replace(/[^0-9]/g, ''))}
-                onBlur={() => {
-                  setMinFanTouched(true);
-                  const parsed = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
-                  if (parsed !== null) {
-                    setMinFanToWin(parsed);
-                    setMinFanInput(String(parsed));
-                  }
-                }}
-                onIncrement={() => adjustMinFan(1)}
-                onDecrement={() => adjustMinFan(-1)}
-                placeholder={`${MIN_FAN_MIN}-${MIN_FAN_MAX}`}
-                editable={!loading}
-                hasError={Boolean(minFanError)}
-              />
-              <Text style={styles.helperText}>{t('newGame.twThresholdHelp')}</Text>
-              {minFanError ? <Text style={styles.inlineErrorText}>{minFanError}</Text> : null}
-            </View>
-          ) : null}
-
-          {mode === 'PMA' ? <Text style={styles.helperText}>{t('newGame.pmaDescription')}</Text> : null}
-        </Card>
+          <ScoringSection
+            mode={mode}
+            hkScoringPreset={hkScoringPreset}
+            hkGunMode={hkGunMode}
+            hkStakePreset={hkStakePreset}
+            capFanEnabled={capFanEnabled}
+            minFanInput={minFanInput}
+            unitPerFanInput={unitPerFanInput}
+            capFanInput={capFanInput}
+            sampleFan={sampleFan}
+            minFanError={minFanError}
+            unitPerFanError={unitPerFanError}
+            capFanError={capFanError}
+            minFanForHint={minFanForHint}
+            currencySymbol={currencySymbol}
+            sampleBaseAmount={sampleBaseAmount}
+            sampleEffectiveFan={sampleEffectiveFan}
+            sampleHalfZimoEach={sampleHalfZimoEach}
+            sampleHalfDiscarder={sampleHalfDiscarder}
+            sampleHalfOthersEach={sampleHalfOthersEach}
+            sampleFullZimoEach={sampleFullZimoEach}
+            sampleFullDiscarder={sampleFullDiscarder}
+            capFanForHint={capFanForHint}
+            disabled={loading}
+            minFanInputRef={minFanInputRef}
+            unitPerFanInputRef={unitPerFanInputRef}
+            capFanInputRef={capFanInputRef}
+            labels={{
+              title: t('newGame.scoringMethod'),
+              hkPresetTraditional: t('newGame.hkPreset.traditional'),
+              hkPresetCustom: t('newGame.hkPreset.custom'),
+              hkGunModeLabel: t('newGame.hkGunModeLabel'),
+              hkGunModeHalf: t('newGame.hkGunMode.half'),
+              hkGunModeFull: t('newGame.hkGunMode.full'),
+              hkStakePresetLabel: t('newGame.hkStakePresetLabel'),
+              hkStakePresetTwoFive: t('newGame.hkStakePreset.twoFiveChicken'),
+              hkStakePresetFiveOne: t('newGame.hkStakePreset.fiveOne'),
+              hkStakePresetOneTwo: t('newGame.hkStakePreset.oneTwo'),
+              hkStakeBasePrefix: t('newGame.hkStakePreset.baseFromMinFanPrefix'),
+              hkStakeBaseSuffix: t('newGame.hkStakePreset.baseFromMinFanSuffix'),
+              minFanThresholdLabel: t('newGame.minFanThresholdLabel'),
+              hkThresholdHelp: t('newGame.hkThresholdHelp'),
+              unitPerFanLabel: t('newGame.unitPerFanLabel'),
+              unitPerFanHelp: t('newGame.unitPerFanHelp'),
+              capModeLabel: t('newGame.capModeLabel'),
+              capModeNone: t('newGame.capMode.none'),
+              capModeFanCap: t('newGame.capMode.fanCap'),
+              capFanLabel: t('newGame.capFanLabel'),
+              capFanHelp: t('newGame.capFanHelp'),
+              capFanDisabledHelp: t('newGame.capFanDisabledHelp'),
+              sampleFanLabel: t('newGame.sampleFanLabel'),
+              realtimeEffectiveFan: t('newGame.realtime.effectiveFan'),
+              realtimeHalfGun: t('newGame.realtime.halfGun'),
+              realtimeFullGun: t('newGame.realtime.fullGun'),
+              twThresholdHelp: t('newGame.twThresholdHelp'),
+              pmaDescription: t('newGame.pmaDescription'),
+            }}
+            stakePresetHintLines={scoringHintLines}
+            onHkScoringPresetChange={setHkScoringPreset}
+            onHkGunModeChange={setHkGunMode}
+            onHkStakePresetChange={setHkStakePreset}
+            onCapModeChange={(next) => {
+              if (next === 'none') {
+                setCapFanEnabled(false);
+                setCapFanTouched(false);
+              } else {
+                setCapFanEnabled(true);
+              }
+            }}
+            onMinFanInputChange={(value) => setMinFanInput(value.replace(/[^0-9]/g, ''))}
+            onMinFanBlur={() => {
+              setMinFanTouched(true);
+              const parsed = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
+              if (parsed !== null) {
+                setMinFanToWin(parsed);
+                setMinFanInput(String(parsed));
+              }
+            }}
+            onMinFanIncrement={() => adjustMinFan(1)}
+            onMinFanDecrement={() => adjustMinFan(-1)}
+            onUnitPerFanInputChange={(value) => setUnitPerFanInput(value.replace(/[^0-9]/g, ''))}
+            onUnitPerFanBlur={() => {
+              setUnitPerFanTouched(true);
+              const parsed = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+              if (parsed !== null) {
+                setUnitPerFan(parsed);
+                setUnitPerFanInput(String(parsed));
+              }
+            }}
+            onUnitPerFanIncrement={() => adjustUnitPerFan(1)}
+            onUnitPerFanDecrement={() => adjustUnitPerFan(-1)}
+            onCapFanInputChange={(value) => setCapFanInput(value.replace(/[^0-9]/g, ''))}
+            onCapFanBlur={() => {
+              setCapFanTouched(true);
+              const parsed = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
+              if (parsed !== null) {
+                setCapFan(parsed);
+                setCapFanInput(String(parsed));
+              }
+            }}
+            onCapFanIncrement={() => adjustCapFan(1)}
+            onCapFanDecrement={() => adjustCapFan(-1)}
+            onSampleFanInputChange={(value) => {
+              const parsed = parseMinFan(value.replace(/[^0-9]/g, ''), SAMPLE_FAN_MIN, SAMPLE_FAN_MAX);
+              if (parsed !== null) {
+                setSampleFan(parsed);
+              }
+            }}
+            onSampleFanIncrement={() => adjustSampleFan(1)}
+            onSampleFanDecrement={() => adjustSampleFan(-1)}
+          />
         </View>
 
         <View
@@ -883,94 +645,37 @@ function NewGameStepperScreen({ navigation }: Props) {
             sectionY.current.players = event.nativeEvent.layout.y;
           }}
         >
-          <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('newGame.players')}</Text>
-
-          <Text style={styles.inputLabel}>{t('newGame.seatModeTitle')}</Text>
-          <SegmentedControl<SeatMode>
-            options={[
-              { value: 'manual', label: t('newGame.seatMode.manual') },
-              { value: 'auto', label: t('newGame.seatMode.auto') },
-            ]}
-            value={seatMode}
-            onChange={handleSeatModeChange}
+          <PlayersSection
+            seatMode={seatMode}
+            seatLabels={seatLabels}
+            players={players}
+            autoNames={autoNames}
+            autoAssigned={autoAssigned}
+            playersError={playersError}
             disabled={loading}
+            manualPlayerRefs={manualPlayerRefs}
+            autoPlayerRefs={autoPlayerRefs}
+            labels={{
+              sectionTitle: t('newGame.players'),
+              seatModeTitle: t('newGame.seatModeTitle'),
+              seatModeManual: t('newGame.seatMode.manual'),
+              seatModeAuto: t('newGame.seatMode.auto'),
+              playerManualHintPrefix: t('newGame.playerManualHintPrefix'),
+              playerManualHintSuffix: t('newGame.playerManualHintSuffix'),
+              playerAutoHintPrefix: t('newGame.playerAutoHintPrefix'),
+              playerAutoHintSuffix: t('newGame.playerAutoHintSuffix'),
+              playerNameBySeatSuffix: t('newGame.playerNameBySeatSuffix'),
+              playerOrderPrefix: t('newGame.playerOrderPrefix'),
+              playerOrderSuffix: t('newGame.playerOrderSuffix'),
+              autoSeatConfirm: t('newGame.autoSeatConfirm'),
+              autoSeatReshuffle: t('newGame.autoSeatReshuffle'),
+              autoSeatResult: t('newGame.autoSeatResult'),
+            }}
+            onSeatModeChange={handleSeatModeChange}
+            onSetPlayer={handleSetPlayer}
+            onSetAutoName={handleSetAutoName}
+            onConfirmAutoSeat={handleConfirmAutoSeat}
           />
-
-          {seatMode === 'manual' ? (
-            <View style={styles.playersList}>
-              <Text style={styles.helperText}>
-                {`${t('newGame.playerManualHintPrefix')}${PLAYER_COUNT}${t('newGame.playerManualHintSuffix')}`}
-              </Text>
-              {seatLabels.map((label, index) => (
-                <View key={label} style={styles.playerRowCard}>
-                  <View style={styles.seatChip}>
-                    <Text style={styles.seatChipText}>{label}</Text>
-                  </View>
-                  <TextInput
-                    ref={(ref) => {
-                      manualPlayerRefs.current[index] = ref;
-                    }}
-                    style={styles.playerInput}
-                    value={players[index]}
-                    onChangeText={(value) => handleSetPlayer(index, value)}
-                    placeholder={`${label}${t('newGame.playerNameBySeatSuffix')}`}
-                    placeholderTextColor={theme.colors.textSecondary}
-                    editable={!loading}
-                    returnKeyType={index === 3 ? 'done' : 'next'}
-                  />
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.playersList}>
-              <Text style={styles.helperText}>
-                {`${t('newGame.playerAutoHintPrefix')}${PLAYER_COUNT}${t('newGame.playerAutoHintSuffix')}`}
-              </Text>
-              {autoNames.map((value, index) => (
-                <View key={`auto-${index}`} style={styles.playerRowCard}>
-                  <View style={styles.seatChip}>
-                    <Text style={styles.seatChipText}>{index + 1}</Text>
-                  </View>
-                  <TextInput
-                    ref={(ref) => {
-                      autoPlayerRefs.current[index] = ref;
-                    }}
-                    style={styles.playerInput}
-                    value={value}
-                    onChangeText={(next) => handleSetAutoName(index, next)}
-                    placeholder={`${t('newGame.playerOrderPrefix')}${index + 1}${t('newGame.playerOrderSuffix')}`}
-                    placeholderTextColor={theme.colors.textSecondary}
-                    editable={!loading}
-                    returnKeyType={index === 3 ? 'done' : 'next'}
-                  />
-                </View>
-              ))}
-
-              <AppButton
-                label={autoAssigned ? t('newGame.autoSeatReshuffle') : t('newGame.autoSeatConfirm')}
-                onPress={confirmAutoSeat}
-                disabled={loading}
-                variant="secondary"
-              />
-
-              {autoAssigned ? (
-                <View style={styles.blockSpacing}>
-                  <Text style={styles.inputLabel}>{t('newGame.autoSeatResult')}</Text>
-                  {seatLabels.map((label, index) => (
-                    <View key={`result-${label}`} style={styles.playerRowCard}>
-                      <View style={styles.seatChip}>
-                        <Text style={styles.seatChipText}>{label}</Text>
-                      </View>
-                      <Text style={styles.resultText}>{autoAssigned[index]}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-            </View>
-          )}
-          {playersError ? <Text style={styles.inlineErrorText}>{playersError}</Text> : null}
-        </Card>
         </View>
 
         {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
@@ -985,209 +690,29 @@ function NewGameStepperScreen({ navigation }: Props) {
         disabled={loading || confirmBusy}
       />
 
-      <Modal
+      <CreateConfirmModal
         visible={confirmVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          if (!confirmBusy) {
-            setConfirmVisible(false);
-          }
+        busy={confirmBusy}
+        sections={confirmSections}
+        labels={{
+          title: t('newGame.confirmModal.title'),
+          subtitle: t('newGame.confirmModal.subtitle'),
+          sectionGame: t('newGame.confirmModal.section.game'),
+          sectionScoring: t('newGame.confirmModal.section.scoring'),
+          sectionPlayers: t('newGame.confirmModal.section.players'),
+          backToEdit: t('newGame.confirmModal.action.backToEdit'),
+          confirmCreate: t('newGame.confirmModal.action.confirmCreate'),
+          creating: t('newGame.creating'),
         }}
-      >
-        <View style={styles.modalOverlay}>
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => {
-              if (!confirmBusy) {
-                setConfirmVisible(false);
-              }
-            }}
-            disabled={confirmBusy}
-          />
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{t('newGame.confirmModal.title')}</Text>
-            <Text style={styles.modalSubtitle}>{t('newGame.confirmModal.subtitle')}</Text>
-            <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
-              {confirmSections ? (
-                <>
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>{t('newGame.confirmModal.section.game')}</Text>
-                    {confirmSections.game.map((field) => (
-                      <View key={`game-${field.label}`} style={styles.modalFieldRow}>
-                        <Text style={styles.modalFieldLabel}>{field.label}</Text>
-                        <Text style={styles.modalFieldValue}>{field.value}</Text>
-                      </View>
-                    ))}
-                  </View>
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>{t('newGame.confirmModal.section.scoring')}</Text>
-                    {confirmSections.scoring.map((field) => (
-                      <View key={`scoring-${field.label}`} style={styles.modalFieldRow}>
-                        <Text style={styles.modalFieldLabel}>{field.label}</Text>
-                        <Text style={styles.modalFieldValue}>{field.value}</Text>
-                      </View>
-                    ))}
-                  </View>
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>{t('newGame.confirmModal.section.players')}</Text>
-                    {confirmSections.players.map((field) => (
-                      <View key={`players-${field.label}`} style={styles.modalFieldRow}>
-                        <Text style={styles.modalFieldLabel}>{field.label}</Text>
-                        <Text style={styles.modalFieldValue}>{field.value}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </>
-              ) : null}
-            </ScrollView>
-            <View style={styles.modalActions}>
-              <AppButton
-                label={t('newGame.confirmModal.action.backToEdit')}
-                variant="secondary"
-                onPress={() => setConfirmVisible(false)}
-                disabled={confirmBusy}
-              />
-              <View style={styles.modalActionGap} />
-              <AppButton
-                label={confirmBusy ? t('newGame.creating') : t('newGame.confirmModal.action.confirmCreate')}
-                onPress={() => {
-                  handleConfirmCreate().catch((error) => {
-                    console.error('[NewGame] confirm create failed', error);
-                  });
-                }}
-                disabled={confirmBusy}
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setConfirmVisible(false)}
+        onConfirm={() => {
+          handleConfirmCreate().catch((error) => {
+            console.error('[NewGame] confirm create failed', error);
+          });
+        }}
+      />
     </KeyboardAvoidingView>
   );
-}
-
-function makeId(prefix: string) {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `${prefix}_${crypto.randomUUID()}`;
-  }
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function parseMinFan(input: string, min: number, max: number): number | null {
-  if (!/^\d+$/.test(input)) {
-    return null;
-  }
-  const parsed = Number(input);
-  if (!Number.isInteger(parsed)) {
-    return null;
-  }
-  if (parsed < min || parsed > max) {
-    return null;
-  }
-  return parsed;
-}
-
-function getMinFanError(input: string, min: number, max: number, message: string): string | null {
-  return parseMinFan(input, min, max) === null ? `${message} (${min}-${max})` : null;
-}
-
-function getStakePresetHintLines(
-  preset: HkStakePreset,
-  gunMode: HkGunMode,
-  minFan: number,
-  capFan: number | null,
-  currencySymbol: string,
-  t: (key: TranslationKey) => string,
-): string[] {
-  const fanText = String(minFan);
-  const capFanText = capFan === null ? t('newGame.capMode.none') : String(capFan);
-  const effectiveMinFan = Math.max(1, minFan);
-  const effectiveCapFan = capFan === null ? effectiveMinFan : Math.max(1, capFan);
-  const startMultiplier = 2 ** (effectiveMinFan - 1);
-  const capMultiplier = 2 ** (effectiveCapFan - 1);
-
-  const base = getStakeBase(preset, gunMode);
-  const startZimo = base.zimo * startMultiplier;
-  const startDiscard = base.discard * startMultiplier;
-  const startOthers = base.others !== null ? base.others * startMultiplier : null;
-  const capZimo = base.zimo * capMultiplier;
-  const capDiscard = base.discard * capMultiplier;
-  const capOthers = base.others !== null ? base.others * capMultiplier : null;
-
-  const fill = (template: string) =>
-    template
-      .replaceAll('{fan}', fanText)
-      .replaceAll('{capFan}', capFanText)
-      .replaceAll('{startZimo}', `${currencySymbol}${formatMoney(startZimo)}`)
-      .replaceAll('{startDiscard}', `${currencySymbol}${formatMoney(startDiscard)}`)
-      .replaceAll('{startOthers}', `${currencySymbol}${formatMoney(startOthers ?? 0)}`)
-      .replaceAll('{capZimo}', `${currencySymbol}${formatMoney(capZimo)}`)
-      .replaceAll('{capDiscard}', `${currencySymbol}${formatMoney(capDiscard)}`)
-      .replaceAll('{capOthers}', `${currencySymbol}${formatMoney(capOthers ?? 0)}`);
-
-  if (preset === 'TWO_FIVE_CHICKEN') {
-    const template =
-      gunMode === 'halfGun'
-        ? t('newGame.hkStakePreset.twoFiveChickenHalfHelp')
-        : t('newGame.hkStakePreset.twoFiveChickenFullHelp');
-    return splitHintLines(fill(template));
-  }
-  if (preset === 'FIVE_ONE') {
-    const template =
-      gunMode === 'halfGun'
-        ? t('newGame.hkStakePreset.fiveOneHalfHelp')
-        : t('newGame.hkStakePreset.fiveOneFullHelp');
-    return splitHintLines(fill(template));
-  }
-  const template =
-    gunMode === 'halfGun'
-      ? t('newGame.hkStakePreset.oneTwoHalfHelp')
-      : t('newGame.hkStakePreset.oneTwoFullHelp');
-  return splitHintLines(fill(template));
-}
-
-function splitHintLines(hint: string): string[] {
-  const parts = hint
-    .split('|')
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return parts.length > 0 ? parts : [hint];
-}
-
-function getStakeBase(
-  preset: HkStakePreset,
-  gunMode: HkGunMode,
-): { zimo: number; discard: number; others: number | null } {
-  if (preset === 'TWO_FIVE_CHICKEN') {
-    return gunMode === 'halfGun'
-      ? { zimo: 1, discard: 1, others: 0.5 }
-      : { zimo: 1, discard: 2, others: null };
-  }
-  if (preset === 'FIVE_ONE') {
-    return gunMode === 'halfGun'
-      ? { zimo: 2, discard: 2, others: 1 }
-      : { zimo: 2, discard: 4, others: null };
-  }
-  return gunMode === 'halfGun'
-    ? { zimo: 4, discard: 4, others: 2 }
-    : { zimo: 4, discard: 8, others: null };
-}
-
-function formatMoney(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, '');
-}
-
-function shuffle(values: string[]): string[] {
-  const next = [...values];
-  for (let i = next.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [next[i], next[j]] = [next[j], next[i]];
-  }
-  return next;
 }
 
 const styles = StyleSheet.create({
@@ -1208,84 +733,6 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     marginBottom: GRID.x2,
   },
-  card: {
-    marginBottom: GRID.x2,
-    padding: GRID.x2,
-  },
-  sectionTitle: {
-    fontSize: theme.fontSize.md,
-    fontWeight: '600',
-    color: theme.colors.textPrimary,
-    marginBottom: GRID.x1_5,
-  },
-  blockSpacing: {
-    marginTop: GRID.x1_5,
-  },
-  inputLabel: {
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.textSecondary,
-    marginBottom: GRID.x1,
-  },
-  helperText: {
-    marginTop: GRID.x1,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.textSecondary,
-    lineHeight: 22,
-  },
-  helperTextSubLine: {
-    marginTop: 6,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.textSecondary,
-    lineHeight: 22,
-  },
-  inlineErrorText: {
-    marginTop: GRID.x1,
-    color: theme.colors.danger,
-    fontSize: theme.fontSize.sm,
-  },
-  playersList: {
-    marginTop: GRID.x1,
-  },
-  playerRowCard: {
-    minHeight: 56,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: GRID.x1_5,
-    marginBottom: GRID.x1_5,
-  },
-  seatChip: {
-    minWidth: 40,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#E6F5F5',
-    borderWidth: 1,
-    borderColor: theme.colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: GRID.x1_5,
-  },
-  seatChipText: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: theme.colors.primary,
-  },
-  playerInput: {
-    flex: 1,
-    minHeight: 44,
-    fontSize: theme.fontSize.md,
-    color: theme.colors.textPrimary,
-    paddingVertical: 0,
-  },
-  resultText: {
-    flex: 1,
-    fontSize: theme.fontSize.md,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-  },
   errorText: {
     marginTop: GRID.x1,
     marginBottom: GRID.x2,
@@ -1294,67 +741,6 @@ const styles = StyleSheet.create({
   },
   debugSpacer: {
     height: 800,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-    justifyContent: 'center',
-    paddingHorizontal: GRID.x2,
-    paddingVertical: GRID.x3,
-  },
-  modalCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.lg,
-    padding: GRID.x2,
-    maxHeight: '80%',
-  },
-  modalTitle: {
-    fontSize: theme.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-  },
-  modalSubtitle: {
-    marginTop: GRID.x1,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.textSecondary,
-  },
-  modalScroll: {
-    marginTop: GRID.x2,
-    maxHeight: 380,
-  },
-  modalScrollContent: {
-    paddingBottom: GRID.x1,
-  },
-  modalSection: {
-    marginBottom: GRID.x2,
-  },
-  modalSectionTitle: {
-    fontSize: theme.fontSize.md,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-    marginBottom: GRID.x1,
-  },
-  modalFieldRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: GRID.x1,
-  },
-  modalFieldLabel: {
-    width: 112,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.textSecondary,
-  },
-  modalFieldValue: {
-    flex: 1,
-    fontSize: theme.fontSize.sm,
-    color: theme.colors.textPrimary,
-    lineHeight: 20,
-  },
-  modalActions: {
-    marginTop: GRID.x1_5,
-  },
-  modalActionGap: {
-    height: GRID.x1,
   },
 });
 

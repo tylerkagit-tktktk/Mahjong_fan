@@ -13,6 +13,7 @@ import BottomActionBar from '../components/BottomActionBar';
 import TextField from '../components/TextField';
 import Card from '../components/Card';
 import SegmentedControl from '../components/SegmentedControl';
+import PillGroup from '../components/PillGroup';
 import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { getGameBundle, insertHand } from '../db/repo';
@@ -113,18 +114,12 @@ function AddHandScreen({ navigation, route }: Props) {
     [t],
   );
   const winnerOptions = useMemo(
-    () => [{ value: '__none__', label: t('addHand.none') }, ...(bundle?.players ?? []).map((player) => ({
-      value: player.id,
-      label: player.name,
-    }))],
-    [bundle?.players, t],
+    () => (bundle?.players ?? []).map((player) => ({ key: player.id, label: player.name })),
+    [bundle?.players],
   );
   const discarderOptions = useMemo(
-    () => [{ value: '__none__', label: t('addHand.none') }, ...(bundle?.players ?? []).map((player) => ({
-      value: player.id,
-      label: player.name,
-    }))],
-    [bundle?.players, t],
+    () => (bundle?.players ?? []).map((player) => ({ key: player.id, label: player.name })),
+    [bundle?.players],
   );
 
   const loadBundle = useCallback(async () => {
@@ -286,23 +281,6 @@ function AddHandScreen({ navigation, route }: Props) {
     }
   };
 
-  const renderSegmentedRows = <T extends string>(
-    options: Array<{ value: T; label: string }>,
-    value: T,
-    onChange: (next: T) => void,
-    columns = 3,
-  ) =>
-    chunkOptions(options, columns).map((row, index) => (
-      <SegmentedControl<T>
-        key={`row-${index}-${row.map((option) => option.value).join('-')}`}
-        options={row}
-        value={value}
-        onChange={onChange}
-        disabled={saving}
-        style={index > 0 ? styles.segmentedRowSpacing : undefined}
-      />
-    ));
-
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -401,11 +379,13 @@ function AddHandScreen({ navigation, route }: Props) {
               </>
             ) : null}
             <Text style={styles.sectionTitle}>{t('addHand.winner')}</Text>
-            {renderSegmentedRows(
-              winnerOptions,
-              winnerId ?? '__none__',
-              (next) => setWinnerId(next === '__none__' ? null : next),
-            )}
+            <PillGroup
+              options={winnerOptions}
+              valueKey={winnerId}
+              onChange={setWinnerId}
+              disabled={saving}
+              noneLabel={t('addHand.none')}
+            />
             {showWinnerInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
           </Card>
         ) : null}
@@ -413,11 +393,13 @@ function AddHandScreen({ navigation, route }: Props) {
         {!isPma && (!isHkCustom || settlementType === 'discard') ? (
           <Card style={styles.card}>
             <Text style={styles.sectionTitle}>{t('addHand.discarder')}</Text>
-            {renderSegmentedRows(
-              discarderOptions,
-              discarderId ?? '__none__',
-              (next) => setDiscarderId(next === '__none__' ? null : next),
-            )}
+            <PillGroup
+              options={discarderOptions}
+              valueKey={discarderId}
+              onChange={setDiscarderId}
+              disabled={saving}
+              noneLabel={t('addHand.none')}
+            />
             {showDiscarderInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
           </Card>
         ) : null}
@@ -455,14 +437,6 @@ function normalizeVariant(value: string): Variant {
     return 'TW';
   }
   return 'HK';
-}
-
-function chunkOptions<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    chunks.push(items.slice(i, i + size));
-  }
-  return chunks;
 }
 
 const styles = StyleSheet.create({
@@ -503,9 +477,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: theme.colors.textPrimary,
     marginBottom: GRID.x1_5,
-  },
-  segmentedRowSpacing: {
-    marginTop: GRID.x1,
   },
   helperText: {
     marginTop: GRID.x1,

@@ -1,6 +1,6 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
 import BottomActionBar from '../components/BottomActionBar';
@@ -28,6 +28,18 @@ import theme from '../theme/theme';
 type Props = NativeStackScreenProps<RootStackParamList, 'NewGameStepper'>;
 type SeatMode = 'manual' | 'auto';
 type CapMode = 'none' | 'fanCap';
+type PreparedCreateContext = {
+  gameId: string;
+  trimmedTitle: string;
+  resolvedPlayers: string[];
+  playerInputs: Array<{
+    id: string;
+    gameId: string;
+    name: string;
+    seatIndex: number;
+  }>;
+  rules: RulesV1;
+};
 
 const PLAYER_COUNT = 4;
 
@@ -140,11 +152,11 @@ function NewGameStepperScreen({ navigation }: Props) {
     setPlayersError(null);
   };
 
-  const handleCreate = async () => {
+  const prepareCreateContext = (): PreparedCreateContext | null => {
     setFormError(null);
     setSubmitAttempted(true);
     if (loading) {
-      return;
+      return null;
     }
 
     const trimmedTitle = title.trim();
@@ -159,7 +171,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     if (showMinFan) {
       const parsedMinFan = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
       if (parsedMinFan === null) {
-        return;
+        return null;
       }
       resolvedMinFan = parsedMinFan;
       setMinFanToWin(parsedMinFan);
@@ -169,7 +181,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     if (mode === 'HK' && hkScoringPreset === 'customTable') {
       const validatedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
       if (validatedUnitPerFan === null) {
-        return;
+        return null;
       }
       resolvedUnitPerFan = validatedUnitPerFan;
       setUnitPerFan(validatedUnitPerFan);
@@ -217,7 +229,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     setTitleError(nextTitleError);
     setPlayersError(nextPlayersError);
     if (nextTitleError || nextPlayersError) {
-      return;
+      return null;
     }
 
     const gameId = makeId('game');
@@ -242,7 +254,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       if (capFanEnabled) {
         const validatedCapFan = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
         if (validatedCapFan === null) {
-          return;
+          return null;
         }
         parsedCapFan = validatedCapFan;
         setCapFan(validatedCapFan);
@@ -269,27 +281,131 @@ function NewGameStepperScreen({ navigation }: Props) {
       rules.pma = { pricingMode: 'directAmount' };
     }
 
+    return {
+      gameId,
+      trimmedTitle,
+      resolvedPlayers,
+      playerInputs,
+      rules,
+    };
+  };
+
+  const executeCreateGame = async (context: PreparedCreateContext) => {
     try {
       setLoading(true);
       await createGameWithPlayers(
         {
-          id: gameId,
-          title: trimmedTitle,
+          id: context.gameId,
+          title: context.trimmedTitle,
           createdAt: Date.now(),
-          currencySymbol: rules.currencySymbol,
-          variant: rules.variant,
-          rulesJson: serializeRules(rules),
+          currencySymbol: context.rules.currencySymbol,
+          variant: context.rules.variant,
+          rulesJson: serializeRules(context.rules),
           languageOverride: null,
         },
-        playerInputs,
+        context.playerInputs,
       );
-      navigation.replace('GameDashboard', { gameId });
+      navigation.replace('GameDashboard', { gameId: context.gameId });
     } catch (err) {
       console.error('[DB] createGame failed', err);
       setFormError(t('errors.createGame'));
     } finally {
       setLoading(false);
     }
+  };
+
+  const buildConfirmMessage = (context: PreparedCreateContext): string => {
+    const lines: string[] = [];
+    const modeLabel =
+      context.rules.mode === 'HK'
+        ? t('newGame.mode.hk')
+        : context.rules.mode === 'TW'
+        ? t('newGame.mode.tw')
+        : t('newGame.mode.pma');
+
+    lines.push(`${t('newGame.confirm.gameTitle')}: ${context.trimmedTitle}`);
+    lines.push(`${t('newGame.confirm.players')}: ${context.resolvedPlayers.join(' / ')}`);
+    lines.push(`${t('newGame.confirm.mode')}: ${modeLabel}`);
+    lines.push(
+      `${t('newGame.confirm.currency')}: ${formatCurrencyUnit(context.rules.currencyCode)}`,
+    );
+
+    if (context.rules.mode === 'HK' && context.rules.hk) {
+      lines.push(
+        `${t('newGame.confirm.hkScoring')}: ${
+          context.rules.hk.scoringPreset === 'customTable'
+            ? t('newGame.hkPreset.custom')
+            : t('newGame.hkPreset.traditional')
+        }`,
+      );
+      lines.push(
+        `${t('newGame.confirm.hkGunMode')}: ${
+          context.rules.hk.gunMode === 'halfGun'
+            ? t('newGame.hkGunMode.half')
+            : t('newGame.hkGunMode.full')
+        }`,
+      );
+      lines.push(
+        `${t('newGame.confirm.hkStakePreset')}: ${
+          context.rules.hk.stakePreset === 'TWO_FIVE_CHICKEN'
+            ? t('newGame.hkStakePreset.twoFiveChicken')
+            : context.rules.hk.stakePreset === 'FIVE_ONE'
+            ? t('newGame.hkStakePreset.fiveOne')
+            : t('newGame.hkStakePreset.oneTwo')
+        }`,
+      );
+      lines.push(
+        `${t('newGame.confirm.cap')}: ${
+          context.rules.hk.capFan === null
+            ? t('newGame.capMode.none')
+            : `${t('newGame.capMode.fanCap')} ${context.rules.hk.capFan}`
+        }`,
+      );
+      if (context.rules.hk.scoringPreset === 'customTable') {
+        lines.push(
+          `${t('newGame.confirm.unitPerFan')}: ${context.rules.hk.unitPerFan ?? 1}`,
+        );
+      } else {
+        lines.push(
+          `${t('newGame.confirm.minFan')}: ${context.rules.minFanToWin ?? minFanToWin}`,
+        );
+      }
+    }
+
+    if (context.rules.mode === 'TW') {
+      lines.push(`${t('newGame.confirm.twMinFan')}: ${context.rules.minFanToWin ?? minFanToWin}`);
+    }
+
+    if (context.rules.mode === 'PMA') {
+      lines.push(`${t('newGame.confirm.pma')}: ${t('newGame.pmaDescription')}`);
+    }
+
+    return lines.join('\n');
+  };
+
+  const handleCreate = () => {
+    const context = prepareCreateContext();
+    if (!context) {
+      return;
+    }
+
+    Alert.alert(t('newGame.confirm.title'), buildConfirmMessage(context), [
+      {
+        text: t('newGame.confirm.cancel'),
+        style: 'cancel',
+      },
+      {
+        text: t('newGame.confirm.confirm'),
+        onPress: () => {
+          if (loading) {
+            return;
+          }
+          executeCreateGame(context).catch((error) => {
+            console.error('[NewGame] create after confirm failed', error);
+          });
+        },
+      },
+    ]);
   };
 
   const adjustMinFan = (delta: number) => {

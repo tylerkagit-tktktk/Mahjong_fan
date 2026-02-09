@@ -5,6 +5,8 @@ export type TranslationKey =
   | 'common.comingSoon'
   | 'home.title'
   | 'home.subtitle'
+  | 'home.brandTitle'
+  | 'home.tagline'
   | 'home.newGame'
   | 'home.settings'
   | 'home.history'

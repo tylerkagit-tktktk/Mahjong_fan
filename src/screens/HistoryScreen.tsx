@@ -1,16 +1,20 @@
+import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Card from '../components/Card';
-import theme from '../theme/theme';
-import { RootStackParamList } from '../navigation/types';
 import { listGames } from '../db/repo';
-import { Game } from '../models/db';
 import { useAppLanguage } from '../i18n/useAppLanguage';
+import { Game } from '../models/db';
+import { RootStackParamList, RootTabParamList } from '../navigation/types';
+import theme from '../theme/theme';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'History'>;
+type Props = CompositeScreenProps<
+  BottomTabScreenProps<RootTabParamList, 'History'>,
+  NativeStackScreenProps<RootStackParamList>
+>;
 
 function HistoryScreen({ navigation }: Props) {
   const [games, setGames] = useState<Game[]>([]);
@@ -53,9 +57,7 @@ function HistoryScreen({ navigation }: Props) {
                   ]}
                 >
                   <Text style={styles.historyTitle}>{game.title}</Text>
-                  <Text style={styles.historyDate}>
-                    {new Date(game.createdAt).toLocaleDateString()}
-                  </Text>
+                  <Text style={styles.historyDate}>{new Date(game.createdAt).toLocaleDateString()}</Text>
                 </Pressable>
               ))}
             </View>

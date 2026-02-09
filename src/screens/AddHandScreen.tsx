@@ -1,20 +1,18 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useMemo, useState } from 'react';
-import type { StyleProp, ViewStyle } from 'react-native';
 import {
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AppButton from '../components/AppButton';
+import BottomActionBar from '../components/BottomActionBar';
 import TextField from '../components/TextField';
 import Card from '../components/Card';
+import SegmentedControl from '../components/SegmentedControl';
 import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { getGameBundle, insertHand } from '../db/repo';
@@ -41,12 +39,10 @@ const GRID = {
   x2: 16,
   x3: 24,
 } as const;
-const HIT_SLOP = { top: GRID.x1, right: GRID.x1, bottom: GRID.x1, left: GRID.x1 } as const;
 
 function AddHandScreen({ navigation, route }: Props) {
   const { gameId } = route.params;
   const { t } = useAppLanguage();
-  const insets = useSafeAreaInsets();
 
   const [bundle, setBundle] = useState<GameBundle | null>(null);
   const [hkScoringPreset, setHkScoringPreset] = useState<'traditionalFan' | 'customTable'>(
@@ -101,6 +97,35 @@ function AddHandScreen({ navigation, route }: Props) {
     liveBaseAmount !== null ? (hkGunMode === 'fullGun' ? liveBaseAmount * 4 : liveBaseAmount * 2) : null;
   const liveOthersPay =
     liveBaseAmount !== null && hkGunMode === 'halfGun' ? liveBaseAmount : null;
+  const handTypeOptions = useMemo(
+    () =>
+      (['normal', 'draw', 'bonus'] as const).map((type) => ({
+        value: type,
+        label: t(`addHand.type.${type}`),
+      })),
+    [t],
+  );
+  const settlementOptions = useMemo(
+    () => [
+      { value: 'zimo' as const, label: t('addHand.settlementType.zimo') },
+      { value: 'discard' as const, label: t('addHand.settlementType.discard') },
+    ],
+    [t],
+  );
+  const winnerOptions = useMemo(
+    () => [{ value: '__none__', label: t('addHand.none') }, ...(bundle?.players ?? []).map((player) => ({
+      value: player.id,
+      label: player.name,
+    }))],
+    [bundle?.players, t],
+  );
+  const discarderOptions = useMemo(
+    () => [{ value: '__none__', label: t('addHand.none') }, ...(bundle?.players ?? []).map((player) => ({
+      value: player.id,
+      label: player.name,
+    }))],
+    [bundle?.players, t],
+  );
 
   const loadBundle = useCallback(async () => {
     try {
@@ -261,6 +286,23 @@ function AddHandScreen({ navigation, route }: Props) {
     }
   };
 
+  const renderSegmentedRows = <T extends string>(
+    options: Array<{ value: T; label: string }>,
+    value: T,
+    onChange: (next: T) => void,
+    columns = 3,
+  ) =>
+    chunkOptions(options, columns).map((row, index) => (
+      <SegmentedControl<T>
+        key={`row-${index}-${row.map((option) => option.value).join('-')}`}
+        options={row}
+        value={value}
+        onChange={onChange}
+        disabled={saving}
+        style={index > 0 ? styles.segmentedRowSpacing : undefined}
+      />
+    ));
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -284,31 +326,12 @@ function AddHandScreen({ navigation, route }: Props) {
         {!isPma && !isHkCustom ? (
           <Card style={styles.card}>
             <Text style={styles.sectionTitle}>{t('addHand.type')}</Text>
-            <View style={styles.segmentedRow}>
-              {(['normal', 'draw', 'bonus'] as const).map((type, index, list) => {
-                const selected = handType === type;
-                const isLast = index === list.length - 1;
-                return (
-                  <Pressable
-                    key={type}
-                    style={[
-                      styles.segmentedButton,
-                      !isLast && styles.segmentedButtonSpacing,
-                      selected && styles.segmentedButtonActive,
-                    ]}
-                    onPress={() => setHandType(type)}
-                    disabled={saving}
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: saving, selected }}
-                    hitSlop={HIT_SLOP}
-                  >
-                    <Text style={[styles.segmentedText, selected && styles.segmentedTextActive]}>
-                      {t(`addHand.type.${type}`)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <SegmentedControl
+              options={handTypeOptions}
+              value={handType}
+              onChange={setHandType}
+              disabled={saving}
+            />
           </Card>
         ) : null}
 
@@ -364,66 +387,25 @@ function AddHandScreen({ navigation, route }: Props) {
             {isHkCustom ? (
               <>
                 <Text style={styles.sectionTitle}>{t('addHand.settlementType')}</Text>
-                <View style={styles.segmentedRow}>
-                  <Pressable
-                    style={[
-                      styles.segmentedButton,
-                      styles.segmentedButtonSpacing,
-                      settlementType === 'zimo' && styles.segmentedButtonActive,
-                    ]}
-                    onPress={() => {
-                      setSettlementType('zimo');
+                <SegmentedControl
+                  options={settlementOptions}
+                  value={settlementType}
+                  onChange={(next) => {
+                    setSettlementType(next);
+                    if (next === 'zimo') {
                       setDiscarderId(null);
-                    }}
-                    disabled={saving}
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: saving, selected: settlementType === 'zimo' }}
-                    hitSlop={HIT_SLOP}
-                  >
-                    <Text style={[styles.segmentedText, settlementType === 'zimo' && styles.segmentedTextActive]}>
-                      {t('addHand.settlementType.zimo')}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.segmentedButton, settlementType === 'discard' && styles.segmentedButtonActive]}
-                    onPress={() => setSettlementType('discard')}
-                    disabled={saving}
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: saving, selected: settlementType === 'discard' }}
-                    hitSlop={HIT_SLOP}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentedText,
-                        settlementType === 'discard' && styles.segmentedTextActive,
-                      ]}
-                    >
-                      {t('addHand.settlementType.discard')}
-                    </Text>
-                  </Pressable>
-                </View>
+                    }
+                  }}
+                  disabled={saving}
+                />
               </>
             ) : null}
             <Text style={styles.sectionTitle}>{t('addHand.winner')}</Text>
-            <View style={styles.pillWrap}>
-              <ChoicePill
-                label={t('addHand.none')}
-                selected={winnerId === null}
-                onPress={() => setWinnerId(null)}
-                disabled={saving}
-                style={styles.choicePillSpacing}
-              />
-              {bundle?.players.map((player) => (
-                <ChoicePill
-                  key={player.id}
-                  label={player.name}
-                  selected={winnerId === player.id}
-                  onPress={() => setWinnerId(player.id)}
-                  disabled={saving}
-                  style={styles.choicePillSpacing}
-                />
-              ))}
-            </View>
+            {renderSegmentedRows(
+              winnerOptions,
+              winnerId ?? '__none__',
+              (next) => setWinnerId(next === '__none__' ? null : next),
+            )}
             {showWinnerInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
           </Card>
         ) : null}
@@ -431,25 +413,11 @@ function AddHandScreen({ navigation, route }: Props) {
         {!isPma && (!isHkCustom || settlementType === 'discard') ? (
           <Card style={styles.card}>
             <Text style={styles.sectionTitle}>{t('addHand.discarder')}</Text>
-            <View style={styles.pillWrap}>
-              <ChoicePill
-                label={t('addHand.none')}
-                selected={discarderId === null}
-                onPress={() => setDiscarderId(null)}
-                disabled={saving}
-                style={styles.choicePillSpacing}
-              />
-              {bundle?.players.map((player) => (
-                <ChoicePill
-                  key={player.id}
-                  label={player.name}
-                  selected={discarderId === player.id}
-                  onPress={() => setDiscarderId(player.id)}
-                  disabled={saving}
-                  style={styles.choicePillSpacing}
-                />
-              ))}
-            </View>
+            {renderSegmentedRows(
+              discarderOptions,
+              discarderId ?? '__none__',
+              (next) => setDiscarderId(next === '__none__' ? null : next),
+            )}
             {showDiscarderInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
           </Card>
         ) : null}
@@ -457,40 +425,18 @@ function AddHandScreen({ navigation, route }: Props) {
         {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
       </ScrollView>
 
-      <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, GRID.x2) }]}> 
-        <AppButton label={t('addHand.save')} onPress={handleSave} disabled={saving} />
-        <AppButton
-          label={t('common.back')}
-          onPress={() => navigation.goBack()}
-          disabled={saving}
-          variant="secondary"
-          style={styles.secondaryAction}
-        />
-      </View>
+      <BottomActionBar
+        primaryLabel={t('addHand.save')}
+        onPrimaryPress={() => {
+          handleSave().catch((err) => {
+            console.error('[AddHand] save press failed', err);
+          });
+        }}
+        secondaryLabel={t('common.back')}
+        onSecondaryPress={() => navigation.goBack()}
+        disabled={saving}
+      />
     </KeyboardAvoidingView>
-  );
-}
-
-type ChoicePillProps = {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  disabled?: boolean;
-  style?: StyleProp<ViewStyle>;
-};
-
-function ChoicePill({ label, selected, onPress, disabled, style }: ChoicePillProps) {
-  return (
-    <Pressable
-      style={[styles.choicePill, selected && styles.choicePillActive, style]}
-      onPress={onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: Boolean(disabled), selected }}
-      hitSlop={HIT_SLOP}
-    >
-      <Text style={[styles.choicePillText, selected && styles.choicePillTextActive]}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -509,6 +455,14 @@ function normalizeVariant(value: string): Variant {
     return 'TW';
   }
   return 'HK';
+}
+
+function chunkOptions<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
 }
 
 const styles = StyleSheet.create({
@@ -550,35 +504,8 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     marginBottom: GRID.x1_5,
   },
-  segmentedRow: {
-    flexDirection: 'row',
-  },
-  segmentedButton: {
-    flex: 1,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: GRID.x1,
-  },
-  segmentedButtonSpacing: {
-    marginRight: GRID.x1,
-  },
-  segmentedButtonActive: {
-    borderColor: theme.colors.primary,
-    backgroundColor: '#E6F5F5',
-  },
-  segmentedText: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: '500',
-    color: theme.colors.textPrimary,
-  },
-  segmentedTextActive: {
-    color: theme.colors.primary,
-    fontWeight: '700',
+  segmentedRowSpacing: {
+    marginTop: GRID.x1,
   },
   helperText: {
     marginTop: GRID.x1,
@@ -589,48 +516,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
-  },
-  pillWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  choicePillSpacing: {
-    marginRight: GRID.x1,
-    marginBottom: GRID.x1,
-  },
-  choicePill: {
-    minWidth: 64,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: GRID.x1_5,
-  },
-  choicePillActive: {
-    borderColor: theme.colors.primary,
-    backgroundColor: '#E6F5F5',
-  },
-  choicePillText: {
-    color: theme.colors.textPrimary,
-    fontSize: theme.fontSize.md,
-    fontWeight: '500',
-  },
-  choicePillTextActive: {
-    color: theme.colors.primary,
-    fontWeight: '700',
-  },
-  actionBar: {
-    paddingHorizontal: GRID.x2,
-    paddingTop: GRID.x1_5,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-    backgroundColor: theme.colors.background,
-  },
-  secondaryAction: {
-    marginTop: GRID.x1_5,
   },
   debugSpacer: {
     height: 800,

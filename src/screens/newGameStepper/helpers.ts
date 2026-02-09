@@ -120,3 +120,11 @@ export function shuffle(values: string[]): string[] {
   }
   return next;
 }
+
+export function rotatePlayersToEast(values: string[], eastIndex: number): string[] {
+  if (values.length === 0) {
+    return values;
+  }
+  const offset = ((eastIndex % values.length) + values.length) % values.length;
+  return values.slice(offset).concat(values.slice(0, offset));
+}

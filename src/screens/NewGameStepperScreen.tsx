@@ -23,14 +23,14 @@ import {
   UNIT_PER_FAN_MAX,
   UNIT_PER_FAN_MIN,
 } from './newGameStepper/constants';
-import { clamp, getMinFanError, getStakePresetHintLines, makeId, parseMinFan, shuffle } from './newGameStepper/helpers';
+import { clamp, getMinFanError, getStakePresetHintLines, makeId, parseMinFan, rotatePlayersToEast, shuffle } from './newGameStepper/helpers';
 import CreateConfirmModal from './newGameStepper/sections/CreateConfirmModal';
 import CurrencySection from './newGameStepper/sections/CurrencySection';
 import GameTitleSection from './newGameStepper/sections/GameTitleSection';
 import ModeSection from './newGameStepper/sections/ModeSection';
 import PlayersSection from './newGameStepper/sections/PlayersSection';
 import ScoringSection from './newGameStepper/sections/ScoringSection';
-import { ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateContext, SeatMode } from './newGameStepper/types';
+import { ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateContext, SeatMode, StartingDealerMode } from './newGameStepper/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewGameStepper'>;
 
@@ -60,6 +60,8 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [players, setPlayers] = useState(['', '', '', '']);
   const [autoNames, setAutoNames] = useState(['', '', '', '']);
   const [autoAssigned, setAutoAssigned] = useState<string[] | null>(null);
+  const [startingDealerMode, setStartingDealerMode] = useState<StartingDealerMode>('random');
+  const [startingDealerSourceIndex, setStartingDealerSourceIndex] = useState<number | null>(null);
   const [titleError, setTitleError] = useState<string | null>(null);
   const [playersError, setPlayersError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -116,6 +118,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       return next;
     });
     setPlayersError(null);
+    setStartingDealerSourceIndex(null);
   };
 
   const handleSetAutoName = (index: number, value: string) => {
@@ -126,12 +129,14 @@ function NewGameStepperScreen({ navigation }: Props) {
     });
     setAutoAssigned(null);
     setPlayersError(null);
+    setStartingDealerSourceIndex(null);
   };
 
   const handleSeatModeChange = (nextMode: SeatMode) => {
     setSeatMode(nextMode);
     setPlayersError(null);
     setSubmitAttempted(false);
+    setStartingDealerSourceIndex(null);
   };
 
   const handleConfirmAutoSeat = () => {
@@ -140,7 +145,24 @@ function NewGameStepperScreen({ navigation }: Props) {
       setPlayersError(t('newGame.autoSeatRequired'));
       return;
     }
-    setAutoAssigned(shuffle(trimmed));
+    const shuffled = shuffle(trimmed);
+    setAutoAssigned(shuffled);
+    setPlayersError(null);
+    if (startingDealerMode === 'random') {
+      setStartingDealerSourceIndex(Math.floor(Math.random() * PLAYER_COUNT));
+    } else {
+      setStartingDealerSourceIndex(null);
+    }
+  };
+
+  const handleStartingDealerModeChange = (nextMode: StartingDealerMode) => {
+    setStartingDealerMode(nextMode);
+    setStartingDealerSourceIndex(null);
+    setPlayersError(null);
+  };
+
+  const handleSelectStartingDealer = (index: number) => {
+    setStartingDealerSourceIndex(index);
     setPlayersError(null);
   };
 
@@ -173,6 +195,10 @@ function NewGameStepperScreen({ navigation }: Props) {
           autoPlayerRefs.current[0]?.focus();
         }
       }, 120);
+      return;
+    }
+    if (target.kind === 'startingDealer') {
+      scrollToY(sectionY.current.players);
       return;
     }
     if (target.kind === 'minFan') {
@@ -233,8 +259,10 @@ function NewGameStepperScreen({ navigation }: Props) {
     }
 
     let resolvedPlayers = [...players];
+    let basePlayers = [...players];
     if (seatMode === 'manual') {
       resolvedPlayers = resolvedPlayers.map((name) => name.trim());
+      basePlayers = [...resolvedPlayers];
       const missingIndexes = resolvedPlayers.map((name, index) => (name.length === 0 ? index : -1)).filter((index) => index >= 0);
       if (missingIndexes.length > 0) {
         if (missingIndexes.length === PLAYER_COUNT) {
@@ -273,7 +301,27 @@ function NewGameStepperScreen({ navigation }: Props) {
         }
       } else {
         resolvedPlayers = [...autoAssigned];
+        basePlayers = [...resolvedPlayers];
       }
+    }
+
+    let selectedStartingDealerIndex = seatMode === 'manual' ? 0 : startingDealerSourceIndex;
+    if (seatMode === 'auto') {
+      if (
+        selectedStartingDealerIndex === null ||
+        selectedStartingDealerIndex < 0 ||
+        selectedStartingDealerIndex >= PLAYER_COUNT
+      ) {
+        nextPlayersError =
+          startingDealerMode === 'manual' ? t('newGame.startingDealerPickRequired') : t('newGame.startingDealerRequired');
+        if (!invalidTarget) {
+          invalidTarget = { kind: 'startingDealer' };
+        }
+      } else {
+        resolvedPlayers = rotatePlayersToEast(basePlayers, selectedStartingDealerIndex);
+      }
+    } else {
+      resolvedPlayers = [...basePlayers];
     }
 
     setTitleError(nextTitleError);
@@ -335,7 +383,14 @@ function NewGameStepperScreen({ navigation }: Props) {
       rules.pma = { pricingMode: 'directAmount' };
     }
 
-    return { gameId, trimmedTitle, resolvedPlayers, playerInputs, rules };
+    return {
+      gameId,
+      trimmedTitle,
+      resolvedPlayers,
+      startingDealerSourceIndex: selectedStartingDealerIndex as number,
+      playerInputs,
+      rules,
+    };
   };
 
   const executeCreateGame = async (context: PreparedCreateContext): Promise<boolean> => {
@@ -349,6 +404,7 @@ function NewGameStepperScreen({ navigation }: Props) {
           currencySymbol: context.rules.currencySymbol,
           variant: context.rules.variant,
           rulesJson: serializeRules(context.rules),
+          startingDealerSeatIndex: 0,
           languageOverride: null,
         },
         context.playerInputs,
@@ -419,6 +475,10 @@ function NewGameStepperScreen({ navigation }: Props) {
       'newGame.confirmModal.field.playersNorth',
     ];
     const playerFields: ConfirmField[] = context.resolvedPlayers.map((player, index) => ({ label: t(playerLabels[index]), value: player }));
+    playerFields[0] = {
+      label: `${t(playerLabels[0])} (${t('newGame.dealerBadge')})`,
+      value: context.resolvedPlayers[0],
+    };
 
     return { game: gameFields, scoring: scoringFields, players: playerFields };
   };
@@ -485,8 +545,6 @@ function NewGameStepperScreen({ navigation }: Props) {
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
-        <Text style={styles.pageTitle}>{t('newGame.title')}</Text>
-
         <View
           onLayout={(event) => {
             sectionY.current.title = event.nativeEvent.layout.y;
@@ -651,6 +709,8 @@ function NewGameStepperScreen({ navigation }: Props) {
             players={players}
             autoNames={autoNames}
             autoAssigned={autoAssigned}
+            startingDealerMode={startingDealerMode}
+            startingDealerSourceIndex={startingDealerSourceIndex}
             playersError={playersError}
             disabled={loading}
             manualPlayerRefs={manualPlayerRefs}
@@ -670,11 +730,20 @@ function NewGameStepperScreen({ navigation }: Props) {
               autoSeatConfirm: t('newGame.autoSeatConfirm'),
               autoSeatReshuffle: t('newGame.autoSeatReshuffle'),
               autoSeatResult: t('newGame.autoSeatResult'),
+              autoSeatResultManualTitle: t('newGame.autoSeatResultManualTitle'),
+              autoSeatResultHint: t('newGame.autoSeatResultHint'),
+              manualSeatCaption: t('newGame.manualSeatCaption'),
+              startingDealerModeRandom: t('newGame.startingDealerMode.random'),
+              startingDealerModeManual: t('newGame.startingDealerMode.manual'),
+              autoFlowHint: t('newGame.autoFlowHint'),
+              dealerBadge: t('newGame.dealerBadge'),
             }}
             onSeatModeChange={handleSeatModeChange}
             onSetPlayer={handleSetPlayer}
             onSetAutoName={handleSetAutoName}
             onConfirmAutoSeat={handleConfirmAutoSeat}
+            onStartingDealerModeChange={handleStartingDealerModeChange}
+            onSelectStartingDealer={handleSelectStartingDealer}
           />
         </View>
 
@@ -685,8 +754,6 @@ function NewGameStepperScreen({ navigation }: Props) {
       <BottomActionBar
         primaryLabel={loading ? t('newGame.creating') : t('newGame.create')}
         onPrimaryPress={handlePressCreate}
-        secondaryLabel={t('common.back')}
-        onSecondaryPress={() => navigation.goBack()}
         disabled={loading || confirmBusy}
       />
 
@@ -726,12 +793,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: GRID.x2,
     paddingTop: GRID.x3,
-  },
-  pageTitle: {
-    fontSize: theme.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-    marginBottom: GRID.x2,
   },
   errorText: {
     marginTop: GRID.x1,

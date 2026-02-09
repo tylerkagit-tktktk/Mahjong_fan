@@ -1,11 +1,11 @@
 import { RefObject } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import AppButton from '../../../components/AppButton';
 import Card from '../../../components/Card';
 import SegmentedControl from '../../../components/SegmentedControl';
 import theme from '../../../theme/theme';
 import { GRID, PLAYER_COUNT } from '../constants';
-import { SeatMode } from '../types';
+import { SeatMode, StartingDealerMode } from '../types';
 
 type Props = {
   seatMode: SeatMode;
@@ -13,6 +13,8 @@ type Props = {
   players: string[];
   autoNames: string[];
   autoAssigned: string[] | null;
+  startingDealerMode: StartingDealerMode;
+  startingDealerSourceIndex: number | null;
   playersError: string | null;
   disabled: boolean;
   manualPlayerRefs: RefObject<Array<TextInput | null>>;
@@ -32,11 +34,20 @@ type Props = {
     autoSeatConfirm: string;
     autoSeatReshuffle: string;
     autoSeatResult: string;
+    autoSeatResultManualTitle: string;
+    autoSeatResultHint: string;
+    manualSeatCaption: string;
+    startingDealerModeRandom: string;
+    startingDealerModeManual: string;
+    autoFlowHint: string;
+    dealerBadge: string;
   };
   onSeatModeChange: (nextMode: SeatMode) => void;
   onSetPlayer: (index: number, value: string) => void;
   onSetAutoName: (index: number, value: string) => void;
   onConfirmAutoSeat: () => void;
+  onStartingDealerModeChange: (mode: StartingDealerMode) => void;
+  onSelectStartingDealer: (index: number) => void;
 };
 
 function PlayersSection({
@@ -45,6 +56,8 @@ function PlayersSection({
   players,
   autoNames,
   autoAssigned,
+  startingDealerMode,
+  startingDealerSourceIndex,
   playersError,
   disabled,
   manualPlayerRefs,
@@ -54,10 +67,21 @@ function PlayersSection({
   onSetPlayer,
   onSetAutoName,
   onConfirmAutoSeat,
+  onStartingDealerModeChange,
+  onSelectStartingDealer,
 }: Props) {
+  const dealerResultIndex = startingDealerSourceIndex;
+  const hasDealerResult = dealerResultIndex !== null && dealerResultIndex >= 0 && dealerResultIndex < PLAYER_COUNT;
+  const dealerSeatLabel = hasDealerResult ? seatLabels[dealerResultIndex] : '';
+  const dealerPlayerName = hasDealerResult && autoAssigned ? autoAssigned[dealerResultIndex] : '';
+  const southSeatIndex = hasDealerResult ? (dealerResultIndex + 1) % PLAYER_COUNT : null;
+  const southSeatLabel = southSeatIndex !== null ? seatLabels[southSeatIndex] : '';
+  const southPlayerName = southSeatIndex !== null && autoAssigned ? autoAssigned[southSeatIndex] : '';
+
   return (
     <Card style={styles.card}>
       <Text style={styles.sectionTitle}>{labels.sectionTitle}</Text>
+      {seatMode === 'manual' ? <Text style={styles.captionText}>{labels.manualSeatCaption}</Text> : null}
 
       <Text style={styles.inputLabel}>{labels.seatModeTitle}</Text>
       <SegmentedControl<SeatMode>
@@ -92,14 +116,13 @@ function PlayersSection({
                 editable={!disabled}
                 returnKeyType={index === 3 ? 'done' : 'next'}
               />
+              {index === 0 ? <Text style={styles.dealerBadge}>{labels.dealerBadge}</Text> : null}
             </View>
           ))}
         </View>
       ) : (
         <View style={styles.playersList}>
-          <Text style={styles.helperText}>
-            {`${labels.playerAutoHintPrefix}${PLAYER_COUNT}${labels.playerAutoHintSuffix}`}
-          </Text>
+          <Text style={styles.helperText}>{labels.autoFlowHint}</Text>
           {autoNames.map((value, index) => (
             <View key={`auto-${index}`} style={styles.playerRowCard}>
               <View style={styles.seatChip}>
@@ -120,24 +143,67 @@ function PlayersSection({
             </View>
           ))}
 
-          <AppButton
-            label={autoAssigned ? labels.autoSeatReshuffle : labels.autoSeatConfirm}
-            onPress={onConfirmAutoSeat}
-            disabled={disabled}
-            variant="secondary"
-          />
+          <View style={styles.blockSpacing}>
+            <SegmentedControl<StartingDealerMode>
+              options={[
+                { value: 'random', label: labels.startingDealerModeRandom },
+                { value: 'manual', label: labels.startingDealerModeManual },
+              ]}
+              value={startingDealerMode}
+              onChange={onStartingDealerModeChange}
+              disabled={disabled}
+            />
+          </View>
+
+          <View style={styles.confirmButtonSpacing}>
+            <AppButton
+              label={autoAssigned ? labels.autoSeatReshuffle : labels.autoSeatConfirm}
+              onPress={onConfirmAutoSeat}
+              disabled={disabled}
+              variant="secondary"
+            />
+          </View>
 
           {autoAssigned ? (
             <View style={styles.blockSpacing}>
-              <Text style={styles.inputLabel}>{labels.autoSeatResult}</Text>
+              <Text style={styles.inputLabel}>
+                {startingDealerMode === 'manual' ? labels.autoSeatResultManualTitle : labels.autoSeatResult}
+              </Text>
               {seatLabels.map((label, index) => (
-                <View key={`result-${label}`} style={styles.playerRowCard}>
+                <Pressable
+                  key={`result-${label}`}
+                  onPress={() => {
+                    if (disabled || startingDealerMode !== 'manual') {
+                      return;
+                    }
+                    onSelectStartingDealer(index);
+                  }}
+                  style={({ pressed }) => [
+                    styles.playerRowCard,
+                    startingDealerMode === 'manual' ? styles.selectableRow : null,
+                    startingDealerMode === 'manual' && startingDealerSourceIndex === index ? styles.selectedDealerRow : null,
+                    pressed && startingDealerMode === 'manual' ? styles.pressedDealerRow : null,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    disabled: disabled || startingDealerMode !== 'manual',
+                    selected: startingDealerSourceIndex === index,
+                  }}
+                  hitSlop={6}
+                >
                   <View style={styles.seatChip}>
                     <Text style={styles.seatChipText}>{label}</Text>
                   </View>
                   <Text style={styles.resultText}>{autoAssigned[index]}</Text>
-                </View>
+                  {startingDealerSourceIndex === index ? <Text style={styles.dealerBadge}>{labels.dealerBadge}</Text> : null}
+                </Pressable>
               ))}
+              <Text style={styles.resultHintText}>{labels.autoSeatResultHint}</Text>
+              {hasDealerResult ? (
+                <Text style={styles.resultHintText}>
+                  {`例：${dealerSeatLabel}位（${dealerPlayerName}）做莊，建立牌局後佢會成為東風；${southSeatLabel}位（${southPlayerName}）會成為南風。`}
+                </Text>
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -157,6 +223,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: theme.colors.textPrimary,
     marginBottom: GRID.x1_5,
+  },
+  captionText: {
+    marginTop: -2,
+    marginBottom: GRID.x1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
   },
   inputLabel: {
     fontSize: theme.fontSize.sm,
@@ -209,16 +282,41 @@ const styles = StyleSheet.create({
   blockSpacing: {
     marginTop: GRID.x1_5,
   },
+  confirmButtonSpacing: {
+    marginTop: GRID.x2,
+  },
   resultText: {
     flex: 1,
     fontSize: theme.fontSize.md,
     color: theme.colors.textPrimary,
     fontWeight: '600',
   },
+  selectableRow: {
+    borderColor: theme.colors.border,
+  },
+  selectedDealerRow: {
+    borderColor: theme.colors.primary,
+    backgroundColor: '#F2FAFA',
+  },
+  pressedDealerRow: {
+    opacity: 0.9,
+  },
+  dealerBadge: {
+    marginLeft: GRID.x1,
+    color: theme.colors.danger,
+    fontSize: theme.fontSize.sm,
+    fontWeight: '700',
+  },
   inlineErrorText: {
     marginTop: GRID.x1,
     color: theme.colors.danger,
     fontSize: theme.fontSize.sm,
+  },
+  resultHintText: {
+    marginTop: GRID.x1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
   },
 });
 

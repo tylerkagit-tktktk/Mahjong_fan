@@ -1,6 +1,10 @@
-export type RootStackParamList = {
+export type RootTabParamList = {
   Home: undefined;
   History: undefined;
+};
+
+export type RootStackParamList = {
+  Tabs: undefined;
   NewGameStepper: undefined;
   GameDashboard: { gameId: string };
   AddHand: { gameId: string };

@@ -53,6 +53,13 @@ function RootNavigator() {
       initialRouteName="Tabs"
       screenOptions={{
         headerTitleAlign: 'center',
+        headerBackVisible: true,
+        headerBackButtonDisplayMode: 'minimal',
+        headerStyle: {
+          backgroundColor: theme.colors.background,
+        },
+        headerShadowVisible: false,
+        headerTintColor: theme.colors.textPrimary,
       }}
     >
       <Stack.Screen name="Tabs" component={AppTabs} options={{ headerShown: false }} />

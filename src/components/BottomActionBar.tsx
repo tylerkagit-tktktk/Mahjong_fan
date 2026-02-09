@@ -6,8 +6,8 @@ import AppButton from './AppButton';
 type BottomActionBarProps = {
   primaryLabel: string;
   onPrimaryPress: () => void;
-  secondaryLabel: string;
-  onSecondaryPress: () => void;
+  secondaryLabel?: string;
+  onSecondaryPress?: () => void;
   disabled?: boolean;
 };
 
@@ -23,13 +23,15 @@ function BottomActionBar({
   return (
     <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 16) }]}>
       <AppButton label={primaryLabel} onPress={onPrimaryPress} disabled={disabled} />
-      <AppButton
-        label={secondaryLabel}
-        onPress={onSecondaryPress}
-        disabled={disabled}
-        variant="secondary"
-        style={styles.secondaryAction}
-      />
+      {secondaryLabel && onSecondaryPress ? (
+        <AppButton
+          label={secondaryLabel}
+          onPress={onSecondaryPress}
+          disabled={disabled}
+          variant="secondary"
+          style={styles.secondaryAction}
+        />
+      ) : null}
     </View>
   );
 }

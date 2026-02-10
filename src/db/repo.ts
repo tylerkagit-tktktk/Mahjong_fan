@@ -188,8 +188,8 @@ export async function insertHand(handInput: NewHandInput): Promise<Hand> {
       const createdAt = handInput.createdAt ?? Date.now();
 
       await executeTx(
-        `INSERT INTO hands (id, gameId, handIndex, dealerSeatIndex, isDraw, winnerSeatIndex, type, winnerPlayerId, discarderPlayerId, inputValue, computedJson, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        `INSERT INTO hands (id, gameId, handIndex, dealerSeatIndex, isDraw, winnerSeatIndex, type, winnerPlayerId, discarderPlayerId, inputValue, deltasJson, computedJson, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           handInput.id,
           handInput.gameId,
@@ -201,6 +201,7 @@ export async function insertHand(handInput: NewHandInput): Promise<Hand> {
           handInput.winnerPlayerId ?? null,
           handInput.discarderPlayerId ?? null,
           handInput.inputValue ?? null,
+          handInput.deltasJson ?? null,
           handInput.computedJson,
           createdAt,
         ],
@@ -217,6 +218,7 @@ export async function insertHand(handInput: NewHandInput): Promise<Hand> {
         winnerPlayerId: handInput.winnerPlayerId ?? null,
         discarderPlayerId: handInput.discarderPlayerId ?? null,
         inputValue: handInput.inputValue ?? null,
+        deltasJson: handInput.deltasJson ?? null,
         computedJson: handInput.computedJson,
         createdAt,
       };

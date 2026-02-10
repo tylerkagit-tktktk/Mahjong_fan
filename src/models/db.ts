@@ -39,6 +39,7 @@ export type Hand = {
   winnerPlayerId?: string | null;
   discarderPlayerId?: string | null;
   inputValue?: number | null;
+  deltasJson?: string | null;
   computedJson: string;
   createdAt: number;
 };

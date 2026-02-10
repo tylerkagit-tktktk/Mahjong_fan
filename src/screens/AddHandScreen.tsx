@@ -21,6 +21,7 @@ import { GameBundle } from '../models/db';
 import { parseRules, Variant } from '../models/rules';
 import { computeCustomPayout, HkSettlementType } from '../models/hkStakes';
 import { getDealerSeatIndexForNextHand } from '../models/dealer';
+import { computeHkSettlement, toAmountFromQ } from '../domain/hk/settlement';
 import {
   CurrencyCode,
   DEFAULT_CURRENCY_CODE,
@@ -237,13 +238,42 @@ function AddHandScreen({ navigation, route }: Props) {
           return;
         }
         const handIsDraw = handType === 'draw';
+        const discarderSeatIndex = discarderId
+          ? bundle?.players.find((player) => player.id === discarderId)?.seatIndex ?? null
+          : null;
+        if (discarderId && discarderSeatIndex === null) {
+          setError(t('errors.selectDiscarder'));
+          return;
+        }
+        const settlementForCalc: HkSettlementType = isHkCustom
+          ? settlementType
+          : handType === 'draw'
+          ? 'zimo'
+          : 'discard';
         const customPayout = isHkCustom
           ? computeCustomPayout({
               fan: Number(numericValue),
               unitPerFan,
               capFan,
               gunMode: hkGunMode,
-              settlementType,
+              settlementType: settlementForCalc,
+            })
+          : null;
+        const hkRules = parseRules(bundle.game.rulesJson, normalizeVariant(bundle.game.variant));
+        const shouldUseHkEngine =
+          hkRules.mode === 'HK' &&
+          numericValue !== null &&
+          Number.isInteger(numericValue) &&
+          numericValue >= (hkRules.minFanToWin ?? 0) &&
+          winnerSeatIndex !== null &&
+          (settlementForCalc === 'zimo' || discarderSeatIndex !== null);
+        const hkSettlement = shouldUseHkEngine
+          ? computeHkSettlement({
+              rules: hkRules,
+              fan: Number(numericValue),
+              settlementType: settlementForCalc,
+              winnerSeatIndex,
+              discarderSeatIndex,
             })
           : null;
         const payoutShareText = customPayout
@@ -264,9 +294,35 @@ function AddHandScreen({ navigation, route }: Props) {
           winnerPlayerId: isPma ? null : winnerId,
           discarderPlayerId:
             isPma || (isHkCustom && settlementType === 'zimo') ? null : discarderId,
-          inputValue: customPayout ? customPayout.totalWinAmount : Number.isNaN(numericValue) ? null : numericValue,
+          inputValue: hkSettlement
+            ? toAmountFromQ(hkSettlement.totalWinAmountQ)
+            : customPayout
+            ? customPayout.totalWinAmount
+            : Number.isNaN(numericValue)
+            ? null
+            : numericValue,
+          deltasJson: hkSettlement
+            ? JSON.stringify(hkSettlement.deltasQ.map((valueQ) => toAmountFromQ(valueQ)))
+            : null,
           computedJson: JSON.stringify(
-            customPayout
+            hkSettlement
+              ? {
+                  source: hkSettlement.source,
+                  fan: Number(numericValue),
+                  effectiveFan: hkSettlement.effectiveFan,
+                  settlementType: settlementForCalc,
+                  dealerSeatIndex: currentDealerSeatIndex,
+                  isDraw: handIsDraw,
+                  winnerSeatIndex,
+                  discarderSeatIndex,
+                  discarderPays: toAmountFromQ(hkSettlement.discarderPaysQ),
+                  othersPay:
+                    hkSettlement.othersPayQ === null
+                      ? null
+                      : toAmountFromQ(hkSettlement.othersPayQ),
+                  totalWinAmount: toAmountFromQ(hkSettlement.totalWinAmountQ),
+                }
+              : customPayout
               ? {
                   fan: customPayout.fan,
                   effectiveFan: customPayout.effectiveFan,

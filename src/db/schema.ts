@@ -29,6 +29,7 @@ const TABLES = [
     winnerPlayerId TEXT NULL,
     discarderPlayerId TEXT NULL,
     inputValue REAL NULL,
+    deltasJson TEXT NULL,
     computedJson TEXT,
     createdAt INTEGER
   );`,
@@ -52,6 +53,7 @@ export async function initializeSchema(db: SQLite.SQLiteDatabase): Promise<void>
   await ensureColumn(db, 'hands', 'dealerSeatIndex', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'hands', 'isDraw', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'hands', 'winnerSeatIndex', 'INTEGER NULL');
+  await ensureColumn(db, 'hands', 'deltasJson', 'TEXT NULL');
   await ensureBackfillDefaults(db);
 
   for (const statement of INDICES) {

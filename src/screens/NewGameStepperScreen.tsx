@@ -30,7 +30,7 @@ import GameTitleSection from './newGameStepper/sections/GameTitleSection';
 import ModeSection from './newGameStepper/sections/ModeSection';
 import PlayersSection from './newGameStepper/sections/PlayersSection';
 import ScoringSection from './newGameStepper/sections/ScoringSection';
-import { ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateContext, SeatMode, StartingDealerMode } from './newGameStepper/types';
+import { CapMode, ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateContext, SeatMode, StartingDealerMode } from './newGameStepper/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewGameStepper'>;
 
@@ -51,10 +51,11 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [minFanToWin, setMinFanToWin] = useState(3);
   const [minFanInput, setMinFanInput] = useState('3');
   const [minFanTouched, setMinFanTouched] = useState(false);
-  const [capFanEnabled, setCapFanEnabled] = useState(true);
-  const [capFan, setCapFan] = useState(10);
-  const [capFanInput, setCapFanInput] = useState('10');
-  const [capFanTouched, setCapFanTouched] = useState(false);
+  const [capFan, setCapFan] = useState<8 | 10 | 13>(10);
+  const [customCapMode, setCustomCapMode] = useState<CapMode>('fanCap');
+  const [customCapFan, setCustomCapFan] = useState(10);
+  const [customCapFanInput, setCustomCapFanInput] = useState('10');
+  const [customCapFanTouched, setCustomCapFanTouched] = useState(false);
   const [sampleFan, setSampleFan] = useState(3);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [players, setPlayers] = useState(['', '', '', '']);
@@ -76,33 +77,37 @@ function NewGameStepperScreen({ navigation }: Props) {
   const autoPlayerRefs = useRef<Array<TextInput | null>>([]);
   const minFanInputRef = useRef<TextInput | null>(null);
   const unitPerFanInputRef = useRef<TextInput | null>(null);
-  const capFanInputRef = useRef<TextInput | null>(null);
+  const customCapFanInputRef = useRef<TextInput | null>(null);
   const sectionY = useRef<{ title: number; scoring: number; players: number }>({ title: 0, scoring: 0, players: 0 });
 
   const seatLabels = useMemo(() => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')], [t]);
   const showMinFan = mode === 'TW' || (mode === 'HK' && hkScoringPreset === 'traditionalFan');
+  const parsedMinFanInput = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
+  const parsedCustomCapFan = parseMinFan(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
+  const customCapFanForCalc = customCapMode === 'fanCap' ? parsedCustomCapFan ?? customCapFan : null;
+  const minFanCapRelationInvalid =
+    mode === 'HK' &&
+    parsedMinFanInput !== null &&
+    (hkScoringPreset === 'traditionalFan' ? parsedMinFanInput > capFan : customCapFanForCalc !== null && parsedMinFanInput > customCapFanForCalc);
 
   const minFanError =
     showMinFan && (minFanTouched || submitAttempted)
-      ? getMinFanError(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX, t('newGame.minFanValidation'))
+      ? getMinFanError(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX, t('newGame.minFanValidation')) ??
+        (minFanCapRelationInvalid ? t('newGame.minFanMustNotExceedCap') : null)
       : null;
   const unitPerFanError =
     mode === 'HK' && hkScoringPreset === 'customTable' && (unitPerFanTouched || submitAttempted)
       ? getMinFanError(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX, t('newGame.unitPerFanValidation'))
       : null;
-  const capFanError =
-    mode === 'HK' &&
-    capFanEnabled &&
-    (hkScoringPreset === 'traditionalFan' || hkScoringPreset === 'customTable') &&
-    (capFanTouched || submitAttempted)
-      ? getMinFanError(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX, t('newGame.capFanValidation'))
+  const customCapFanError =
+    mode === 'HK' && hkScoringPreset === 'customTable' && customCapMode === 'fanCap' && (customCapFanTouched || submitAttempted)
+      ? getMinFanError(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX, t('newGame.customCapFanValidation'))
       : null;
 
   const minFanForHint = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX) ?? minFanToWin;
-  const capFanForHint = capFanEnabled ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) ?? capFan : null;
   const parsedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
-  const previewCapFan = capFanEnabled ? parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX) : null;
-  const sampleEffectiveFan = previewCapFan !== null ? Math.min(sampleFan, previewCapFan) : sampleFan;
+  const sampleCapFan = hkScoringPreset === 'traditionalFan' ? capFan : customCapFanForCalc;
+  const sampleEffectiveFan = sampleCapFan !== null ? Math.min(sampleFan, sampleCapFan) : sampleFan;
   const sampleBaseAmount = parsedUnitPerFan !== null ? sampleEffectiveFan * parsedUnitPerFan : null;
   const sampleHalfZimoEach = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
   const sampleHalfDiscarder = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
@@ -213,7 +218,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     }
     if (target.kind === 'capFan') {
       scrollToY(sectionY.current.scoring);
-      setTimeout(() => capFanInputRef.current?.focus(), 120);
+      setTimeout(() => customCapFanInputRef.current?.focus(), 120);
       return;
     }
     scrollToY(sectionY.current.scoring);
@@ -248,6 +253,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     }
 
     let resolvedUnitPerFan = unitPerFan;
+    let resolvedCustomCapFan = customCapFanForCalc;
     if (mode === 'HK' && hkScoringPreset === 'customTable') {
       const validatedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
       if (validatedUnitPerFan === null) {
@@ -256,6 +262,28 @@ function NewGameStepperScreen({ navigation }: Props) {
       }
       resolvedUnitPerFan = validatedUnitPerFan;
       setUnitPerFan(validatedUnitPerFan);
+
+      if (customCapMode === 'fanCap') {
+        const validatedCustomCapFan = parseMinFan(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
+        if (validatedCustomCapFan === null) {
+          focusInvalidTarget(invalidTarget ?? { kind: 'capFan' });
+          return null;
+        }
+        resolvedCustomCapFan = validatedCustomCapFan;
+        setCustomCapFan(validatedCustomCapFan);
+        setCustomCapFanInput(String(validatedCustomCapFan));
+      } else {
+        resolvedCustomCapFan = null;
+      }
+    }
+
+    if (mode === 'HK') {
+      const capToValidate = hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan;
+      if (capToValidate !== null && resolvedMinFan > capToValidate) {
+        setFormError(t('newGame.minFanMustNotExceedCap'));
+        focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
+        return null;
+      }
     }
 
     let resolvedPlayers = [...players];
@@ -351,17 +379,6 @@ function NewGameStepperScreen({ navigation }: Props) {
     };
 
     if (mode === 'HK') {
-      let parsedCapFan: number | null = null;
-      if (capFanEnabled) {
-        const validatedCapFan = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
-        if (validatedCapFan === null) {
-          focusInvalidTarget({ kind: 'capFan' });
-          return null;
-        }
-        parsedCapFan = validatedCapFan;
-        setCapFan(validatedCapFan);
-      }
-
       const hkBase = rules.hk ?? getDefaultRules('HK').hk!;
       rules.hk = {
         ...hkBase,
@@ -369,7 +386,7 @@ function NewGameStepperScreen({ navigation }: Props) {
         gunMode: hkGunMode,
         stakePreset: hkStakePreset,
         unitPerFan: resolvedUnitPerFan,
-        capFan: parsedCapFan,
+        capFan: hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan,
       };
       rules.minFanToWin = hkScoringPreset === 'traditionalFan' ? resolvedMinFan : rules.minFanToWin ?? 3;
     }
@@ -409,7 +426,7 @@ function NewGameStepperScreen({ navigation }: Props) {
         },
         context.playerInputs,
       );
-      navigation.replace('GameDashboard', { gameId: context.gameId });
+      navigation.replace('GameTable', { gameId: context.gameId });
       return true;
     } catch (err) {
       console.error('[DB] createGame failed', err);
@@ -514,13 +531,6 @@ function NewGameStepperScreen({ navigation }: Props) {
     setMinFanTouched(true);
   };
 
-  const adjustCapFan = (delta: number) => {
-    const next = clamp(capFan + delta, CAP_FAN_MIN, CAP_FAN_MAX);
-    setCapFan(next);
-    setCapFanInput(String(next));
-    setCapFanTouched(true);
-  };
-
   const adjustUnitPerFan = (delta: number) => {
     const next = clamp(unitPerFan + delta, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
     setUnitPerFan(next);
@@ -534,7 +544,7 @@ function NewGameStepperScreen({ navigation }: Props) {
   };
 
   const confirmSections = pendingPayload ? buildConfirmSections(pendingPayload) : null;
-  const scoringHintLines = getStakePresetHintLines(hkStakePreset, hkGunMode, minFanForHint, capFanForHint, currencySymbol, t);
+  const scoringHintLines = getStakePresetHintLines(hkStakePreset, hkGunMode, minFanForHint, capFan, t);
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
@@ -590,15 +600,15 @@ function NewGameStepperScreen({ navigation }: Props) {
             hkScoringPreset={hkScoringPreset}
             hkGunMode={hkGunMode}
             hkStakePreset={hkStakePreset}
-            capFanEnabled={capFanEnabled}
+            capFan={capFan}
+            customCapMode={customCapMode}
+            customCapFanInput={customCapFanInput}
             minFanInput={minFanInput}
             unitPerFanInput={unitPerFanInput}
-            capFanInput={capFanInput}
             sampleFan={sampleFan}
             minFanError={minFanError}
             unitPerFanError={unitPerFanError}
-            capFanError={capFanError}
-            minFanForHint={minFanForHint}
+            customCapFanError={customCapFanError}
             currencySymbol={currencySymbol}
             sampleBaseAmount={sampleBaseAmount}
             sampleEffectiveFan={sampleEffectiveFan}
@@ -607,11 +617,10 @@ function NewGameStepperScreen({ navigation }: Props) {
             sampleHalfOthersEach={sampleHalfOthersEach}
             sampleFullZimoEach={sampleFullZimoEach}
             sampleFullDiscarder={sampleFullDiscarder}
-            capFanForHint={capFanForHint}
             disabled={loading}
             minFanInputRef={minFanInputRef}
             unitPerFanInputRef={unitPerFanInputRef}
-            capFanInputRef={capFanInputRef}
+            customCapFanInputRef={customCapFanInputRef}
             labels={{
               title: t('newGame.scoringMethod'),
               hkPresetTraditional: t('newGame.hkPreset.traditional'),
@@ -623,18 +632,22 @@ function NewGameStepperScreen({ navigation }: Props) {
               hkStakePresetTwoFive: t('newGame.hkStakePreset.twoFiveChicken'),
               hkStakePresetFiveOne: t('newGame.hkStakePreset.fiveOne'),
               hkStakePresetOneTwo: t('newGame.hkStakePreset.oneTwo'),
-              hkStakeBasePrefix: t('newGame.hkStakePreset.baseFromMinFanPrefix'),
-              hkStakeBaseSuffix: t('newGame.hkStakePreset.baseFromMinFanSuffix'),
               minFanThresholdLabel: t('newGame.minFanThresholdLabel'),
               hkThresholdHelp: t('newGame.hkThresholdHelp'),
               unitPerFanLabel: t('newGame.unitPerFanLabel'),
               unitPerFanHelp: t('newGame.unitPerFanHelp'),
               capModeLabel: t('newGame.capModeLabel'),
-              capModeNone: t('newGame.capMode.none'),
-              capModeFanCap: t('newGame.capMode.fanCap'),
+              capModeEight: t('newGame.capMode.eight'),
+              capModeTen: t('newGame.capMode.ten'),
+              capModeThirteen: t('newGame.capMode.thirteen'),
               capFanLabel: t('newGame.capFanLabel'),
               capFanHelp: t('newGame.capFanHelp'),
-              capFanDisabledHelp: t('newGame.capFanDisabledHelp'),
+              customCapModeLabel: t('newGame.customCapModeLabel'),
+              customCapModeNone: t('newGame.customCapMode.none'),
+              customCapModeFanCap: t('newGame.customCapMode.fanCap'),
+              customCapFanLabel: t('newGame.customCapFanLabel'),
+              customCapNoneHelp: t('newGame.customCapNoneHelp'),
+              customCapValueHelp: t('newGame.customCapValueHelp'),
               sampleFanLabel: t('newGame.sampleFanLabel'),
               realtimeEffectiveFan: t('newGame.realtime.effectiveFan'),
               realtimeHalfGun: t('newGame.realtime.halfGun'),
@@ -646,13 +659,31 @@ function NewGameStepperScreen({ navigation }: Props) {
             onHkScoringPresetChange={setHkScoringPreset}
             onHkGunModeChange={setHkGunMode}
             onHkStakePresetChange={setHkStakePreset}
-            onCapModeChange={(next) => {
-              if (next === 'none') {
-                setCapFanEnabled(false);
-                setCapFanTouched(false);
-              } else {
-                setCapFanEnabled(true);
+            onCapFanChange={setCapFan}
+            onCustomCapModeChange={(value) => {
+              setCustomCapMode(value);
+              setCustomCapFanTouched(false);
+            }}
+            onCustomCapFanInputChange={(value) => setCustomCapFanInput(value.replace(/[^0-9]/g, ''))}
+            onCustomCapFanBlur={() => {
+              setCustomCapFanTouched(true);
+              const parsed = parseMinFan(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
+              if (parsed !== null) {
+                setCustomCapFan(parsed);
+                setCustomCapFanInput(String(parsed));
               }
+            }}
+            onCustomCapFanIncrement={() => {
+              const next = clamp(customCapFan + 1, CAP_FAN_MIN, CAP_FAN_MAX);
+              setCustomCapFan(next);
+              setCustomCapFanInput(String(next));
+              setCustomCapFanTouched(true);
+            }}
+            onCustomCapFanDecrement={() => {
+              const next = clamp(customCapFan - 1, CAP_FAN_MIN, CAP_FAN_MAX);
+              setCustomCapFan(next);
+              setCustomCapFanInput(String(next));
+              setCustomCapFanTouched(true);
             }}
             onMinFanInputChange={(value) => setMinFanInput(value.replace(/[^0-9]/g, ''))}
             onMinFanBlur={() => {
@@ -676,17 +707,6 @@ function NewGameStepperScreen({ navigation }: Props) {
             }}
             onUnitPerFanIncrement={() => adjustUnitPerFan(1)}
             onUnitPerFanDecrement={() => adjustUnitPerFan(-1)}
-            onCapFanInputChange={(value) => setCapFanInput(value.replace(/[^0-9]/g, ''))}
-            onCapFanBlur={() => {
-              setCapFanTouched(true);
-              const parsed = parseMinFan(capFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
-              if (parsed !== null) {
-                setCapFan(parsed);
-                setCapFanInput(String(parsed));
-              }
-            }}
-            onCapFanIncrement={() => adjustCapFan(1)}
-            onCapFanDecrement={() => adjustCapFan(-1)}
             onSampleFanInputChange={(value) => {
               const parsed = parseMinFan(value.replace(/[^0-9]/g, ''), SAMPLE_FAN_MIN, SAMPLE_FAN_MAX);
               if (parsed !== null) {

@@ -90,22 +90,16 @@ export function computeHkSettlement(
     assertSeatIndex('discarderSeatIndex', discarderSeatIndex);
   }
 
-  if (
-    rules.hk.scoringPreset === 'traditionalFan' &&
-    settlementType === 'discard'
-  ) {
-    if (discarderSeatIndex === null) {
-      throw new Error('discarderSeatIndex is required for discard settlement');
-    }
-
+  if (rules.hk.scoringPreset === 'traditionalFan') {
     const v1 = computeSettlementHkV1({
       rules,
       fan,
+      settlementType,
       winnerSeatIndex,
       discarderSeatIndex,
     });
 
-    const totalWinAmountQ = v1.discarderPaysQ + (v1.othersPayQ ?? 0) * 2;
+    const totalWinAmountQ = v1.deltasQ[winnerSeatIndex];
 
     return {
       source: 'v1',
@@ -114,7 +108,7 @@ export function computeHkSettlement(
       totalWinAmountQ,
       discarderPaysQ: v1.discarderPaysQ,
       othersPayQ: v1.othersPayQ,
-      zimoPerPlayerQ: v1.discarderPaysQ,
+      zimoPerPlayerQ: v1.zimoPerPlayerQ,
     };
   }
 

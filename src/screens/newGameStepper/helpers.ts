@@ -30,86 +30,34 @@ export function getMinFanError(input: string, min: number, max: number, message:
   return parseMinFan(input, min, max) === null ? `${message} (${min}-${max})` : null;
 }
 
-export function splitHintLines(hint: string): string[] {
-  const parts = hint
-    .split('|')
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return parts.length > 0 ? parts : [hint];
-}
-
-export function getStakeBase(
-  preset: HkStakePreset,
-  gunMode: HkGunMode,
-): { zimo: number; discard: number; others: number | null } {
-  if (preset === 'TWO_FIVE_CHICKEN') {
-    return gunMode === 'halfGun'
-      ? { zimo: 1, discard: 1, others: 0.5 }
-      : { zimo: 1, discard: 2, others: null };
-  }
-  if (preset === 'FIVE_ONE') {
-    return gunMode === 'halfGun'
-      ? { zimo: 2, discard: 2, others: 1 }
-      : { zimo: 2, discard: 4, others: null };
-  }
-  return gunMode === 'halfGun'
-    ? { zimo: 4, discard: 4, others: 2 }
-    : { zimo: 4, discard: 8, others: null };
-}
-
-export function formatMoney(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, '');
-}
-
 export function getStakePresetHintLines(
   preset: HkStakePreset,
   gunMode: HkGunMode,
   minFan: number,
   capFan: number | null,
-  currencySymbol: string,
   t: (key: TranslationKey) => string,
 ): string[] {
-  const fanText = String(minFan);
   const capFanText = capFan === null ? t('newGame.capMode.none') : String(capFan);
-  const effectiveMinFan = Math.max(1, minFan);
-  const effectiveCapFan = capFan === null ? effectiveMinFan : Math.max(1, capFan);
-  const startMultiplier = 2 ** (effectiveMinFan - 1);
-  const capMultiplier = 2 ** (effectiveCapFan - 1);
+  const gunModeText = gunMode === 'halfGun' ? t('newGame.hkGunMode.half') : t('newGame.hkGunMode.full');
+  const stakePresetText =
+    preset === 'TWO_FIVE_CHICKEN'
+      ? t('newGame.hkStakePreset.twoFiveChicken')
+      : preset === 'FIVE_ONE'
+      ? t('newGame.hkStakePreset.fiveOne')
+      : t('newGame.hkStakePreset.oneTwo');
 
-  const base = getStakeBase(preset, gunMode);
-  const startZimo = base.zimo * startMultiplier;
-  const startDiscard = base.discard * startMultiplier;
-  const startOthers = base.others !== null ? base.others * startMultiplier : null;
-  const capZimo = base.zimo * capMultiplier;
-  const capDiscard = base.discard * capMultiplier;
-  const capOthers = base.others !== null ? base.others * capMultiplier : null;
+  const configLine = t('newGame.hkStakePreview.config')
+    .replaceAll('{gunMode}', gunModeText)
+    .replaceAll('{stakePreset}', stakePresetText)
+    .replaceAll('{minFan}', String(minFan))
+    .replaceAll('{capFan}', capFanText);
+  const ruleLine = t('newGame.hkStakePreview.ruleLine')
+    .replaceAll('{minFan}', String(minFan))
+    .replaceAll('{capFan}', capFanText);
+  const capLine = t('newGame.hkStakePreview.capLine')
+    .replaceAll('{capFan}', capFanText);
 
-  const fill = (template: string) =>
-    template
-      .replaceAll('{fan}', fanText)
-      .replaceAll('{capFan}', capFanText)
-      .replaceAll('{startZimo}', `${currencySymbol}${formatMoney(startZimo)}`)
-      .replaceAll('{startDiscard}', `${currencySymbol}${formatMoney(startDiscard)}`)
-      .replaceAll('{startOthers}', `${currencySymbol}${formatMoney(startOthers ?? 0)}`)
-      .replaceAll('{capZimo}', `${currencySymbol}${formatMoney(capZimo)}`)
-      .replaceAll('{capDiscard}', `${currencySymbol}${formatMoney(capDiscard)}`)
-      .replaceAll('{capOthers}', `${currencySymbol}${formatMoney(capOthers ?? 0)}`);
-
-  if (preset === 'TWO_FIVE_CHICKEN') {
-    const template =
-      gunMode === 'halfGun'
-        ? t('newGame.hkStakePreset.twoFiveChickenHalfHelp')
-        : t('newGame.hkStakePreset.twoFiveChickenFullHelp');
-    return splitHintLines(fill(template));
-  }
-  if (preset === 'FIVE_ONE') {
-    const template =
-      gunMode === 'halfGun' ? t('newGame.hkStakePreset.fiveOneHalfHelp') : t('newGame.hkStakePreset.fiveOneFullHelp');
-    return splitHintLines(fill(template));
-  }
-  const template =
-    gunMode === 'halfGun' ? t('newGame.hkStakePreset.oneTwoHalfHelp') : t('newGame.hkStakePreset.oneTwoFullHelp');
-  return splitHintLines(fill(template));
+  return [configLine, ruleLine, capLine];
 }
 
 export function shuffle(values: string[]): string[] {

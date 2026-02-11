@@ -13,15 +13,15 @@ type Props = {
   hkScoringPreset: HkScoringPreset;
   hkGunMode: HkGunMode;
   hkStakePreset: HkStakePreset;
-  capFanEnabled: boolean;
+  capFan: 8 | 10 | 13;
+  customCapMode: CapMode;
+  customCapFanInput: string;
   minFanInput: string;
   unitPerFanInput: string;
-  capFanInput: string;
   sampleFan: number;
   minFanError: string | null;
   unitPerFanError: string | null;
-  capFanError: string | null;
-  minFanForHint: number;
+  customCapFanError: string | null;
   currencySymbol: string;
   sampleBaseAmount: number | null;
   sampleEffectiveFan: number;
@@ -30,11 +30,10 @@ type Props = {
   sampleHalfOthersEach: number | null;
   sampleFullZimoEach: number | null;
   sampleFullDiscarder: number | null;
-  capFanForHint: number | null;
   disabled: boolean;
   minFanInputRef: Ref<TextInput>;
   unitPerFanInputRef: Ref<TextInput>;
-  capFanInputRef: Ref<TextInput>;
+  customCapFanInputRef: Ref<TextInput>;
   labels: {
     title: string;
     hkPresetTraditional: string;
@@ -46,18 +45,22 @@ type Props = {
     hkStakePresetTwoFive: string;
     hkStakePresetFiveOne: string;
     hkStakePresetOneTwo: string;
-    hkStakeBasePrefix: string;
-    hkStakeBaseSuffix: string;
     minFanThresholdLabel: string;
     hkThresholdHelp: string;
     unitPerFanLabel: string;
     unitPerFanHelp: string;
     capModeLabel: string;
-    capModeNone: string;
-    capModeFanCap: string;
+    capModeEight: string;
+    capModeTen: string;
+    capModeThirteen: string;
     capFanLabel: string;
     capFanHelp: string;
-    capFanDisabledHelp: string;
+    customCapModeLabel: string;
+    customCapModeNone: string;
+    customCapModeFanCap: string;
+    customCapFanLabel: string;
+    customCapNoneHelp: string;
+    customCapValueHelp: string;
     sampleFanLabel: string;
     realtimeEffectiveFan: string;
     realtimeHalfGun: string;
@@ -69,7 +72,12 @@ type Props = {
   onHkScoringPresetChange: (value: HkScoringPreset) => void;
   onHkGunModeChange: (value: HkGunMode) => void;
   onHkStakePresetChange: (value: HkStakePreset) => void;
-  onCapModeChange: (value: CapMode) => void;
+  onCapFanChange: (value: 8 | 10 | 13) => void;
+  onCustomCapModeChange: (value: CapMode) => void;
+  onCustomCapFanInputChange: (value: string) => void;
+  onCustomCapFanBlur: () => void;
+  onCustomCapFanIncrement: () => void;
+  onCustomCapFanDecrement: () => void;
   onMinFanInputChange: (value: string) => void;
   onMinFanBlur: () => void;
   onMinFanIncrement: () => void;
@@ -78,10 +86,6 @@ type Props = {
   onUnitPerFanBlur: () => void;
   onUnitPerFanIncrement: () => void;
   onUnitPerFanDecrement: () => void;
-  onCapFanInputChange: (value: string) => void;
-  onCapFanBlur: () => void;
-  onCapFanIncrement: () => void;
-  onCapFanDecrement: () => void;
   onSampleFanInputChange: (value: string) => void;
   onSampleFanIncrement: () => void;
   onSampleFanDecrement: () => void;
@@ -92,15 +96,15 @@ function ScoringSection({
   hkScoringPreset,
   hkGunMode,
   hkStakePreset,
-  capFanEnabled,
+  capFan,
+  customCapMode,
+  customCapFanInput,
   minFanInput,
   unitPerFanInput,
-  capFanInput,
   sampleFan,
   minFanError,
   unitPerFanError,
-  capFanError,
-  minFanForHint,
+  customCapFanError,
   currencySymbol,
   sampleBaseAmount,
   sampleEffectiveFan,
@@ -112,13 +116,18 @@ function ScoringSection({
   disabled,
   minFanInputRef,
   unitPerFanInputRef,
-  capFanInputRef,
+  customCapFanInputRef,
   labels,
   stakePresetHintLines,
   onHkScoringPresetChange,
   onHkGunModeChange,
   onHkStakePresetChange,
-  onCapModeChange,
+  onCapFanChange,
+  onCustomCapModeChange,
+  onCustomCapFanInputChange,
+  onCustomCapFanBlur,
+  onCustomCapFanIncrement,
+  onCustomCapFanDecrement,
   onMinFanInputChange,
   onMinFanBlur,
   onMinFanIncrement,
@@ -127,10 +136,6 @@ function ScoringSection({
   onUnitPerFanBlur,
   onUnitPerFanIncrement,
   onUnitPerFanDecrement,
-  onCapFanInputChange,
-  onCapFanBlur,
-  onCapFanIncrement,
-  onCapFanDecrement,
   onSampleFanInputChange,
   onSampleFanIncrement,
   onSampleFanDecrement,
@@ -176,9 +181,6 @@ function ScoringSection({
                   onChange={onHkStakePresetChange}
                   disabled={disabled}
                 />
-                <Text style={styles.helperText}>
-                  {`${labels.hkStakeBasePrefix}${minFanForHint}${labels.hkStakeBaseSuffix}`}
-                </Text>
                 {stakePresetHintLines.map((line, index) => (
                   <Text key={`${hkStakePreset}-${hkGunMode}-${index}`} style={index === 0 ? styles.helperText : styles.helperTextSubLine}>
                     {line}
@@ -236,40 +238,57 @@ function ScoringSection({
             </View>
           )}
 
-          <View style={styles.blockSpacing}>
-            <Text style={styles.inputLabel}>{labels.capModeLabel}</Text>
-            <SegmentedControl<CapMode>
-              options={[
-                { value: 'none', label: labels.capModeNone },
-                { value: 'fanCap', label: labels.capModeFanCap },
-              ]}
-              value={capFanEnabled ? 'fanCap' : 'none'}
-              onChange={onCapModeChange}
-              disabled={disabled}
-            />
-            {capFanEnabled ? (
-              <>
-                <View style={styles.blockSpacing}>
-                  <Text style={styles.inputLabel}>{labels.capFanLabel}</Text>
-                  <StepperNumberInput
-                    inputRef={capFanInputRef}
-                    valueText={capFanInput}
-                    onChangeText={onCapFanInputChange}
-                    onBlur={onCapFanBlur}
-                    onIncrement={onCapFanIncrement}
-                    onDecrement={onCapFanDecrement}
-                    placeholder={`${CAP_FAN_MIN}-${CAP_FAN_MAX}`}
-                    editable={!disabled}
-                    hasError={Boolean(capFanError)}
-                  />
-                </View>
-                <Text style={styles.helperText}>{labels.capFanHelp}</Text>
-                {capFanError ? <Text style={styles.inlineErrorText}>{capFanError}</Text> : null}
-              </>
-            ) : (
-              <Text style={styles.helperText}>{labels.capFanDisabledHelp}</Text>
-            )}
-          </View>
+          {hkScoringPreset === 'traditionalFan' ? (
+            <View style={styles.blockSpacing}>
+              <Text style={styles.inputLabel}>{labels.capModeLabel}</Text>
+              <SegmentedControl<8 | 10 | 13>
+                options={[
+                  { value: 8, label: labels.capModeEight },
+                  { value: 10, label: labels.capModeTen },
+                  { value: 13, label: labels.capModeThirteen },
+                ]}
+                value={capFan}
+                onChange={onCapFanChange}
+                disabled={disabled}
+              />
+            </View>
+          ) : (
+            <View style={styles.blockSpacing}>
+              <Text style={styles.inputLabel}>{labels.customCapModeLabel}</Text>
+              <SegmentedControl<CapMode>
+                options={[
+                  { value: 'none', label: labels.customCapModeNone },
+                  { value: 'fanCap', label: labels.customCapModeFanCap },
+                ]}
+                value={customCapMode}
+                onChange={onCustomCapModeChange}
+                disabled={disabled}
+              />
+
+              {customCapMode === 'fanCap' ? (
+                <>
+                  <View style={styles.blockSpacing}>
+                    <Text style={styles.inputLabel}>{labels.customCapFanLabel}</Text>
+                    <StepperNumberInput
+                      inputRef={customCapFanInputRef}
+                      valueText={customCapFanInput}
+                      onChangeText={onCustomCapFanInputChange}
+                      onBlur={onCustomCapFanBlur}
+                      onIncrement={onCustomCapFanIncrement}
+                      onDecrement={onCustomCapFanDecrement}
+                      placeholder={`${CAP_FAN_MIN}-${CAP_FAN_MAX}`}
+                      editable={!disabled}
+                      hasError={Boolean(customCapFanError)}
+                    />
+                    {customCapFanError ? <Text style={styles.inlineErrorText}>{customCapFanError}</Text> : null}
+                  </View>
+                  <Text style={styles.helperText}>{labels.customCapValueHelp.replaceAll('{capFan}', customCapFanInput || '0')}</Text>
+                </>
+              ) : (
+                <Text style={styles.helperText}>{labels.customCapNoneHelp}</Text>
+              )}
+            </View>
+          )}
 
           {hkScoringPreset === 'customTable' ? (
             <View style={styles.blockSpacing}>

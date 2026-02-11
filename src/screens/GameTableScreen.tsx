@@ -352,9 +352,14 @@ function GameTableScreen({ route, navigation }: Props) {
       };
     }
 
-    const minFan = Math.max(targetRules.minFanToWin ?? 0, 0);
-    const capFan = targetRules.hk.capFan ?? 10;
-    const maxFan = Math.min(capFan, 10);
+    const minFanToWin = targetRules.minFanToWin ?? 0;
+    const startFan = Math.max(minFanToWin || 0, 1);
+    const rawCapFan = targetRules.hk.capFan;
+    const capFan = typeof rawCapFan === 'number' ? rawCapFan : 13;
+    const endFan = Math.min(capFan, 13);
+    const hasValidRange = startFan <= endFan;
+    const minFan = hasValidRange ? startFan : 3;
+    const maxFan = hasValidRange ? endFan : 10;
     const stakeLabelMap = {
       TWO_FIVE_CHICKEN: '二五雞',
       FIVE_ONE: '五一',
@@ -413,6 +418,16 @@ function GameTableScreen({ route, navigation }: Props) {
     setPaytableMeta(result.meta);
     setShowStakePaytable(true);
   }, [buildTraditionalPaytableRows, rules]);
+
+  const paytableRangeLabel = useMemo(() => {
+    const minFan = paytableMeta?.minFan ?? (paytableRows.length ? paytableRows[0].fan : null);
+    const maxFan = paytableMeta?.maxFan ?? (paytableRows.length ? paytableRows[paytableRows.length - 1].fan : null);
+    if (minFan === null || maxFan === null) {
+      return '傳統番數';
+    }
+    const fanRangeLabel = minFan === maxFan ? `${minFan} 番` : `${minFan}–${maxFan} 番`;
+    return `傳統番數 · ${fanRangeLabel}`;
+  }, [paytableMeta, paytableRows]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -919,9 +934,7 @@ function GameTableScreen({ route, navigation }: Props) {
               <Text style={styles.paytableTitle}>
                 {paytableMeta?.stakeLabel ?? rulesSummaryMeta?.stakeLabel ?? ''} · {paytableMeta?.gunModeLabel ?? (rules?.hk?.gunMode === 'halfGun' ? '半銃制' : '全銃制')}
               </Text>
-              <Text style={styles.paytableSubtitle}>
-                傳統番數 · {paytableMeta?.minFan ?? (paytableRows.length ? paytableRows[0].fan : '-')}–{paytableMeta?.maxFan ?? (paytableRows.length ? paytableRows[paytableRows.length - 1].fan : '-')} 番
-              </Text>
+              <Text style={styles.paytableSubtitle}>{paytableRangeLabel}</Text>
               <Text style={styles.paytableCaption}>金額為贏家實收</Text>
             </View>
 

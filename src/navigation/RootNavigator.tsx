@@ -2,6 +2,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AddHandScreen from '../screens/AddHandScreen';
 import GameDashboardScreen from '../screens/GameDashboardScreen';
+import GameTableScreen from '../screens/GameTableScreen';
 import HomeScreen from '../screens/HomeScreen';
 import HistoryScreen from '../screens/HistoryScreen';
 import theme from '../theme/theme';
@@ -71,6 +72,11 @@ function RootNavigator() {
       <Stack.Screen
         name="GameDashboard"
         component={GameDashboardScreen}
+        options={{ title: t('nav.dashboard') }}
+      />
+      <Stack.Screen
+        name="GameTable"
+        component={GameTableScreen}
         options={{ title: t('nav.dashboard') }}
       />
       <Stack.Screen name="AddHand" component={AddHandScreen} options={{ title: t('nav.addHand') }} />

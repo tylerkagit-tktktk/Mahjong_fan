@@ -50,6 +50,7 @@ export async function initializeSchema(db: SQLite.SQLiteDatabase): Promise<void>
   }
 
   await ensureColumn(db, 'games', 'startingDealerSeatIndex', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'games', 'endedAt', 'INTEGER NULL');
   await ensureColumn(db, 'hands', 'dealerSeatIndex', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'hands', 'isDraw', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'hands', 'winnerSeatIndex', 'INTEGER NULL');

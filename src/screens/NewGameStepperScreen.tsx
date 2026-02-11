@@ -316,7 +316,7 @@ function NewGameStepperScreen({ navigation }: Props) {
           const joined =
             missingOrderPlayers.length === 1
               ? missingOrderPlayers[0]
-              : `${missingOrderPlayers.slice(0, -1).join('、')}及${missingOrderPlayers[missingOrderPlayers.length - 1]}`;
+              : `${missingOrderPlayers.slice(0, -1).join(t('newGame.listSeparator'))}${t('newGame.listJoinAnd')}${missingOrderPlayers[missingOrderPlayers.length - 1]}`;
           nextPlayersError = `${t('newGame.requiredPlayersListPrefix')}${joined}${t('newGame.playerOrderSuffix')}`;
         }
         if (!invalidTarget) {
@@ -752,6 +752,7 @@ function NewGameStepperScreen({ navigation }: Props) {
               autoSeatResult: t('newGame.autoSeatResult'),
               autoSeatResultManualTitle: t('newGame.autoSeatResultManualTitle'),
               autoSeatResultHint: t('newGame.autoSeatResultHint'),
+              autoSeatDealerExample: t('newGame.autoSeatDealerExample'),
               manualSeatCaption: t('newGame.manualSeatCaption'),
               startingDealerModeRandom: t('newGame.startingDealerMode.random'),
               startingDealerModeManual: t('newGame.startingDealerMode.manual'),

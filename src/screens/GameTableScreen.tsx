@@ -164,7 +164,7 @@ function GameTableScreen({ route, navigation }: Props) {
   const playerPanels = useMemo(() => [2, 1, 0, 3], []);
 
   const gameName = bundle?.game.title ?? '';
-  const gameTitle = gameName || t('nav.gameTable');
+  const gameTitle = gameName || t('nav.dashboard');
   const isEnded = Boolean(bundle?.game.endedAt);
   const tableSize = Math.min(width * 0.56, 260);
   const tableVerticalOffset = Math.min(height * 0.06, 50);
@@ -275,7 +275,10 @@ function GameTableScreen({ route, navigation }: Props) {
   const roundLabel = roundState?.labelZh ?? null;
   const roundIndex = roundState?.roundIndex ?? 1;
   const handCount = bundle?.hands.length ?? 0;
-  const handCountLabel = handCount > 0 ? `已打 ${handCount} 鋪` : '尚未開局';
+  const handCountLabel =
+    handCount > 0
+      ? t('gameTable.handCount.started').replace('{count}', String(handCount))
+      : t('gameTable.handCount.notStarted');
 
   const rulesSummaryMeta = useMemo<RuleSummaryMeta | null>(() => {
     if (!rules || rules.mode !== 'HK' || !rules.hk) {
@@ -283,37 +286,43 @@ function GameTableScreen({ route, navigation }: Props) {
     }
 
     const isHkTraditional = rules.hk.scoringPreset === 'traditionalFan';
-    const scoringLabel = isHkTraditional ? '傳統番數' : '自訂番數';
-    const gunLabel = rules.hk.gunMode === 'halfGun' ? '半銃制' : '全銃制';
+    const scoringLabel = isHkTraditional ? t('newGame.hkPreset.traditional') : t('newGame.hkPreset.custom');
+    const gunLabel = rules.hk.gunMode === 'halfGun' ? t('newGame.hkGunMode.half') : t('newGame.hkGunMode.full');
     const stakeLabelMap = {
-      TWO_FIVE_CHICKEN: '二五雞',
-      FIVE_ONE: '五一',
-      ONE_TWO: '一二蚊',
+      TWO_FIVE_CHICKEN: t('newGame.hkStakePreset.twoFiveChicken'),
+      FIVE_ONE: t('newGame.hkStakePreset.fiveOne'),
+      ONE_TWO: t('newGame.hkStakePreset.oneTwo'),
     } as const;
     const stakeLabel = stakeLabelMap[rules.hk.stakePreset] ?? rules.hk.stakePreset;
     return { scoringLabel, gunLabel, stakeLabel, isHkTraditional };
-  }, [rules]);
+  }, [rules, t]);
 
   const rulesSummaryTags = useMemo(() => {
     if (!rulesSummaryMeta) {
       return null;
     }
-    return ['香港牌', rulesSummaryMeta.scoringLabel, rulesSummaryMeta.gunLabel, rulesSummaryMeta.stakeLabel];
-  }, [rulesSummaryMeta]);
+    return [t('newGame.mode.hk'), rulesSummaryMeta.scoringLabel, rulesSummaryMeta.gunLabel, rulesSummaryMeta.stakeLabel];
+  }, [rulesSummaryMeta, t]);
 
   const rulesSummaryStats = useMemo(() => {
     if (!rules || rules.mode !== 'HK' || !rules.hk) {
       return null;
     }
 
-    const capText = rules.hk.capFan === null ? '不設上限' : `${rules.hk.capFan} 番爆棚`;
-    const minFanText = rules.minFanToWin === 0 ? '無最低' : `${rules.minFanToWin} 番起糊`;
+    const capText =
+      rules.hk.capFan === null
+        ? t('gameTable.rules.capNone')
+        : t('gameTable.rules.capValue').replace('{count}', String(rules.hk.capFan));
+    const minFanText =
+      rules.minFanToWin === 0
+        ? t('gameTable.rules.minNone')
+        : t('gameTable.rules.minValue').replace('{count}', String(rules.minFanToWin));
 
     return {
       capText,
       minFanText,
     };
-  }, [rules]);
+  }, [rules, t]);
 
   const elapsedLabel = useMemo(() => {
     if (!bundle?.game.createdAt) {
@@ -322,12 +331,17 @@ function GameTableScreen({ route, navigation }: Props) {
     const elapsedMs = Math.max(0, elapsedNow - bundle.game.createdAt);
     const minutes = Math.floor(elapsedMs / 60000);
     if (minutes < 60) {
-      return `已玩 ${minutes} 分鐘`;
+      return t('gameTable.elapsed.minutes').replace('{minutes}', String(minutes));
     }
     const hours = Math.floor(minutes / 60);
     const remain = minutes % 60;
-    return remain === 0 ? `已玩 ${hours} 小時` : `已玩 ${hours} 小時 ${remain} 分鐘`;
-  }, [bundle?.game.createdAt, elapsedNow]);
+    if (remain === 0) {
+      return t('gameTable.elapsed.hours').replace('{hours}', String(hours));
+    }
+    return t('gameTable.elapsed.hoursMinutes')
+      .replace('{hours}', String(hours))
+      .replace('{minutes}', String(remain));
+  }, [bundle?.game.createdAt, elapsedNow, t]);
 
   const footerLabel = useMemo(() => {
     if (!elapsedLabel) {
@@ -361,12 +375,12 @@ function GameTableScreen({ route, navigation }: Props) {
     const minFan = hasValidRange ? startFan : 3;
     const maxFan = hasValidRange ? endFan : 10;
     const stakeLabelMap = {
-      TWO_FIVE_CHICKEN: '二五雞',
-      FIVE_ONE: '五一',
-      ONE_TWO: '一二蚊',
+      TWO_FIVE_CHICKEN: t('newGame.hkStakePreset.twoFiveChicken'),
+      FIVE_ONE: t('newGame.hkStakePreset.fiveOne'),
+      ONE_TWO: t('newGame.hkStakePreset.oneTwo'),
     } as const;
     const stakeLabel = stakeLabelMap[targetRules.hk.stakePreset] ?? targetRules.hk.stakePreset;
-    const gunModeLabel = targetRules.hk.gunMode === 'halfGun' ? '半銃制' : '全銃制';
+    const gunModeLabel = targetRules.hk.gunMode === 'halfGun' ? t('newGame.hkGunMode.half') : t('newGame.hkGunMode.full');
     const rows: PaytableRow[] = [];
 
     for (let fan = minFan; fan <= maxFan; fan += 1) {
@@ -404,7 +418,7 @@ function GameTableScreen({ route, navigation }: Props) {
         gunModeLabel,
       },
     };
-  }, []);
+  }, [t]);
 
   const handleStakeChipPress = useCallback(() => {
     if (!rules || rules.mode !== 'HK' || !rules.hk || rules.hk.scoringPreset !== 'traditionalFan') {
@@ -423,11 +437,14 @@ function GameTableScreen({ route, navigation }: Props) {
     const minFan = paytableMeta?.minFan ?? (paytableRows.length ? paytableRows[0].fan : null);
     const maxFan = paytableMeta?.maxFan ?? (paytableRows.length ? paytableRows[paytableRows.length - 1].fan : null);
     if (minFan === null || maxFan === null) {
-      return '傳統番數';
+      return t('gameTable.paytable.traditional');
     }
-    const fanRangeLabel = minFan === maxFan ? `${minFan} 番` : `${minFan}–${maxFan} 番`;
-    return `傳統番數 · ${fanRangeLabel}`;
-  }, [paytableMeta, paytableRows]);
+    const fanRangeLabel =
+      minFan === maxFan
+        ? t('gameTable.paytable.fanValue').replace('{fan}', String(minFan))
+        : t('gameTable.paytable.fanRange').replace('{min}', String(minFan)).replace('{max}', String(maxFan));
+    return t('gameTable.paytable.range').replace('{range}', fanRangeLabel);
+  }, [paytableMeta, paytableRows, t]);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -668,10 +685,10 @@ function GameTableScreen({ route, navigation }: Props) {
       return;
     }
 
-    Alert.alert('結束牌局', '結束後將無法再修改此牌局的任何內容，是否確認結束？', [
-      { text: '取消', style: 'cancel' },
+    Alert.alert(t('gameTable.endGame.title'), t('gameTable.endGame.message'), [
+      { text: t('gameTable.endGame.cancel'), style: 'cancel' },
       {
-        text: '確認結束',
+        text: t('gameTable.endGame.confirm'),
         style: 'destructive',
         onPress: async () => {
           try {
@@ -693,7 +710,7 @@ function GameTableScreen({ route, navigation }: Props) {
             navigation.replace('Summary', { gameId: bundle.game.id });
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            setError(message || '結束牌局失敗');
+            setError(message || t('gameTable.endGame.failed'));
           } finally {
             setSaving(false);
           }
@@ -706,10 +723,10 @@ function GameTableScreen({ route, navigation }: Props) {
     if (!bundle || saving || isEnded) {
       return;
     }
-    Alert.alert('流局', '請選擇流局後莊家處理方式：', [
-      { text: '取消', style: 'cancel' },
-      { text: '留莊', onPress: () => { saveDrawHand('stick'); } },
-      { text: '過莊', onPress: () => { saveDrawHand('pass'); } },
+    Alert.alert(t('gameTable.draw.title'), t('gameTable.draw.message'), [
+      { text: t('gameTable.draw.cancel'), style: 'cancel' },
+      { text: t('gameTable.draw.stick'), onPress: () => { saveDrawHand('stick'); } },
+      { text: t('gameTable.draw.pass'), onPress: () => { saveDrawHand('pass'); } },
     ]);
   };
 
@@ -720,7 +737,9 @@ function GameTableScreen({ route, navigation }: Props) {
           <View style={styles.headerInfoBlock}>
             {roundLabel ? <Text style={styles.roundLabel}>{roundLabel}</Text> : null}
             <Text style={styles.roundSummaryLine}>
-              {roundLabel ? `第 ${roundIndex} 圈 · ${handCountLabel}` : handCountLabel}
+              {roundLabel
+                ? t('gameTable.roundSummary').replace('{round}', String(roundIndex)).replace('{status}', handCountLabel)
+                : handCountLabel}
             </Text>
             <View style={styles.roundDivider} />
           </View>
@@ -762,7 +781,7 @@ function GameTableScreen({ route, navigation }: Props) {
               ) : null}
             </View>
           ) : null}
-          {isEnded ? <Text style={styles.readonlyText}>此牌局已結束（只讀）</Text> : null}
+          {isEnded ? <Text style={styles.readonlyText}>{t('gameTable.readonly')}</Text> : null}
 
           <View style={styles.tableZone}>
             <View
@@ -779,7 +798,7 @@ function GameTableScreen({ route, navigation }: Props) {
 
               <View style={styles.centerBadge}>
                 <View style={styles.centerDealerDot} />
-                <Text style={styles.centerBadgeLabel}>當前{t('newGame.dealerBadge')}</Text>
+                <Text style={styles.centerBadgeLabel}>{t('gameTable.currentDealer')}</Text>
                 <Text
                   style={[
                     styles.centerBadgeValue,
@@ -822,14 +841,14 @@ function GameTableScreen({ route, navigation }: Props) {
 
           <View style={styles.footerButtonsRow}>
             <AppButton
-              label="流局"
+              label={t('gameTable.action.draw')}
               onPress={handleDrawActionPress}
               disabled={saving || !bundle || isEnded}
               variant="secondary"
               style={styles.footerButton}
             />
             <AppButton
-              label="結束牌局"
+              label={t('gameTable.action.endGame')}
               onPress={handleEndGame}
               disabled={saving || isEnded}
               style={styles.footerButton}
@@ -932,23 +951,25 @@ function GameTableScreen({ route, navigation }: Props) {
           <Pressable style={styles.paytableCard} onPress={(event) => event.stopPropagation()}>
             <View style={styles.paytableHeader}>
               <Text style={styles.paytableTitle}>
-                {paytableMeta?.stakeLabel ?? rulesSummaryMeta?.stakeLabel ?? ''} · {paytableMeta?.gunModeLabel ?? (rules?.hk?.gunMode === 'halfGun' ? '半銃制' : '全銃制')}
+                {paytableMeta?.stakeLabel ?? rulesSummaryMeta?.stakeLabel ?? ''} · {paytableMeta?.gunModeLabel ?? (rules?.hk?.gunMode === 'halfGun' ? t('newGame.hkGunMode.half') : t('newGame.hkGunMode.full'))}
               </Text>
               <Text style={styles.paytableSubtitle}>{paytableRangeLabel}</Text>
-              <Text style={styles.paytableCaption}>金額為贏家實收</Text>
+              <Text style={styles.paytableCaption}>{t('gameTable.paytable.caption')}</Text>
             </View>
 
             <ScrollView style={styles.paytableScroll} horizontal>
               <View>
                 <View style={styles.paytableRowHeader}>
-                  <Text style={[styles.paytableCell, styles.paytableCellFan]}>番數</Text>
-                  <Text style={styles.paytableCell}>出銃（贏家收）</Text>
-                  <Text style={styles.paytableCell}>自摸（贏家收）</Text>
+                  <Text style={[styles.paytableCell, styles.paytableCellFan]}>{t('gameTable.paytable.col.fan')}</Text>
+                  <Text style={styles.paytableCell}>{t('gameTable.paytable.col.discard')}</Text>
+                  <Text style={styles.paytableCell}>{t('gameTable.paytable.col.zimo')}</Text>
                 </View>
 
                 {paytableRows.map((row) => (
                   <View key={row.fan} style={styles.paytableRow}>
-                    <Text style={[styles.paytableCell, styles.paytableCellFan]}>{row.fan} 番</Text>
+                    <Text style={[styles.paytableCell, styles.paytableCellFan]}>
+                      {t('gameTable.paytable.fanValue').replace('{fan}', String(row.fan))}
+                    </Text>
                     <Text style={styles.paytableCell}>HK${formatMoneyValue(row.discardTotal)}</Text>
                     <Text style={styles.paytableCell}>HK${formatMoneyValue(row.zimoTotal)}</Text>
                   </View>
@@ -957,7 +978,7 @@ function GameTableScreen({ route, navigation }: Props) {
             </ScrollView>
 
             <Pressable style={styles.paytableCloseButton} onPress={() => setShowStakePaytable(false)}>
-              <Text style={styles.paytableCloseText}>知道了</Text>
+              <Text style={styles.paytableCloseText}>{t('gameTable.paytable.close')}</Text>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -977,6 +998,7 @@ function PlayerPanel({
   currencyCode,
   style,
 }: PlayerPanelProps) {
+  const { t } = useAppLanguage();
   const amountColor =
     amount > 0 ? '#188038' : amount < 0 ? '#C5221F' : theme.colors.textSecondary;
   const sign = amount > 0 ? '+' : amount < 0 ? '-' : '';
@@ -997,7 +1019,7 @@ function PlayerPanel({
         </Text>
         <View style={styles.playerMetaRow}>
           <Text style={[styles.playerSeat, { color: windColor }]}>{windGlyph}</Text>
-          {isDealer ? <Text style={styles.dealerText}>{' · 莊'}</Text> : null}
+          {isDealer ? <Text style={styles.dealerText}>{` · ${t('newGame.dealerBadge')}`}</Text> : null}
         </View>
         <Text style={[styles.playerAmount, { color: amountColor }]}>
           {`${sign}${symbol}${formatMoneyValue(absolute)}`}

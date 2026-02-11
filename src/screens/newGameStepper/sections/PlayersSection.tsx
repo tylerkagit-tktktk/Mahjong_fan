@@ -36,6 +36,7 @@ type Props = {
     autoSeatResult: string;
     autoSeatResultManualTitle: string;
     autoSeatResultHint: string;
+    autoSeatDealerExample: string;
     manualSeatCaption: string;
     startingDealerModeRandom: string;
     startingDealerModeManual: string;
@@ -201,7 +202,11 @@ function PlayersSection({
               <Text style={styles.resultHintText}>{labels.autoSeatResultHint}</Text>
               {hasDealerResult ? (
                 <Text style={styles.resultHintText}>
-                  {`例：${dealerSeatLabel}位（${dealerPlayerName}）做莊，建立牌局後佢會成為東風；${southSeatLabel}位（${southPlayerName}）會成為南風。`}
+                  {labels.autoSeatDealerExample
+                    .replace('{dealerSeatLabel}', dealerSeatLabel)
+                    .replace('{dealerPlayerName}', dealerPlayerName)
+                    .replace('{southSeatLabel}', southSeatLabel)
+                    .replace('{southPlayerName}', southPlayerName)}
                 </Text>
               ) : null}
             </View>

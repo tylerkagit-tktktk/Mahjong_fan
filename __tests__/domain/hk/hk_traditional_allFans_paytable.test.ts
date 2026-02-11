@@ -12,17 +12,17 @@ function makeRules(stakePreset: HkStakePreset, gunMode: HkGunMode): RulesV1 {
       scoringPreset: 'traditionalFan',
       gunMode,
       stakePreset,
-      capFan: 10,
+      capFan: 13,
     },
   };
 }
 
-// full-gun baseline (TWO_FIVE_CHICKEN) fan 0..10
-const full25: number[] = [1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128];
+// full-gun baseline (TWO_FIVE_CHICKEN) fan 0..13
+const full25: number[] = [1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384];
 
-// half-gun baseline (TWO_FIVE_CHICKEN) fan 0..10
-const D25: number[] = [0.5, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64];
-const O25: number[] = [0.25, 0.5, 1, 2, 4, 6, 8, 12, 16, 24, 32];
+// half-gun baseline (TWO_FIVE_CHICKEN) fan 0..13
+const D25: number[] = [0.5, 1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192];
+const O25: number[] = [0.25, 0.5, 1, 2, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96];
 
 const stakeScale: Record<HkStakePreset, number> = {
   TWO_FIVE_CHICKEN: 1,
@@ -47,11 +47,11 @@ function expectZeroSum(deltasQ: [number, number, number, number]): void {
   expect(deltasQ.reduce((sum, v) => sum + v, 0)).toBe(0);
 }
 
-describe('HK traditionalFan paytable (fan=1..10, all stake presets)', () => {
+describe('HK traditionalFan paytable (fan=1..13, all stake presets)', () => {
   const stakePresets: HkStakePreset[] = ['TWO_FIVE_CHICKEN', 'FIVE_ONE', 'ONE_TWO'];
 
-  it.each(stakePresets)('fullGun + %s: discard & zimo 1..10 fan', (preset) => {
-    for (let fan = 1; fan <= 10; fan += 1) {
+  it.each(stakePresets)('fullGun + %s: discard & zimo 1..13 fan', (preset) => {
+    for (let fan = 1; fan <= 13; fan += 1) {
       const rules = makeRules(preset, 'fullGun');
       const base = getFullPay(preset, fan);
 
@@ -96,8 +96,8 @@ describe('HK traditionalFan paytable (fan=1..10, all stake presets)', () => {
     }
   });
 
-  it.each(stakePresets)('halfGun + %s: discard & zimo 1..10 fan', (preset) => {
-    for (let fan = 1; fan <= 10; fan += 1) {
+  it.each(stakePresets)('halfGun + %s: discard & zimo 1..13 fan', (preset) => {
+    for (let fan = 1; fan <= 13; fan += 1) {
       const rules = makeRules(preset, 'halfGun');
       const { D, O } = getHalfGunDO(preset, fan);
 
@@ -144,4 +144,3 @@ describe('HK traditionalFan paytable (fan=1..10, all stake presets)', () => {
     }
   });
 });
-

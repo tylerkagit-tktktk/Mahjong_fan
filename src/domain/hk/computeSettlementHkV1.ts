@@ -23,7 +23,7 @@ type TraditionalHalfGunPay = {
   discardSmall: number;
 };
 
-type NormalizedFan = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+type NormalizedFan = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
 
 const TRADITIONAL_HALF_GUN_PAYTABLE: Record<
   HkStakePreset,
@@ -41,6 +41,9 @@ const TRADITIONAL_HALF_GUN_PAYTABLE: Record<
     8: { selfDraw: 32, discardBig: 32, discardSmall: 16 },
     9: { selfDraw: 48, discardBig: 48, discardSmall: 24 },
     10: { selfDraw: 64, discardBig: 64, discardSmall: 32 },
+    11: { selfDraw: 96, discardBig: 96, discardSmall: 48 },
+    12: { selfDraw: 128, discardBig: 128, discardSmall: 64 },
+    13: { selfDraw: 192, discardBig: 192, discardSmall: 96 },
   },
   FIVE_ONE: {
     0: { selfDraw: 1, discardBig: 1, discardSmall: 0.5 },
@@ -54,6 +57,9 @@ const TRADITIONAL_HALF_GUN_PAYTABLE: Record<
     8: { selfDraw: 64, discardBig: 64, discardSmall: 32 },
     9: { selfDraw: 96, discardBig: 96, discardSmall: 48 },
     10: { selfDraw: 128, discardBig: 128, discardSmall: 64 },
+    11: { selfDraw: 192, discardBig: 192, discardSmall: 96 },
+    12: { selfDraw: 256, discardBig: 256, discardSmall: 128 },
+    13: { selfDraw: 384, discardBig: 384, discardSmall: 192 },
   },
   ONE_TWO: {
     0: { selfDraw: 2, discardBig: 2, discardSmall: 1 },
@@ -67,6 +73,9 @@ const TRADITIONAL_HALF_GUN_PAYTABLE: Record<
     8: { selfDraw: 128, discardBig: 128, discardSmall: 64 },
     9: { selfDraw: 192, discardBig: 192, discardSmall: 96 },
     10: { selfDraw: 256, discardBig: 256, discardSmall: 128 },
+    11: { selfDraw: 384, discardBig: 384, discardSmall: 192 },
+    12: { selfDraw: 512, discardBig: 512, discardSmall: 256 },
+    13: { selfDraw: 768, discardBig: 768, discardSmall: 384 },
   },
 };
 
@@ -91,8 +100,8 @@ export function normalizeTraditionalFan(rawFan: number): NormalizedFan {
   if (rawFan <= 0) {
     return 0;
   }
-  if (rawFan >= 10) {
-    return 10;
+  if (rawFan >= 13) {
+    return 13;
   }
   return rawFan as NormalizedFan;
 }

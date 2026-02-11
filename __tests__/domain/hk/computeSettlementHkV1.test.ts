@@ -96,10 +96,11 @@ describe('HK half-gun half-spicy payout table', () => {
     },
   );
 
-  it('capFan=null allows extrapolation beyond fan=10', () => {
+  it('fan above cap is clamped to capFan (no extrapolation)', () => {
     const rules = getDefaultRules('HK');
+    rules.hk!.gunMode = 'fullGun';
     rules.hk!.stakePreset = 'TWO_FIVE_CHICKEN';
-    rules.hk!.capFan = null;
+    rules.hk!.capFan = 10;
     rules.minFanToWin = 0;
 
     const fan10 = computeSettlementHkV1({
@@ -116,8 +117,11 @@ describe('HK half-gun half-spicy payout table', () => {
       discarderSeatIndex: 1,
     });
 
-    expect(fan13.discarderPaysQ).toBeGreaterThan(fan10.discarderPaysQ);
-    expect(fan13.othersPayQ).toBeGreaterThan(fan10.othersPayQ);
+    expect(fan13.discarderPaysQ).toBe(fan10.discarderPaysQ);
+    expect(fan13.othersPayQ).toBe(fan10.othersPayQ);
+    expect(fan13.deltasQ).toEqual(fan10.deltasQ);
+    const sum13 = fan13.deltasQ[0] + fan13.deltasQ[1] + fan13.deltasQ[2] + fan13.deltasQ[3];
+    expect(sum13).toBe(0);
   });
 
   it('deltas always sum to zero', () => {

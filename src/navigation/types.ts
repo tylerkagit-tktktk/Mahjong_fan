@@ -6,6 +6,7 @@ export type RootTabParamList = {
 export type RootStackParamList = {
   Tabs: undefined;
   NewGameStepper: undefined;
+  GameTable: { gameId: string };
   GameDashboard: { gameId: string };
   AddHand: { gameId: string };
   Summary: { gameId: string };

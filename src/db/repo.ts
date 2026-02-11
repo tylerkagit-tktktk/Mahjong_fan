@@ -266,6 +266,21 @@ export async function wipeAllData(): Promise<void> {
   }
 }
 
+export async function endGame(gameId: string, endedAt: number = Date.now()): Promise<void> {
+  try {
+    if (__DEV__) {
+      setBreadcrumb('Repo: endGame', { gameId, endedAt });
+    }
+    await runExplicitWriteTransaction('endGame', async (executeTx) => {
+      await executeTx('UPDATE games SET endedAt = ? WHERE id = ?;', [endedAt, gameId]);
+    });
+  } catch (error) {
+    const wrapped = normalizeError(error, 'endGame failed');
+    console.error('[DB]', wrapped);
+    throw wrapped;
+  }
+}
+
 function normalizeError(error: unknown, context: string): Error {
   if (error instanceof Error) {
     return error;

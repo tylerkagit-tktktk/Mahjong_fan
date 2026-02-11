@@ -18,6 +18,7 @@ export type Game = {
   variant: string;
   rulesJson: string;
   startingDealerSeatIndex: number;
+  endedAt?: number | null;
   languageOverride?: string | null;
 };
 

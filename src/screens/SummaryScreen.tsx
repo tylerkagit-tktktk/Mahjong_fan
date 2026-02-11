@@ -44,7 +44,7 @@ function SummaryScreen({ navigation, route }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <Text style={styles.title}>{title || t('summary.title')}</Text>
-      <Text style={styles.subtitle}>{endedAt ? '牌局已結束' : '牌局摘要'}</Text>
+      <Text style={styles.subtitle}>{endedAt ? t('summary.ended') : t('summary.overview')}</Text>
       <AppButton label={t('common.back')} onPress={() => navigation.replace('Tabs')} />
     </SafeAreaView>
   );

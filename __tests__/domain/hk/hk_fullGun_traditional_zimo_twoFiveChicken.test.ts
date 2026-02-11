@@ -12,7 +12,7 @@ function makeFullGunRules(preset: HkStakePreset): RulesV1 {
       scoringPreset: 'traditionalFan',
       gunMode: 'fullGun',
       stakePreset: preset,
-      capFan: 10,
+      capFan: 13,
     },
   };
 }
@@ -91,6 +91,44 @@ describe('HK traditional + fullGun + TWO_FIVE_CHICKEN + zimo', () => {
     });
 
     expect(out.deltasQ).toEqual([-512, 0, 512, 0]);
+    expect(out.deltasQ.reduce((sum, item) => sum + item, 0)).toBe(0);
+  });
+
+  test.each([
+    { fan: 11, expectedEachLoser: 96, expectedWinner: 288 },
+    { fan: 12, expectedEachLoser: 128, expectedWinner: 384 },
+    { fan: 13, expectedEachLoser: 192, expectedWinner: 576 },
+  ])('zimo fan=$fan should follow 11-13 golden table', ({ fan, expectedEachLoser, expectedWinner }) => {
+    const rules = makeFullGunRules('TWO_FIVE_CHICKEN');
+
+    const out = computeHkSettlement({
+      rules,
+      fan,
+      settlementType: 'zimo',
+      winnerSeatIndex: 0,
+      discarderSeatIndex: null,
+    });
+
+    expect(out.deltasQ).toEqual([expectedWinner * 4, -expectedEachLoser * 4, -expectedEachLoser * 4, -expectedEachLoser * 4]);
+    expect(out.deltasQ.reduce((sum, item) => sum + item, 0)).toBe(0);
+  });
+
+  test.each([
+    { fan: 11, expectedDiscard: 192 },
+    { fan: 12, expectedDiscard: 256 },
+    { fan: 13, expectedDiscard: 384 },
+  ])('discard fan=$fan should follow 11-13 golden table', ({ fan, expectedDiscard }) => {
+    const rules = makeFullGunRules('TWO_FIVE_CHICKEN');
+
+    const out = computeHkSettlement({
+      rules,
+      fan,
+      settlementType: 'discard',
+      winnerSeatIndex: 0,
+      discarderSeatIndex: 1,
+    });
+
+    expect(out.deltasQ).toEqual([expectedDiscard * 4, -expectedDiscard * 4, 0, 0]);
     expect(out.deltasQ.reduce((sum, item) => sum + item, 0)).toBe(0);
   });
 });

@@ -41,7 +41,17 @@ function AppTabs() {
         },
       }}
     >
-      <Tab.Screen name="Home" component={HomeScreen} options={{ title: t('nav.home') }} />
+      <Tab.Screen
+        name="Home"
+        component={HomeScreen}
+        options={{
+          title: t('nav.home'),
+          headerShown: false,
+          tabBarStyle: {
+            display: 'none',
+          },
+        }}
+      />
       <Tab.Screen name="History" component={HistoryScreen} options={{ title: t('nav.history') }} />
     </Tab.Navigator>
   );

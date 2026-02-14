@@ -33,6 +33,7 @@ import {
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
 import { DEBUG_FLAGS } from '../debug/debugFlags';
+import { isDev } from '../debug/isDev';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddHand'>;
 
@@ -138,7 +139,7 @@ function AddHandScreen({ navigation, route }: Props) {
         data = await getGameBundle(gameId);
         setBreadcrumb('AddHand: after getGameBundle', { gameId });
       } catch (err) {
-        if (!err && __DEV__) {
+        if (!err && isDev) {
           const bug = new Error('[BUG] falsy rejection');
           (bug as { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
           console.error('[AddHand] step getGameBundle falsy', dumpBreadcrumbs(10));
@@ -344,7 +345,7 @@ function AddHandScreen({ navigation, route }: Props) {
         });
         setBreadcrumb('AddHand: after insertHand', { gameId });
       } catch (err) {
-        if (!err && __DEV__) {
+        if (!err && isDev) {
           const bug = new Error('[BUG] falsy rejection');
           (bug as { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
           console.error('[AddHand] step insertHand falsy', dumpBreadcrumbs(10));

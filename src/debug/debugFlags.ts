@@ -1,5 +1,6 @@
-export const DEBUG_FLAGS = {
-  enableBreadcrumbs: __DEV__ && false,
-  enableScrollSpacer: __DEV__ && false,
-} as const;
+import { isDev } from './isDev';
 
+export const DEBUG_FLAGS = {
+  enableBreadcrumbs: isDev && false,
+  enableScrollSpacer: isDev && false,
+} as const;

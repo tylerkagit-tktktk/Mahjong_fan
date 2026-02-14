@@ -6,6 +6,7 @@ import {
   inferCurrencyCodeFromSymbol,
   resolveCurrencyCode,
 } from './currency';
+import { isDev } from '../debug/isDev';
 
 export type RulesVersion = 1;
 export type Variant = 'HK' | 'TW' | 'PMA';
@@ -107,13 +108,13 @@ export function parseRules(
   json: string | null | undefined,
   fallbackVariant: Variant = 'HK',
 ): RulesV1 {
-  if (__DEV__) {
+  if (isDev) {
     setBreadcrumb('Rules: parse start', { hasJson: Boolean(json) });
   }
 
   if (!json) {
     const fallback = getDefaultRules(fallbackVariant);
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('Rules: parse fallback (empty)');
     }
     return fallback;
@@ -183,7 +184,7 @@ export function parseRules(
           : fallback.minFanToWin,
     };
 
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('Rules: parse success', { variant: normalized.variant });
     }
     return normalized;
@@ -192,7 +193,7 @@ export function parseRules(
       rulesJsonSnippet: json?.slice(0, 80),
     });
     const fallback = getDefaultRules(fallbackVariant);
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('Rules: parse fallback (exception)');
     }
     return fallback;

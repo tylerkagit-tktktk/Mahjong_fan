@@ -318,4 +318,25 @@ describe('repo insertHand draw fallback', () => {
     expect(lastInserted?.nextRoundLabelZh).toBe(expected);
     expect(state.game.currentRoundLabelZh).toBe(expected);
   });
+
+  it('throws guard error when game is ended', async () => {
+    const state = createInitialState('game-fallback-ended');
+    state.game.endedAt = Date.now();
+    state.game.gameState = 'ended';
+    const executeTx = buildExecuteTx(state);
+
+    await expect(
+      __testOnly_insertHandWithTx(createDrawInput('game-fallback-ended', '{}'), executeTx),
+    ).rejects.toThrow('Cannot add hand to ended or abandoned game');
+  });
+
+  it('throws guard error when game is abandoned', async () => {
+    const state = createInitialState('game-fallback-abandoned');
+    state.game.gameState = 'abandoned';
+    const executeTx = buildExecuteTx(state);
+
+    await expect(
+      __testOnly_insertHandWithTx(createDrawInput('game-fallback-abandoned', '{}'), executeTx),
+    ).rejects.toThrow('Cannot add hand to ended or abandoned game');
+  });
 });

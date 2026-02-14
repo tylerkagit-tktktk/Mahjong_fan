@@ -301,5 +301,9 @@
   "game.detail.hands.jump.south": "南風",
   "game.detail.hands.jump.west": "西風",
   "game.detail.hands.jump.north": "北風",
-  "game.detail.readOnlyBlockedTitle": "只可查看已結束對局"
+  "game.detail.readOnlyBlockedTitle": "只可查看已結束對局",
+  "newGame.confirmModal.field.playersEast": "東",
+  "newGame.confirmModal.field.playersSouth": "南",
+  "newGame.confirmModal.field.playersWest": "西",
+  "newGame.confirmModal.field.playersNorth": "北"
 }

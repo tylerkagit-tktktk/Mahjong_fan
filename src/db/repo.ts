@@ -429,6 +429,427 @@ export async function wipeAllData(): Promise<void> {
   }
 }
 
+export async function deleteAllGames(): Promise<void> {
+  try {
+    if (isDev) {
+      setBreadcrumb('Repo: deleteAllGames');
+    }
+
+    await runExplicitWriteTransaction('deleteAllGames', async (executeTx) => {
+      await executeTx('DELETE FROM hands;');
+      await executeTx('DELETE FROM players;');
+
+      // Backward compatibility: older builds may use game_players naming.
+      const gamePlayersTable = await executeTx(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_players' LIMIT 1;",
+      );
+      if (gamePlayersTable.rows.length > 0) {
+        await executeTx('DELETE FROM game_players;');
+      }
+
+      await executeTx('DELETE FROM games;');
+    });
+  } catch (error) {
+    const wrapped = normalizeError(error, 'deleteAllGames failed');
+    console.error('[DB]', wrapped);
+    throw wrapped;
+  }
+}
+
+function buildDemoId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildDemoPlayers(gameId: string): NewPlayerInput[] {
+  const names = ['東家阿明', '南家阿華', '西家阿強', '北家阿玲'];
+  return names.map((name, seatIndex) => ({
+    id: buildDemoId(`demo-player-${seatIndex}`),
+    gameId,
+    name,
+    seatIndex,
+  }));
+}
+
+function buildDemoHandInput(params: {
+  gameId: string;
+  dealerSeatIndex?: number;
+  isDraw?: boolean;
+  type?: string;
+  winnerSeatIndex?: number | null;
+  winnerPlayerId?: string | null;
+  discarderPlayerId?: string | null;
+  deltasJson?: string | null;
+  computedJson?: string;
+  createdAt: number;
+}): NewHandInput {
+  return {
+    id: buildDemoId('demo-hand'),
+    gameId: params.gameId,
+    dealerSeatIndex: params.dealerSeatIndex ?? 0,
+    isDraw: params.isDraw ?? false,
+    winnerSeatIndex: params.winnerSeatIndex ?? (params.winnerPlayerId ? 0 : null),
+    type: params.type ?? 'discard',
+    winnerPlayerId: params.winnerPlayerId ?? null,
+    discarderPlayerId: params.discarderPlayerId ?? null,
+    inputValue: 0,
+    deltasJson: params.deltasJson ?? null,
+    computedJson: params.computedJson ?? JSON.stringify({ source: 'seedDemo' }),
+    createdAt: params.createdAt,
+  };
+}
+
+export async function seedDemoGames(): Promise<void> {
+  if (!isDev) {
+    return;
+  }
+
+  const now = Date.now();
+  const oneDay = 24 * 60 * 60 * 1000;
+
+  // Case 1: 進行中（有手、未結束、無結果快照）
+  const activeGameId = buildDemoId('demo-active');
+  const activeCreatedAt = now - oneDay * 2;
+  const activePlayers = buildDemoPlayers(activeGameId);
+  await createGameWithPlayers(
+    {
+      id: activeGameId,
+      title: 'Demo 進行中',
+      currencySymbol: 'HK$',
+      variant: 'HK',
+      rulesJson: '{}',
+      startingDealerSeatIndex: 0,
+      createdAt: activeCreatedAt,
+    },
+    activePlayers,
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: activeGameId,
+      dealerSeatIndex: 0,
+      winnerSeatIndex: 1,
+      winnerPlayerId: activePlayers[1].id,
+      discarderPlayerId: activePlayers[1].id,
+      deltasJson: JSON.stringify([40, -20, -10, -10]),
+      createdAt: activeCreatedAt + 5 * 60 * 1000,
+    }),
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: activeGameId,
+      dealerSeatIndex: 1,
+      winnerSeatIndex: 2,
+      winnerPlayerId: activePlayers[2].id,
+      discarderPlayerId: activePlayers[2].id,
+      deltasJson: JSON.stringify([-10, 40, -20, -10]),
+      createdAt: activeCreatedAt + 10 * 60 * 1000,
+    }),
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: activeGameId,
+      dealerSeatIndex: 2,
+      winnerSeatIndex: 3,
+      winnerPlayerId: activePlayers[3].id,
+      discarderPlayerId: activePlayers[3].id,
+      deltasJson: JSON.stringify([-10, -10, 30, -10]),
+      createdAt: activeCreatedAt + 15 * 60 * 1000,
+    }),
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: activeGameId,
+      dealerSeatIndex: 3,
+      winnerSeatIndex: 0,
+      winnerPlayerId: activePlayers[0].id,
+      discarderPlayerId: activePlayers[0].id,
+      deltasJson: JSON.stringify([30, -10, -10, -10]),
+      createdAt: activeCreatedAt + 20 * 60 * 1000,
+    }),
+  );
+  await runExplicitWriteTransaction('seedDemoGames-active-null-result', async (executeTx) => {
+    await executeTx(
+      `UPDATE games
+       SET resultStatus = NULL,
+           resultSummaryJson = NULL,
+           resultUpdatedAt = ?
+       WHERE id = ?;`,
+      [activeCreatedAt + 6 * 60 * 1000, activeGameId],
+    );
+  });
+
+  // Case 2: 已結束（有結果）
+  const endedWithResultId = buildDemoId('demo-ended-result');
+  const endedWithResultCreatedAt = now - oneDay * 10;
+  const endedWithResultPlayers = buildDemoPlayers(endedWithResultId);
+  await createGameWithPlayers(
+    {
+      id: endedWithResultId,
+      title: 'Demo 已結束',
+      currencySymbol: 'HK$',
+      variant: 'HK',
+      rulesJson: '{}',
+      startingDealerSeatIndex: 0,
+      createdAt: endedWithResultCreatedAt,
+    },
+    endedWithResultPlayers,
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: endedWithResultId,
+      winnerPlayerId: endedWithResultPlayers[2].id,
+      discarderPlayerId: endedWithResultPlayers[0].id,
+      deltasJson: JSON.stringify({ values: [-16, -8, 32, -8] }),
+      createdAt: endedWithResultCreatedAt + 8 * 60 * 1000,
+    }),
+  );
+  await endGame(endedWithResultId, endedWithResultCreatedAt + 70 * 60 * 1000);
+  await updateGameResultSnapshot(endedWithResultId);
+
+  // Case 3: 已結束（未有結果）- 有手但 summary 刻意留空
+  const endedNoResultId = buildDemoId('demo-ended-no-result');
+  const endedNoResultCreatedAt = now - oneDay * 20;
+  const endedNoResultPlayers = buildDemoPlayers(endedNoResultId);
+  await createGameWithPlayers(
+    {
+      id: endedNoResultId,
+      title: 'Demo 已結束',
+      currencySymbol: 'HK$',
+      variant: 'HK',
+      rulesJson: '{}',
+      startingDealerSeatIndex: 0,
+      createdAt: endedNoResultCreatedAt,
+    },
+    endedNoResultPlayers,
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: endedNoResultId,
+      winnerPlayerId: endedNoResultPlayers[1].id,
+      discarderPlayerId: endedNoResultPlayers[3].id,
+      deltasJson: 'not-json',
+      createdAt: endedNoResultCreatedAt + 6 * 60 * 1000,
+    }),
+  );
+  await runExplicitWriteTransaction('seedDemoGames-end-no-result', async (executeTx) => {
+    await executeTx(
+      `UPDATE games
+       SET endedAt = ?,
+           resultStatus = NULL,
+           resultSummaryJson = NULL,
+           resultUpdatedAt = ?
+       WHERE id = ?;`,
+      [endedNoResultCreatedAt + 80 * 60 * 1000, now, endedNoResultId],
+    );
+  });
+
+  // Case 4: 已放棄（ended + 0 hands）
+  const abandonedGameId = buildDemoId('demo-abandoned');
+  const abandonedCreatedAt = now - oneDay * 5;
+  await createGameWithPlayers(
+    {
+      id: abandonedGameId,
+      title: 'Demo 已放棄',
+      currencySymbol: 'HK$',
+      variant: 'HK',
+      rulesJson: '{}',
+      startingDealerSeatIndex: 0,
+      createdAt: abandonedCreatedAt,
+    },
+    buildDemoPlayers(abandonedGameId),
+  );
+  await endGame(abandonedGameId, abandonedCreatedAt + 10 * 60 * 1000);
+
+  if (isDev) {
+    setBreadcrumb('Repo: seedDemoGames done', {
+      gameIds: [activeGameId, endedWithResultId, endedNoResultId, abandonedGameId].join(','),
+    });
+  }
+}
+
+export async function seedDemoGamesWithProgress(): Promise<void> {
+  if (!isDev) {
+    return;
+  }
+
+  const now = Date.now();
+  const oneDay = 24 * 60 * 60 * 1000;
+
+  // Case A: 進行中（真局風推進 + 流局 pass/stick）
+  const activeId = buildDemoId('demo-progress-active');
+  const activeCreatedAt = now - oneDay * 2;
+  const activePlayers = buildDemoPlayers(activeId);
+  await createGameWithPlayers(
+    {
+      id: activeId,
+      title: 'Demo 進行中',
+      currencySymbol: 'HK$',
+      variant: 'HK',
+      rulesJson: '{}',
+      startingDealerSeatIndex: 0,
+      createdAt: activeCreatedAt,
+    },
+    activePlayers,
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: activeId,
+      winnerPlayerId: activePlayers[0].id,
+      discarderPlayerId: activePlayers[1].id,
+      deltasJson: JSON.stringify([20, -10, -5, -5]),
+      createdAt: activeCreatedAt + 5 * 60 * 1000,
+    }),
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: activeId,
+      dealerSeatIndex: 1,
+      winnerSeatIndex: 2,
+      winnerPlayerId: activePlayers[1].id,
+      discarderPlayerId: activePlayers[2].id,
+      deltasJson: JSON.stringify([-10, 30, -10, -10]),
+      createdAt: activeCreatedAt + 10 * 60 * 1000,
+    }),
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: activeId,
+      dealerSeatIndex: 2,
+      winnerSeatIndex: 3,
+      winnerPlayerId: activePlayers[2].id,
+      discarderPlayerId: activePlayers[3].id,
+      deltasJson: JSON.stringify([-10, -10, 30, -10]),
+      createdAt: activeCreatedAt + 15 * 60 * 1000,
+    }),
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: activeId,
+      dealerSeatIndex: 3,
+      winnerSeatIndex: 0,
+      winnerPlayerId: activePlayers[3].id,
+      discarderPlayerId: activePlayers[0].id,
+      deltasJson: JSON.stringify([-10, -10, -10, 30]),
+      createdAt: activeCreatedAt + 20 * 60 * 1000,
+    }),
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: activeId,
+      dealerSeatIndex: 0,
+      winnerSeatIndex: null,
+      winnerPlayerId: null,
+      discarderPlayerId: null,
+      isDraw: true,
+      type: 'draw',
+      computedJson: JSON.stringify({ source: 'seedDemo', dealerAction: 'stick' }),
+      deltasJson: null,
+      createdAt: activeCreatedAt + 25 * 60 * 1000,
+    }),
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: activeId,
+      dealerSeatIndex: 0,
+      winnerSeatIndex: null,
+      winnerPlayerId: null,
+      discarderPlayerId: null,
+      isDraw: true,
+      type: 'draw',
+      computedJson: JSON.stringify({ source: 'seedDemo', dealerAction: 'pass' }),
+      deltasJson: null,
+      createdAt: activeCreatedAt + 30 * 60 * 1000,
+    }),
+  );
+
+  // Case B: 已結束 + 有結果
+  const endedResultId = buildDemoId('demo-progress-ended-result');
+  const endedResultCreatedAt = now - oneDay * 10;
+  const endedResultPlayers = buildDemoPlayers(endedResultId);
+  await createGameWithPlayers(
+    {
+      id: endedResultId,
+      title: 'Demo 已結束',
+      currencySymbol: 'HK$',
+      variant: 'HK',
+      rulesJson: '{}',
+      startingDealerSeatIndex: 0,
+      createdAt: endedResultCreatedAt,
+    },
+    endedResultPlayers,
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: endedResultId,
+      winnerPlayerId: endedResultPlayers[2].id,
+      discarderPlayerId: endedResultPlayers[0].id,
+      deltasJson: JSON.stringify({ values: [-16, -8, 32, -8] }),
+      createdAt: endedResultCreatedAt + 8 * 60 * 1000,
+    }),
+  );
+  await endGame(endedResultId, endedResultCreatedAt + 70 * 60 * 1000);
+  await updateGameResultSnapshot(endedResultId);
+
+  // Case C: 已結束 + 無結果
+  const endedNoResultId = buildDemoId('demo-progress-ended-no-result');
+  const endedNoResultCreatedAt = now - oneDay * 20;
+  const endedNoResultPlayers = buildDemoPlayers(endedNoResultId);
+  await createGameWithPlayers(
+    {
+      id: endedNoResultId,
+      title: 'Demo 已結束',
+      currencySymbol: 'HK$',
+      variant: 'HK',
+      rulesJson: '{}',
+      startingDealerSeatIndex: 0,
+      createdAt: endedNoResultCreatedAt,
+    },
+    endedNoResultPlayers,
+  );
+  await insertHand(
+    buildDemoHandInput({
+      gameId: endedNoResultId,
+      winnerPlayerId: endedNoResultPlayers[1].id,
+      discarderPlayerId: endedNoResultPlayers[3].id,
+      deltasJson: 'not-json',
+      createdAt: endedNoResultCreatedAt + 6 * 60 * 1000,
+    }),
+  );
+  await runExplicitWriteTransaction('seedDemoGamesWithProgress-ended-no-result', async (executeTx) => {
+    await executeTx(
+      `UPDATE games
+       SET endedAt = ?,
+           resultStatus = NULL,
+           resultSummaryJson = NULL,
+           resultUpdatedAt = ?
+       WHERE id = ?;`,
+      [endedNoResultCreatedAt + 80 * 60 * 1000, now, endedNoResultId],
+    );
+  });
+
+  // Case D: 已放棄
+  const abandonedId = buildDemoId('demo-progress-abandoned');
+  const abandonedCreatedAt = now - oneDay * 5;
+  await createGameWithPlayers(
+    {
+      id: abandonedId,
+      title: 'Demo 已放棄',
+      currencySymbol: 'HK$',
+      variant: 'HK',
+      rulesJson: '{}',
+      startingDealerSeatIndex: 0,
+      createdAt: abandonedCreatedAt,
+    },
+    buildDemoPlayers(abandonedId),
+  );
+  await endGame(abandonedId, abandonedCreatedAt + 10 * 60 * 1000);
+
+  if (isDev) {
+    setBreadcrumb('Repo: seedDemoGamesWithProgress done', {
+      gameIds: [activeId, endedResultId, endedNoResultId, abandonedId].join(','),
+    });
+  }
+}
+
 export async function endGame(gameId: string, endedAt: number = Date.now()): Promise<void> {
   try {
     if (isDev) {

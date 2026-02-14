@@ -301,5 +301,9 @@
   "game.detail.hands.jump.south": "South Wind",
   "game.detail.hands.jump.west": "West Wind",
   "game.detail.hands.jump.north": "North Wind",
-  "game.detail.readOnlyBlockedTitle": "Ended games only"
+  "game.detail.readOnlyBlockedTitle": "Ended games only",
+  "newGame.confirmModal.field.playersEast": "East",
+  "newGame.confirmModal.field.playersSouth": "South",
+  "newGame.confirmModal.field.playersWest": "West",
+  "newGame.confirmModal.field.playersNorth": "North"
 }

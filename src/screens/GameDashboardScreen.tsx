@@ -496,14 +496,35 @@ function GameDashboardScreen({ navigation, route }: Props) {
     if (!bundle || !isEnded) {
       return;
     }
+    const rankingLines = rankedPlayers.map((player, index) =>
+      `${index + 1}. ${player.name} ${formatSignedMoney(player.total, bundle.game.currencySymbol ?? '')}`,
+    );
+    const playerStatsLines = rankedPlayers.map(
+      (player) =>
+        `${player.name}：${translateWithFallback(t, 'game.detail.stats.wins', '胡牌')} ${
+          winsBySeat.get(player.seatIndex) ?? 0
+        }｜${translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} ${zimoBySeat.get(player.seatIndex) ?? 0}`,
+    );
     const summaryText = [
       `${translateWithFallback(t, 'game.detail.header.title', '對局總結')}: ${bundle.game.title}`,
       `${translateWithFallback(t, 'game.detail.header.date', '日期')}: ${formatDate(bundle.game.createdAt)}`,
       `${translateWithFallback(t, 'game.detail.result.winner', '贏家')}: ${result.winnerText}`,
       `${translateWithFallback(t, 'game.detail.result.loser', '輸家')}: ${result.loserText}`,
+      '',
+      `${translateWithFallback(t, 'game.detail.players.title', '玩家排名')}:`,
+      ...rankingLines,
+      '',
+      `${translateWithFallback(t, 'game.detail.stats.title', '統計')}:`,
+      ...playerStatsLines,
+      `${translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多放銃')}: ${
+        mostDiscarder ? `${mostDiscarder.name} (${mostDiscarder.count})` : '—'
+      }`,
+      `${translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}: ${
+        mostZimo ? `${mostZimo.name} (${mostZimo.count})` : '—'
+      }`,
     ].join('\n');
     await Share.share({ title: bundle.game.title, message: summaryText });
-  }, [bundle, isEnded, result.loserText, result.winnerText, t]);
+  }, [bundle, isEnded, mostDiscarder, mostZimo, rankedPlayers, result.loserText, result.winnerText, t, winsBySeat, zimoBySeat]);
 
   const toggleExpand = useCallback((handId: string) => {
     setExpandedHands((prev) => ({ ...prev, [handId]: !prev[handId] }));

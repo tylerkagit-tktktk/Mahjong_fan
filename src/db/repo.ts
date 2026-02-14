@@ -11,6 +11,7 @@ import {
 } from '../models/db';
 import { executeSql, runWithWriteLock, withDb } from './sqlite';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
+import { isDev } from '../debug/isDev';
 
 function rowsToArray<T>(result: SQLite.ResultSet): T[] {
   const items: T[] = [];
@@ -44,7 +45,7 @@ async function runExplicitWriteTransaction<T>(
   return runWithWriteLock(async () =>
     withDb(async (db) => {
       const executeTx: TxExecute = async (statement, params = []) => {
-        if (__DEV__) {
+        if (isDev) {
           setBreadcrumb('SQL tx', { statement, params });
         }
         try {
@@ -78,7 +79,7 @@ export async function createGameWithPlayers(
   players: NewPlayerInput[],
 ): Promise<void> {
   try {
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('Repo: createGameWithPlayers', { gameId: game.id, players: players.length });
     }
     const createdAt = game.createdAt ?? Date.now();
@@ -116,7 +117,7 @@ export async function createGameWithPlayers(
 
 export async function listGames(): Promise<Game[]> {
   try {
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('Repo: listGames');
     }
     const result = await executeSql('SELECT * FROM games ORDER BY createdAt DESC;');
@@ -130,7 +131,7 @@ export async function listGames(): Promise<Game[]> {
 
 export async function getGameBundle(gameId: string): Promise<GameBundle> {
   try {
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('Repo: getGameBundle', { gameId });
     }
     const gameResult = await executeSql('SELECT * FROM games WHERE id = ? LIMIT 1;', [gameId]);
@@ -160,7 +161,7 @@ export async function getGameBundle(gameId: string): Promise<GameBundle> {
 
 export async function getHandsCount(gameId: string): Promise<number> {
   try {
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('Repo: getHandsCount', { gameId });
     }
     const result = await executeSql('SELECT COUNT(*) as count FROM hands WHERE gameId = ?;', [gameId]);
@@ -232,7 +233,7 @@ export async function insertHand(handInput: NewHandInput): Promise<Hand> {
 
 export async function deleteGameCascade(gameId: string): Promise<void> {
   try {
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('Repo: deleteGameCascade', { gameId });
     }
 
@@ -250,7 +251,7 @@ export async function deleteGameCascade(gameId: string): Promise<void> {
 
 export async function wipeAllData(): Promise<void> {
   try {
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('Repo: wipeAllData');
     }
 
@@ -268,7 +269,7 @@ export async function wipeAllData(): Promise<void> {
 
 export async function endGame(gameId: string, endedAt: number = Date.now()): Promise<void> {
   try {
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('Repo: endGame', { gameId, endedAt });
     }
     await runExplicitWriteTransaction('endGame', async (executeTx) => {
@@ -285,7 +286,7 @@ function normalizeError(error: unknown, context: string): Error {
   if (error instanceof Error) {
     return error;
   }
-  if (!error && __DEV__) {
+  if (!error && isDev) {
     const bug = new Error('[BUG] falsy rejection');
     (bug as { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
     console.error('[DB] falsy error in', context, dumpBreadcrumbs(10));

@@ -1,6 +1,7 @@
 import SQLite from 'react-native-sqlite-storage';
 import { initializeSchema } from './schema';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
+import { isDev } from '../debug/isDev';
 
 const DB_NAME = 'mahjong_be_fd.db';
 
@@ -22,7 +23,7 @@ async function openDb(): Promise<SQLite.SQLiteDatabase> {
   try {
     db = await dbPromise;
   } catch (error) {
-    if (!error && __DEV__) {
+    if (!error && isDev) {
       console.error('[DB] falsy error at openDb', new Error('trace').stack, dumpBreadcrumbs(10));
       const bug = new Error('[BUG] falsy rejection');
       (bug as { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
@@ -36,7 +37,7 @@ async function openDb(): Promise<SQLite.SQLiteDatabase> {
       await initializeSchema(db);
       schemaReady = true;
     } catch (error) {
-      if (!error && __DEV__) {
+      if (!error && isDev) {
         console.error(
           '[DB] falsy error at initializeSchema',
           new Error('trace').stack,
@@ -79,13 +80,13 @@ export async function executeSql<T = SQLite.ResultSet>(
 ): Promise<T> {
   try {
     const db = await openDb();
-    if (__DEV__) {
+    if (isDev) {
       setBreadcrumb('SQL execute', { statement: sql, params });
     }
     const [result] = await db.executeSql(sql, params);
     return result as T;
   } catch (error) {
-    if (!error && __DEV__) {
+    if (!error && isDev) {
       console.error('[DB] falsy error at executeSql', new Error('trace').stack, {
         sql,
         params,

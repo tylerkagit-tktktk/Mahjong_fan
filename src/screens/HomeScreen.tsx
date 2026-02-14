@@ -1,5 +1,3 @@
-import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import { CompositeScreenProps } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useState } from 'react';
 import { Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
@@ -8,13 +6,10 @@ import { endGame, listGames } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { Game } from '../models/db';
-import { RootStackParamList, RootTabParamList } from '../navigation/types';
+import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
 
-type Props = CompositeScreenProps<
-  BottomTabScreenProps<RootTabParamList, 'Home'>,
-  NativeStackScreenProps<RootStackParamList>
->;
+type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
 const DICE_SIZE = 64;
 const PIP_SIZE = 6;

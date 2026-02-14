@@ -1,5 +1,6 @@
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Pressable, Text } from 'react-native';
 import AddHandScreen from '../screens/AddHandScreen';
 import GameDashboardScreen from '../screens/GameDashboardScreen';
 import GameTableScreen from '../screens/GameTableScreen';
@@ -9,59 +10,32 @@ import theme from '../theme/theme';
 import NewGameStepperScreen from '../screens/NewGameStepperScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import SummaryScreen from '../screens/SummaryScreen';
-import { RootStackParamList, RootTabParamList } from './types';
+import { RootStackParamList } from './types';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const Tab = createBottomTabNavigator<RootTabParamList>();
 
-function AppTabs() {
-  const { t } = useAppLanguage();
+const settingsHeaderTextStyle = {
+  color: theme.colors.textSecondary,
+  fontSize: 18,
+  fontWeight: '500',
+} as const;
 
-  return (
-    <Tab.Navigator
-      initialRouteName="Home"
-      screenOptions={{
-        headerShown: false,
-        sceneContainerStyle: {
-          backgroundColor: theme.colors.background,
-        },
-        tabBarStyle: {
-          backgroundColor: theme.colors.background,
-          borderTopWidth: 0,
-          borderTopColor: 'transparent',
-          elevation: 0,
-          shadowOpacity: 0,
-        },
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.textSecondary,
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '600',
-        },
-      }}
-    >
-      <Tab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{
-          title: t('nav.home'),
-          headerShown: false,
-          tabBarStyle: {
-            display: 'none',
-          },
-        }}
-      />
-      <Tab.Screen name="History" component={HistoryScreen} options={{ title: t('nav.history') }} />
-    </Tab.Navigator>
-  );
+function renderSettingsHeaderRight(navigation: NativeStackNavigationProp<RootStackParamList>) {
+  return function SettingsHeaderRight() {
+    return (
+      <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10}>
+        <Text style={settingsHeaderTextStyle}>⚙︎</Text>
+      </Pressable>
+    );
+  };
 }
 
 function RootNavigator() {
   const { t } = useAppLanguage();
   return (
     <Stack.Navigator
-      initialRouteName="Tabs"
+      initialRouteName="Home"
       screenOptions={{
         headerTitleAlign: 'center',
         headerBackVisible: true,
@@ -73,7 +47,16 @@ function RootNavigator() {
         headerTintColor: theme.colors.textPrimary,
       }}
     >
-      <Stack.Screen name="Tabs" component={AppTabs} options={{ headerShown: false }} />
+      <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="History"
+        component={HistoryScreen}
+        options={({ navigation }) => ({
+          title: t('home.historyAll'),
+          headerRight: renderSettingsHeaderRight(navigation),
+        })}
+      />
+      <Stack.Screen name="Tabs" component={HomeScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="NewGameStepper"
         component={NewGameStepperScreen}

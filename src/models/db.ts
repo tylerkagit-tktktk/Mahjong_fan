@@ -18,7 +18,17 @@ export type Game = {
   variant: string;
   rulesJson: string;
   startingDealerSeatIndex: number;
+  progressIndex: number;
+  currentWindIndex: number;
+  currentRoundNumber: number;
+  maxWindIndex: number;
+  gameState: 'draft' | 'active' | 'ended' | 'abandoned';
+  currentRoundLabelZh?: string | null;
   endedAt?: number | null;
+  handsCount?: number;
+  resultStatus?: 'none' | 'result' | 'abandoned' | null;
+  resultSummaryJson?: string | null;
+  resultUpdatedAt?: number | null;
   languageOverride?: string | null;
 };
 
@@ -34,6 +44,8 @@ export type Hand = {
   gameId: string;
   handIndex: number;
   dealerSeatIndex: number;
+  windIndex: number;
+  roundNumber: number;
   isDraw: boolean;
   winnerSeatIndex?: number | null;
   type: string;
@@ -41,6 +53,7 @@ export type Hand = {
   discarderPlayerId?: string | null;
   inputValue?: number | null;
   deltasJson?: string | null;
+  nextRoundLabelZh?: string | null;
   computedJson: string;
   createdAt: number;
 };
@@ -51,8 +64,20 @@ export type GameBundle = {
   hands: Hand[];
 };
 
-export type NewGameInput = Omit<Game, 'createdAt'> & { createdAt?: number };
+export type NewGameInput = Omit<
+  Game,
+  'createdAt' | 'currentWindIndex' | 'currentRoundNumber' | 'maxWindIndex'
+> & {
+  createdAt?: number;
+  progressIndex?: number;
+  currentWindIndex?: number;
+  currentRoundNumber?: number;
+  maxWindIndex?: number;
+};
 export type NewPlayerInput = Player;
-export type NewHandInput = Omit<Hand, 'handIndex' | 'createdAt'> & {
+export type NewHandInput = Omit<
+  Hand,
+  'handIndex' | 'createdAt' | 'windIndex' | 'roundNumber' | 'nextRoundLabelZh'
+> & {
   createdAt?: number;
 };

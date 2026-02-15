@@ -11,6 +11,7 @@ type MockGameRow = {
   currentRoundNumber: number;
   handsCount: number;
   currentRoundLabelZh: string | null;
+  seatRotationOffset: number;
 };
 
 type MockRowSet<T> = {
@@ -61,8 +62,21 @@ function buildExecuteTx(state: TxState) {
           startingDealerSeatIndex: state.game.startingDealerSeatIndex,
           currentWindIndex: state.game.currentWindIndex,
           currentRoundNumber: state.game.currentRoundNumber,
+          currentRoundLabelZh: state.game.currentRoundLabelZh,
+          seatRotationOffset: state.game.seatRotationOffset,
         },
       ]);
+    }
+
+    if (statement.startsWith('SELECT * FROM players WHERE gameId = ? ORDER BY seatIndex ASC;')) {
+      const gameId = String(params[0]);
+      const matching = [0, 1, 2, 3].map((seat) => ({
+        id: `${gameId}-p${seat}`,
+        gameId,
+        name: `P${seat}`,
+        seatIndex: seat,
+      }));
+      return createRowSet(matching);
     }
 
     if (statement.startsWith('SELECT MAX(handIndex) as maxIndex FROM hands')) {
@@ -115,7 +129,8 @@ function buildExecuteTx(state: TxState) {
     if (statement.includes('SET handsCount = COALESCE(handsCount, 0) + 1,')) {
       state.game.handsCount += 1;
       state.game.currentRoundLabelZh = params[0] == null ? null : String(params[0]);
-      state.game.gameState = String(params[1]) as MockGameRow['gameState'];
+      state.game.seatRotationOffset = Number(params[1] ?? state.game.seatRotationOffset);
+      state.game.gameState = String(params[2]) as MockGameRow['gameState'];
       return createRowSet([]);
     }
 
@@ -138,6 +153,7 @@ function createInitialState(gameId: string): TxState {
       currentRoundNumber: 1,
       handsCount: 0,
       currentRoundLabelZh: '東風東局',
+      seatRotationOffset: 0,
     },
     hands: [],
   };
@@ -319,6 +335,45 @@ describe('repo insertHand draw fallback', () => {
     expect(state.game.currentRoundLabelZh).toBe(expected);
   });
 
+  it('does not auto increment seatRotationOffset after 北風 -> 東風 cycle wrap', async () => {
+    const state = createInitialState('game-rotation-wrap');
+    state.game.currentRoundLabelZh = '北風北局';
+    state.game.seatRotationOffset = 0;
+    state.hands = Array.from({ length: 15 }).map((_, index) => ({
+      id: `seed-h${index + 1}`,
+      gameId: 'game-rotation-wrap',
+      handIndex: index,
+      dealerSeatIndex: index % 4,
+      windIndex: 0,
+      roundNumber: 1,
+      isDraw: 0,
+      winnerSeatIndex: (index + 1) % 4,
+      type: 'discard',
+      winnerPlayerId: `winner-${(index + 1) % 4}`,
+      discarderPlayerId: `discarder-${index % 4}`,
+      inputValue: 0,
+      deltasJson: JSON.stringify([10, -5, -3, -2]),
+      nextRoundLabelZh: null,
+      computedJson: JSON.stringify({ source: 'seed' }),
+      createdAt: Date.now() - (15 - index) * 1000,
+    }));
+    const executeTx = buildExecuteTx(state);
+
+    const inserted = await __testOnly_insertHandWithTx(
+      createNormalInput({
+        gameId: 'game-rotation-wrap',
+        id: 'game-rotation-wrap-h16',
+        dealerSeatIndex: 3,
+        winnerSeatIndex: 0,
+      }),
+      executeTx,
+    );
+
+    expect(inserted.nextRoundLabelZh).toBe('東風東局');
+    expect(state.game.currentRoundLabelZh).toBe('東風東局');
+    expect(state.game.seatRotationOffset).toBe(0);
+  });
+
   it('throws guard error when game is ended', async () => {
     const state = createInitialState('game-fallback-ended');
     state.game.endedAt = Date.now();
@@ -327,7 +382,7 @@ describe('repo insertHand draw fallback', () => {
 
     await expect(
       __testOnly_insertHandWithTx(createDrawInput('game-fallback-ended', '{}'), executeTx),
-    ).rejects.toThrow('Cannot add hand to ended or abandoned game');
+    ).rejects.toThrow('Cannot mutate ended or abandoned game');
   });
 
   it('throws guard error when game is abandoned', async () => {
@@ -337,6 +392,6 @@ describe('repo insertHand draw fallback', () => {
 
     await expect(
       __testOnly_insertHandWithTx(createDrawInput('game-fallback-abandoned', '{}'), executeTx),
-    ).rejects.toThrow('Cannot add hand to ended or abandoned game');
+    ).rejects.toThrow('Cannot mutate ended or abandoned game');
   });
 });

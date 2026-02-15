@@ -13,6 +13,7 @@ import { getRoundLabel } from '../models/dealer';
 import { executeSql, runWithWriteLock, withDb } from './sqlite';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
 import { isDev } from '../debug/isDev';
+import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 
 function rowsToArray<T>(result: SQLite.ResultSet): T[] {
   const items: T[] = [];
@@ -127,41 +128,57 @@ export async function createGameWithPlayers(
     const createdAt = game.createdAt ?? Date.now();
 
     await runExplicitWriteTransaction('createGameWithPlayers', async (executeTx) => {
-      await executeTx(
-        `INSERT INTO games
-         (id, title, createdAt, currencySymbol, variant, rulesJson, startingDealerSeatIndex, progressIndex, currentWindIndex, currentRoundNumber, maxWindIndex, gameState, currentRoundLabelZh, languageOverride)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-        [
-          game.id,
-          game.title,
+      await __testOnly_createGameWithPlayersWithTx(
+        {
+          ...game,
           createdAt,
-          game.currencySymbol,
-          game.variant,
-          game.rulesJson,
-          game.startingDealerSeatIndex ?? 0,
-          game.progressIndex ?? 0,
-          game.currentWindIndex ?? 0,
-          game.currentRoundNumber ?? 1,
-          game.maxWindIndex ?? 1,
-          'draft',
-          '東風東局',
-          game.languageOverride ?? null,
-        ],
+        },
+        players,
+        executeTx,
       );
-
-      for (const player of players) {
-        await executeTx('INSERT INTO players (id, gameId, name, seatIndex) VALUES (?, ?, ?, ?);', [
-          player.id,
-          player.gameId,
-          player.name,
-          player.seatIndex,
-        ]);
-      }
     });
   } catch (error) {
     const wrapped = normalizeError(error, 'createGameWithPlayers failed');
     console.error('[DB]', wrapped);
     throw wrapped;
+  }
+}
+
+export async function __testOnly_createGameWithPlayersWithTx(
+  game: NewGameInput,
+  players: NewPlayerInput[],
+  executeTx: TxExecute,
+): Promise<void> {
+  await executeTx(
+    `INSERT INTO games
+     (id, title, createdAt, currencySymbol, variant, rulesJson, startingDealerSeatIndex, progressIndex, currentWindIndex, currentRoundNumber, maxWindIndex, seatRotationOffset, gameState, currentRoundLabelZh, languageOverride)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      game.id,
+      game.title,
+      game.createdAt ?? Date.now(),
+      game.currencySymbol,
+      game.variant,
+      game.rulesJson,
+      0,
+      game.progressIndex ?? 0,
+      game.currentWindIndex ?? 0,
+      game.currentRoundNumber ?? 1,
+      game.maxWindIndex ?? 1,
+      0,
+      'draft',
+      INITIAL_ROUND_LABEL_ZH,
+      game.languageOverride ?? null,
+    ],
+  );
+
+  for (const player of players) {
+    await executeTx('INSERT INTO players (id, gameId, name, seatIndex) VALUES (?, ?, ?, ?);', [
+      player.id,
+      player.gameId,
+      player.name,
+      player.seatIndex,
+    ]);
   }
 }
 

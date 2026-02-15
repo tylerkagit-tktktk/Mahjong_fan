@@ -18,10 +18,15 @@ export type Game = {
   variant: string;
   rulesJson: string;
   startingDealerSeatIndex: number;
+  /** @deprecated Legacy progression snapshot; do not use for runtime round label. */
   progressIndex: number;
+  /** @deprecated Legacy progression snapshot; do not use for runtime round label. */
   currentWindIndex: number;
+  /** @deprecated Legacy progression snapshot; do not use for runtime round label. */
   currentRoundNumber: number;
+  /** @deprecated Legacy progression snapshot; do not use for runtime round label. */
   maxWindIndex: number;
+  seatRotationOffset?: number;
   gameState: 'draft' | 'active' | 'ended' | 'abandoned';
   currentRoundLabelZh?: string | null;
   endedAt?: number | null;
@@ -73,6 +78,7 @@ export type NewGameInput = Omit<
   currentWindIndex?: number;
   currentRoundNumber?: number;
   maxWindIndex?: number;
+  seatRotationOffset?: number;
 };
 export type NewPlayerInput = Player;
 export type NewHandInput = Omit<
@@ -80,4 +86,5 @@ export type NewHandInput = Omit<
   'handIndex' | 'createdAt' | 'windIndex' | 'roundNumber' | 'nextRoundLabelZh'
 > & {
   createdAt?: number;
+  discarderSeatIndex?: number | null;
 };

@@ -1,5 +1,6 @@
 // @ts-ignore
 import SQLite from 'react-native-sqlite-storage';
+import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 
 const TABLES = [
   `CREATE TABLE IF NOT EXISTS games(
@@ -13,6 +14,7 @@ const TABLES = [
     currentWindIndex INTEGER NOT NULL DEFAULT 0,
     currentRoundNumber INTEGER NOT NULL DEFAULT 1,
     maxWindIndex INTEGER NOT NULL DEFAULT 1,
+    seatRotationOffset INTEGER NOT NULL DEFAULT 0,
     gameState TEXT NOT NULL DEFAULT 'draft',
     currentRoundLabelZh TEXT NULL,
     languageOverride TEXT NULL
@@ -62,6 +64,7 @@ export async function initializeSchema(db: SQLite.SQLiteDatabase): Promise<void>
   await ensureColumn(db, 'games', 'currentWindIndex', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'games', 'currentRoundNumber', 'INTEGER NOT NULL DEFAULT 1');
   await ensureColumn(db, 'games', 'maxWindIndex', 'INTEGER NOT NULL DEFAULT 1');
+  await ensureColumn(db, 'games', 'seatRotationOffset', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'games', 'gameState', "TEXT NOT NULL DEFAULT 'draft'");
   await ensureColumn(db, 'games', 'currentRoundLabelZh', 'TEXT NULL');
   await ensureColumn(db, 'games', 'endedAt', 'INTEGER NULL');
@@ -118,8 +121,11 @@ async function ensureBackfillDefaults(db: SQLite.SQLiteDatabase) {
     await db.executeSql('UPDATE games SET currentWindIndex = 0 WHERE currentWindIndex IS NULL;');
     await db.executeSql('UPDATE games SET currentRoundNumber = 1 WHERE currentRoundNumber IS NULL;');
     await db.executeSql('UPDATE games SET maxWindIndex = 1 WHERE maxWindIndex IS NULL;');
+    await db.executeSql('UPDATE games SET seatRotationOffset = 0 WHERE seatRotationOffset IS NULL;');
     await db.executeSql("UPDATE games SET gameState = 'draft' WHERE gameState IS NULL OR gameState = '';");
-    await db.executeSql("UPDATE games SET currentRoundLabelZh = '東風東局' WHERE currentRoundLabelZh IS NULL;");
+    await db.executeSql(
+      `UPDATE games SET currentRoundLabelZh = '${INITIAL_ROUND_LABEL_ZH}' WHERE currentRoundLabelZh IS NULL;`,
+    );
     await db.executeSql('UPDATE games SET handsCount = 0 WHERE handsCount IS NULL;');
     await db.executeSql(`
       UPDATE games

@@ -1,5 +1,6 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useEffect, useState } from 'react';
 import { Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { endGame, listGames } from '../db/repo';
@@ -10,6 +11,7 @@ import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
+const ONBOARDING_SEEN_KEY = 'home_onboarding_seen_v1';
 
 const DICE_SIZE = 64;
 const PIP_SIZE = 6;
@@ -134,6 +136,7 @@ function HomeScreen({ navigation }: Props) {
   const [activeGamePromptVisible, setActiveGamePromptVisible] = useState(false);
   const [blockingGame, setBlockingGame] = useState<Game | null>(null);
   const [endingBlockingGame, setEndingBlockingGame] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const ctaWidth = Math.min(width - 96, 320);
   const heroSafeTop = clampNumber(height * 0.22, insets.top + 130, insets.top + 210);
@@ -160,6 +163,48 @@ function HomeScreen({ navigation }: Props) {
   };
 
   const blockingGameDuration = blockingGame ? formatElapsedLabel(blockingGame, t) : copy.zeroMinutes;
+  const onboardingCopy = {
+    title: translateWithFallback(t, 'onboarding.title', '三步完成第一局'),
+    subtitle: translateWithFallback(t, 'onboarding.subtitle', '快速上手流程'),
+    stepCreate: translateWithFallback(t, 'onboarding.step.create', '1. 開新枱建立對局'),
+    stepHands: translateWithFallback(t, 'onboarding.step.hands', '2. 在牌枱逐手記錄'),
+    stepSummary: translateWithFallback(t, 'onboarding.step.summary', '3. 完局後查看總結與分享'),
+    skip: translateWithFallback(t, 'onboarding.action.skip', '跳過'),
+    continue: translateWithFallback(t, 'onboarding.action.continue', '知道了'),
+    startNow: translateWithFallback(t, 'onboarding.action.startNow', '立即開新枱'),
+  };
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const seen = await AsyncStorage.getItem(ONBOARDING_SEEN_KEY);
+        if (active && seen !== '1') {
+          setShowOnboarding(true);
+        }
+      } catch {
+        if (active) {
+          setShowOnboarding(true);
+        }
+      }
+    })().catch(() => {
+      if (active) {
+        setShowOnboarding(true);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const markOnboardingSeen = async () => {
+    setShowOnboarding(false);
+    try {
+      await AsyncStorage.setItem(ONBOARDING_SEEN_KEY, '1');
+    } catch (error) {
+      console.warn('[Home] failed to persist onboarding flag', error);
+    }
+  };
 
   async function handleNewGamePress() {
     try {
@@ -401,6 +446,71 @@ function HomeScreen({ navigation }: Props) {
               style={({ pressed }) => [styles.promptCancelButton, pressed && styles.promptCancelPressed]}
             >
               <Text style={styles.promptCancelText}>{copy.cancel}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        transparent
+        animationType="fade"
+        visible={showOnboarding}
+        onRequestClose={() => {
+          markOnboardingSeen().catch((error) => {
+            console.warn('[Home] failed to close onboarding', error);
+          });
+        }}
+      >
+        <View style={styles.promptBackdrop}>
+          <Pressable
+            style={styles.promptBackdropPressable}
+            onPress={() => {
+              markOnboardingSeen().catch((error) => {
+                console.warn('[Home] failed to skip onboarding', error);
+              });
+            }}
+          />
+          <View style={styles.promptCard}>
+            <Text style={styles.promptTitle}>{onboardingCopy.title}</Text>
+            <Text style={styles.promptMessage}>{onboardingCopy.subtitle}</Text>
+            <Text style={styles.onboardingStep}>{onboardingCopy.stepCreate}</Text>
+            <Text style={styles.onboardingStep}>{onboardingCopy.stepHands}</Text>
+            <Text style={styles.onboardingStep}>{onboardingCopy.stepSummary}</Text>
+
+            <Pressable
+              style={({ pressed }) => [styles.promptPrimaryButton, pressed && styles.promptPrimaryPressed]}
+              onPress={() => {
+                markOnboardingSeen().catch((error) => {
+                  console.warn('[Home] failed to continue onboarding', error);
+                });
+              }}
+            >
+              <Text style={styles.promptPrimaryText}>{onboardingCopy.continue}</Text>
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [styles.promptSecondaryButton, pressed && styles.promptSecondaryPressed]}
+              onPress={() => {
+                markOnboardingSeen()
+                  .then(() => {
+                    navigation.navigate('NewGameStepper');
+                  })
+                  .catch((error) => {
+                    console.warn('[Home] failed to start from onboarding', error);
+                  });
+              }}
+            >
+              <Text style={styles.promptSecondaryText}>{onboardingCopy.startNow}</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                markOnboardingSeen().catch((error) => {
+                  console.warn('[Home] failed to skip onboarding', error);
+                });
+              }}
+              style={({ pressed }) => [styles.promptCancelButton, pressed && styles.promptCancelPressed]}
+            >
+              <Text style={styles.promptCancelText}>{onboardingCopy.skip}</Text>
             </Pressable>
           </View>
         </View>
@@ -714,6 +824,12 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
+  },
+  onboardingStep: {
+    marginTop: theme.spacing.xs,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.textPrimary,
+    lineHeight: 20,
   },
   promptGameTitle: {
     marginTop: 4,

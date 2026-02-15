@@ -7,6 +7,7 @@ import { listGames } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { Game } from '../models/db';
+import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
 
@@ -352,7 +353,7 @@ function HistoryScreen({ navigation }: Props) {
 
     const hasResult = Boolean(summary && summary.hasResult);
     const canOpenDetail = game.endedAt != null && !isAbandoned;
-    const defaultRoundLabel = translateWithFallback(t, 'history.round.initial', '東風東局');
+    const defaultRoundLabel = translateWithFallback(t, 'history.round.initial', INITIAL_ROUND_LABEL_ZH);
     const activeRoundLabel = game.currentRoundLabelZh || defaultRoundLabel;
     const settlementLine = isInProgress
       ? activeRoundLabel
@@ -414,7 +415,7 @@ function HistoryScreen({ navigation }: Props) {
       <Text style={styles.emptyTitle}>{translateWithFallback(t, 'history.empty.title', '未有對局記錄')}</Text>
       <Text style={styles.emptySubtitle}>{translateWithFallback(t, 'history.empty.subtitle', '按「新開局」開始第一局')}</Text>
       <Pressable style={styles.emptyAction} onPress={() => navigation.navigate('NewGameStepper')}>
-        <Text style={styles.emptyActionText}>{translateWithFallback(t, 'home.newGame', '新開局')}</Text>
+        <Text style={styles.emptyActionText}>{translateWithFallback(t, 'history.empty.actionStart', '開始新對局')}</Text>
       </Pressable>
     </View>
   );

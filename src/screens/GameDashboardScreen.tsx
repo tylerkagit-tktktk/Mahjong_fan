@@ -10,22 +10,15 @@ import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { GameBundle, Hand } from '../models/db';
 import { getRoundLabel } from '../models/dealer';
+import { computeGameStats } from '../models/gameStats';
 import { parseRules, RulesV1, Variant } from '../models/rules';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GameDashboard'>;
 
-type DetailResult = {
-  seatTotalsQ: number[];
-  moneyTotals: number[];
-  winnerText: string;
-  loserText: string;
-  hasResult: boolean;
-};
-
 type SeatSummary = {
-  seatIndex: number;
+  playerId: string;
   name: string;
   total: number;
 };
@@ -43,14 +36,6 @@ type HandSection = {
   title: string;
   data: HandDisplay[];
   totalCount: number;
-};
-
-const EMPTY_RESULT: DetailResult = {
-  seatTotalsQ: [0, 0, 0, 0],
-  moneyTotals: [0, 0, 0, 0],
-  winnerText: '—',
-  loserText: '—',
-  hasResult: false,
 };
 
 const SEAT_KEYS: Array<'seat.east' | 'seat.south' | 'seat.west' | 'seat.north'> = [
@@ -105,6 +90,44 @@ function formatSignedMoney(value: number, symbol: string): string {
   return `${sign}${symbol ?? ''}${abs}`;
 }
 
+function formatHighlight(value: { name: string; count: number; tiedCount: number } | null, t: (key: TranslationKey) => string): string {
+  if (!value) {
+    return '—';
+  }
+  if (value.tiedCount > 1) {
+    return `${value.name} (${value.count}) (+${value.tiedCount - 1} ${translateWithFallback(
+      t,
+      'game.detail.share.more',
+      'more',
+    )})`;
+  }
+  return `${value.name} (${value.count})`;
+}
+
+function buildShareRankingLines(
+  rankedPlayers: SeatSummary[],
+  symbol: string,
+  t: (key: TranslationKey) => string,
+): string[] {
+  const tieCountByTotal = new Map<number, number>();
+  rankedPlayers.forEach((player) => {
+    tieCountByTotal.set(player.total, (tieCountByTotal.get(player.total) ?? 0) + 1);
+  });
+
+  const emittedTotals = new Set<number>();
+  return rankedPlayers.map((player, index) => {
+    const sameTotalCount = tieCountByTotal.get(player.total) ?? 1;
+    const tieSuffix =
+      sameTotalCount > 1 && !emittedTotals.has(player.total)
+        ? ` ${translateWithFallback(t, 'game.detail.share.tieSuffix', '(+{count} more)', {
+            count: sameTotalCount - 1,
+          })}`
+        : '';
+    emittedTotals.add(player.total);
+    return `${index + 1}. ${player.name} ${formatSignedMoney(player.total, symbol)}${tieSuffix}`;
+  });
+}
+
 function resolveDeltasQ(deltasJson?: string | null): number[] | null {
   if (!deltasJson) {
     return null;
@@ -139,72 +162,6 @@ function parseDealerAction(computedJson: string | null | undefined): 'stick' | '
   } catch {
     return null;
   }
-}
-
-function buildResult(bundle: GameBundle): DetailResult {
-  if (bundle.game.resultSummaryJson) {
-    try {
-      const parsed = JSON.parse(bundle.game.resultSummaryJson) as {
-        winnerText?: string;
-        loserText?: string;
-        seatTotalsQ?: number[];
-      };
-      if (Array.isArray(parsed.seatTotalsQ)) {
-        const seatTotalsQ = [0, 1, 2, 3].map((index) => Number(parsed.seatTotalsQ?.[index] ?? 0));
-        const moneyTotals = seatTotalsQ.map((value) => value / 4);
-        return {
-          seatTotalsQ,
-          moneyTotals,
-          winnerText: parsed.winnerText ?? '—',
-          loserText: parsed.loserText ?? '—',
-          hasResult: Boolean(parsed.winnerText || parsed.loserText),
-        };
-      }
-    } catch {
-      // fallback to compute from hands
-    }
-  }
-
-  const seatTotalsQ = [0, 0, 0, 0];
-  let hasAnyDelta = false;
-  bundle.hands.forEach((hand) => {
-    const deltas = resolveDeltasQ(hand.deltasJson);
-    if (!deltas) {
-      return;
-    }
-    hasAnyDelta = true;
-    for (let i = 0; i < 4; i += 1) {
-      seatTotalsQ[i] += Number(deltas[i] ?? 0);
-    }
-  });
-
-  if (!hasAnyDelta) {
-    return EMPTY_RESULT;
-  }
-
-  const moneyTotals = seatTotalsQ.map((value) => value / 4);
-  let winnerSeat = 0;
-  let loserSeat = 0;
-  for (let i = 1; i < moneyTotals.length; i += 1) {
-    if (moneyTotals[i] > moneyTotals[winnerSeat]) {
-      winnerSeat = i;
-    }
-    if (moneyTotals[i] < moneyTotals[loserSeat]) {
-      loserSeat = i;
-    }
-  }
-
-  const namesBySeat = new Map<number, string>();
-  bundle.players.forEach((player) => namesBySeat.set(player.seatIndex, player.name));
-  const symbol = bundle.game.currencySymbol ?? '';
-
-  return {
-    seatTotalsQ,
-    moneyTotals,
-    winnerText: `${namesBySeat.get(winnerSeat) ?? '—'} ${formatSignedMoney(moneyTotals[winnerSeat], symbol)}`,
-    loserText: `${namesBySeat.get(loserSeat) ?? '—'} ${formatSignedMoney(moneyTotals[loserSeat], symbol)}`,
-    hasResult: true,
-  };
 }
 
 function GameDashboardScreen({ navigation, route }: Props) {
@@ -281,86 +238,18 @@ function GameDashboardScreen({ navigation, route }: Props) {
     return bundle.hands.slice().sort((a, b) => a.handIndex - b.handIndex);
   }, [bundle]);
 
-  const result = useMemo(() => (bundle ? buildResult(bundle) : EMPTY_RESULT), [bundle]);
+  const gameStats = useMemo(() => (bundle ? computeGameStats(bundle) : null), [bundle]);
 
   const rankedPlayers = useMemo(() => {
-    if (!bundle) {
+    if (!bundle || !gameStats) {
       return [] as SeatSummary[];
     }
-    const totals = result.moneyTotals;
-    return bundle.players
-      .map((player) => ({ seatIndex: player.seatIndex, name: player.name, total: totals[player.seatIndex] ?? 0 }))
-      .sort((a, b) => b.total - a.total);
-  }, [bundle, result.moneyTotals]);
-
-  const winsBySeat = useMemo(() => {
-    const map = new Map<number, number>();
-    orderedHands.forEach((hand) => {
-      if (hand.winnerSeatIndex == null) {
-        return;
-      }
-      map.set(hand.winnerSeatIndex, (map.get(hand.winnerSeatIndex) ?? 0) + 1);
-    });
-    return map;
-  }, [orderedHands]);
-
-  const drawsCount = useMemo(() => orderedHands.filter((hand) => hand.isDraw).length, [orderedHands]);
-
-  const zimoBySeat = useMemo(() => {
-    const map = new Map<number, number>();
-    orderedHands.forEach((hand) => {
-      if (hand.type !== 'zimo' || hand.winnerSeatIndex == null) {
-        return;
-      }
-      map.set(hand.winnerSeatIndex, (map.get(hand.winnerSeatIndex) ?? 0) + 1);
-    });
-    return map;
-  }, [orderedHands]);
-
-  const mostDiscarder = useMemo(() => {
-    if (!bundle) {
-      return null;
-    }
-    const count = new Map<string, number>();
-    orderedHands.forEach((hand) => {
-      if (hand.type !== 'discard' || !hand.discarderPlayerId) {
-        return;
-      }
-      count.set(hand.discarderPlayerId, (count.get(hand.discarderPlayerId) ?? 0) + 1);
-    });
-    let topId: string | null = null;
-    let topCount = 0;
-    count.forEach((value, key) => {
-      if (value > topCount) {
-        topCount = value;
-        topId = key;
-      }
-    });
-    if (!topId) {
-      return null;
-    }
-    const player = bundle.players.find((entry) => entry.id === topId);
-    return { name: player?.name ?? '—', count: topCount };
-  }, [bundle, orderedHands]);
-
-  const mostZimo = useMemo(() => {
-    if (!bundle) {
-      return null;
-    }
-    let seatIndex: number | null = null;
-    let count = 0;
-    zimoBySeat.forEach((value, key) => {
-      if (value > count) {
-        count = value;
-        seatIndex = key;
-      }
-    });
-    if (seatIndex == null) {
-      return null;
-    }
-    const player = bundle.players.find((entry) => entry.seatIndex === seatIndex);
-    return { name: player?.name ?? '—', count };
-  }, [bundle, zimoBySeat]);
+    return gameStats.ranking.map((entry) => ({
+      playerId: entry.playerId,
+      name: entry.name,
+      total: entry.totalMoney,
+    }));
+  }, [bundle, gameStats]);
 
   const handDisplayList = useMemo(() => {
     if (!bundle) {
@@ -493,38 +382,40 @@ function GameDashboardScreen({ navigation, route }: Props) {
   );
 
   const handleShare = useCallback(async () => {
-    if (!bundle || !isEnded) {
+    if (!bundle) {
       return;
     }
-    const rankingLines = rankedPlayers.map((player, index) =>
-      `${index + 1}. ${player.name} ${formatSignedMoney(player.total, bundle.game.currencySymbol ?? '')}`,
-    );
+    if (!isEnded) {
+      Alert.alert(
+        translateWithFallback(t, 'game.detail.readOnlyBlockedTitle', '只可查看已結束對局'),
+        translateWithFallback(t, 'game.detail.readOnlyWarning', '此頁僅供已結束對局查看。'),
+      );
+      return;
+    }
+    const rankingLines = buildShareRankingLines(rankedPlayers, bundle.game.currencySymbol ?? '', t);
     const playerStatsLines = rankedPlayers.map(
       (player) =>
         `${player.name}：${translateWithFallback(t, 'game.detail.stats.wins', '胡牌')} ${
-          winsBySeat.get(player.seatIndex) ?? 0
-        }｜${translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} ${zimoBySeat.get(player.seatIndex) ?? 0}`,
+          gameStats?.winsByPlayerId[player.playerId] ?? 0
+        }｜${translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} ${gameStats?.zimoByPlayerId[player.playerId] ?? 0}`,
     );
+    const titleText = bundle.game.title || translateWithFallback(t, 'game.detail.header.title', '對局總結');
+    const dateText = formatDate(bundle.game.createdAt);
     const summaryText = [
-      `${translateWithFallback(t, 'game.detail.header.title', '對局總結')}: ${bundle.game.title}`,
-      `${translateWithFallback(t, 'game.detail.header.date', '日期')}: ${formatDate(bundle.game.createdAt)}`,
-      `${translateWithFallback(t, 'game.detail.result.winner', '贏家')}: ${result.winnerText}`,
-      `${translateWithFallback(t, 'game.detail.result.loser', '輸家')}: ${result.loserText}`,
+      `${titleText} — ${dateText}`,
       '',
       `${translateWithFallback(t, 'game.detail.players.title', '玩家排名')}:`,
       ...rankingLines,
       '',
       `${translateWithFallback(t, 'game.detail.stats.title', '統計')}:`,
+      `${translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', { count: handsCount })}`,
+      `${translateWithFallback(t, 'game.detail.stats.draws', '流局')}: ${gameStats?.draws ?? 0}`,
       ...playerStatsLines,
-      `${translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多放銃')}: ${
-        mostDiscarder ? `${mostDiscarder.name} (${mostDiscarder.count})` : '—'
-      }`,
-      `${translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}: ${
-        mostZimo ? `${mostZimo.name} (${mostZimo.count})` : '—'
-      }`,
+      `${translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多放銃')}: ${formatHighlight(gameStats?.mostDiscarder ?? null, t)}`,
+      `${translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}: ${formatHighlight(gameStats?.mostZimo ?? null, t)}`,
     ].join('\n');
     await Share.share({ title: bundle.game.title, message: summaryText });
-  }, [bundle, isEnded, mostDiscarder, mostZimo, rankedPlayers, result.loserText, result.winnerText, t, winsBySeat, zimoBySeat]);
+  }, [bundle, gameStats, handsCount, isEnded, rankedPlayers, t]);
 
   const toggleExpand = useCallback((handId: string) => {
     setExpandedHands((prev) => ({ ...prev, [handId]: !prev[handId] }));
@@ -764,7 +655,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
                 {translateWithFallback(t, 'game.detail.players.title', '玩家排名')}
               </Text>
               {rankedPlayers.map((player, index) => (
-                <View key={`rank-${player.seatIndex}`} style={styles.playerRow}>
+                <View key={`rank-${player.playerId}`} style={styles.playerRow}>
                   <Text style={styles.playerRank}>{index + 1}.</Text>
                   <View style={styles.playerMetaWrap}>
                     <Text style={styles.playerName}>{player.name}</Text>
@@ -830,23 +721,23 @@ function GameDashboardScreen({ navigation, route }: Props) {
                 {translateWithFallback(t, 'game.detail.stats.hands', '手數')}：{handsCount}
               </Text>
               <Text style={styles.metaText}>
-                {translateWithFallback(t, 'game.detail.stats.draws', '流局')}：{drawsCount}
+                {translateWithFallback(t, 'game.detail.stats.draws', '流局')}：{gameStats?.draws ?? 0}
               </Text>
               {rankedPlayers.map((player) => (
-                <Text key={`wins-${player.seatIndex}`} style={styles.metaText}>
+                <Text key={`wins-${player.playerId}`} style={styles.metaText}>
                   {player.name}：
-                  {translateWithFallback(t, 'game.detail.stats.wins', '胡牌')} {winsBySeat.get(player.seatIndex) ?? 0}
+                  {translateWithFallback(t, 'game.detail.stats.wins', '胡牌')} {gameStats?.winsByPlayerId[player.playerId] ?? 0}
                   {' ｜ '}
-                  {translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} {zimoBySeat.get(player.seatIndex) ?? 0}
+                  {translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} {gameStats?.zimoByPlayerId[player.playerId] ?? 0}
                 </Text>
               ))}
               <Text style={styles.metaText}>
                 {translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多放銃')}：
-                {mostDiscarder ? `${mostDiscarder.name} (${mostDiscarder.count})` : '—'}
+                {gameStats?.mostDiscarder ? `${gameStats.mostDiscarder.name} (${gameStats.mostDiscarder.count})` : '—'}
               </Text>
               <Text style={styles.metaText}>
                 {translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}：
-                {mostZimo ? `${mostZimo.name} (${mostZimo.count})` : '—'}
+                {gameStats?.mostZimo ? `${gameStats.mostZimo.name} (${gameStats.mostZimo.count})` : '—'}
               </Text>
             </Card>
 

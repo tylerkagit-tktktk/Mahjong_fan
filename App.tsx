@@ -1,20 +1,98 @@
 import { NavigationContainer } from '@react-navigation/native';
-import { useEffect } from 'react';
-import { StatusBar, useColorScheme } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, StatusBar, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './src/navigation/RootNavigator';
-import { initializeI18n } from './src/i18n/i18n';
+import { initializeI18n, t } from './src/i18n/i18n';
 import { dumpBreadcrumbs, getLastBreadcrumb, getLastSqlBreadcrumb } from './src/debug/breadcrumbs';
+import AppErrorBoundary from './src/components/AppErrorBoundary';
+import { isDev } from './src/debug/isDev';
 
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
+  const [navigationKey, setNavigationKey] = useState(0);
+  const crashAlertShownRef = useRef(false);
 
   useEffect(() => {
-    void initializeI18n();
+    initializeI18n().catch((error) => {
+      console.warn('[i18n] initialize failed', error);
+    });
   }, []);
 
   useEffect(() => {
-    if (!__DEV__) {
+    const handleAsyncError = (origin: string, reason: unknown) => {
+      const payload =
+        reason instanceof Error
+          ? { message: reason.message, stack: reason.stack, name: reason.name }
+          : { message: String(reason ?? 'unknown') };
+      console.error('[AppAsyncGuard]', { origin, ...payload });
+      if (crashAlertShownRef.current) {
+        return;
+      }
+      crashAlertShownRef.current = true;
+      Alert.alert(
+        t('app.errorBoundary.title'),
+        t('app.errorBoundary.message'),
+        [
+          {
+            text: t('app.errorBoundary.backHome'),
+            onPress: () => {
+              crashAlertShownRef.current = false;
+              setNavigationKey((prev) => prev + 1);
+            },
+          },
+        ],
+      );
+    };
+
+    const onUnhandledRejection = (eventOrReason: unknown) => {
+      const reason =
+        typeof eventOrReason === 'object' && eventOrReason !== null && 'reason' in (eventOrReason as Record<string, unknown>)
+          ? (eventOrReason as Record<string, unknown>).reason
+          : eventOrReason;
+      handleAsyncError('unhandledrejection', reason);
+    };
+
+    const onError = (eventOrMessage: unknown) => {
+      const message =
+        typeof eventOrMessage === 'object' && eventOrMessage !== null && 'message' in (eventOrMessage as Record<string, unknown>)
+          ? (eventOrMessage as Record<string, unknown>).message
+          : eventOrMessage;
+      handleAsyncError('onerror', message);
+    };
+
+    (globalThis as {
+      addEventListener?: (type: string, handler: (event: unknown) => void) => void;
+      removeEventListener?: (type: string, handler: (event: unknown) => void) => void;
+      onunhandledrejection?: (event: unknown) => void;
+      onerror?: (event: unknown) => void;
+    }).onunhandledrejection = onUnhandledRejection;
+
+    if (typeof (globalThis as { addEventListener?: (type: string, handler: (event: unknown) => void) => void }).addEventListener === 'function') {
+      (globalThis as { addEventListener: (type: string, handler: (event: unknown) => void) => void }).addEventListener(
+        'unhandledrejection',
+        onUnhandledRejection,
+      );
+    }
+
+    (globalThis as {
+      onerror?: (event: unknown) => void;
+    }).onerror = onError;
+
+    return () => {
+      if (typeof (globalThis as { removeEventListener?: (type: string, handler: (event: unknown) => void) => void }).removeEventListener === 'function') {
+        (globalThis as { removeEventListener: (type: string, handler: (event: unknown) => void) => void }).removeEventListener(
+          'unhandledrejection',
+          onUnhandledRejection,
+        );
+      }
+      (globalThis as { onunhandledrejection?: (event: unknown) => void }).onunhandledrejection = undefined;
+      (globalThis as { onerror?: (event: unknown) => void }).onerror = undefined;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDev) {
       return;
     }
 
@@ -112,9 +190,15 @@ function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <NavigationContainer>
-        <RootNavigator />
-      </NavigationContainer>
+      <AppErrorBoundary
+        onBackHome={() => {
+          setNavigationKey((prev) => prev + 1);
+        }}
+      >
+        <NavigationContainer key={navigationKey}>
+          <RootNavigator />
+        </NavigationContainer>
+      </AppErrorBoundary>
     </SafeAreaProvider>
   );
 }

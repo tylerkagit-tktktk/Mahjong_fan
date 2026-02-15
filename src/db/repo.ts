@@ -10,6 +10,11 @@ import {
   Player,
 } from '../models/db';
 import { getRoundLabel } from '../models/dealer';
+import {
+  aggregatePlayerTotalsQByTimeline,
+  getEffectivePlayerForSeat,
+  normalizeSeatRotationOffset,
+} from '../models/seatRotation';
 import { executeSql, runWithWriteLock, withDb } from './sqlite';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
 import { isDev } from '../debug/isDev';
@@ -80,6 +85,157 @@ function formatSignedMoney(value: number, symbol: string): string {
 type SqlParam = string | number | null;
 
 type TxExecute = (statement: string, params?: SqlParam[]) => Promise<SQLite.ResultSet>;
+
+const MUTABLE_GAME_STATES: ReadonlySet<string> = new Set(['draft', 'active']);
+const MUTATION_BLOCKED_ERROR = 'Cannot mutate ended or abandoned game';
+const INTERNAL_BACKUPS_KEY = 'db_internal_backups_v1';
+const INTERNAL_BACKUPS_LIMIT = 5;
+const INTERNAL_BACKUP_SCHEMA_VERSION = 1;
+const INTERNAL_BACKUP_SCHEMA_COMPATIBILITY = new Set([INTERNAL_BACKUP_SCHEMA_VERSION]);
+
+type InternalBackup = {
+  id: string;
+  createdAt: number;
+  trigger: 'insertHand' | 'endGame';
+  schemaVersion: number;
+  gameMeta: Array<{
+    gameId: string;
+    handsCount: number;
+    gameState: string;
+  }>;
+  games: GameBundle[];
+};
+
+type BackupValidationReason = 'schema' | 'handsCount' | 'state' | 'deltas';
+type BackupValidationResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: BackupValidationReason;
+    };
+
+type KeyValueStorage = {
+  getItem: (key: string) => Promise<string | null>;
+  setItem: (key: string, value: string) => Promise<void>;
+};
+
+const inMemoryStorage = new Map<string, string>();
+
+function getKeyValueStorage(): KeyValueStorage {
+  try {
+    const asyncStorage = require('@react-native-async-storage/async-storage').default as KeyValueStorage;
+    if (asyncStorage && typeof asyncStorage.getItem === 'function' && typeof asyncStorage.setItem === 'function') {
+      return asyncStorage;
+    }
+  } catch {
+    // fall through to in-memory fallback for tests/non-native env.
+  }
+  return {
+    async getItem(key: string) {
+      return inMemoryStorage.has(key) ? inMemoryStorage.get(key)! : null;
+    },
+    async setItem(key: string, value: string) {
+      inMemoryStorage.set(key, value);
+    },
+  };
+}
+
+function assertGameMutable(gameState: string | null | undefined, endedAt: number | null | undefined): void {
+  if (endedAt != null || !MUTABLE_GAME_STATES.has(gameState ?? '')) {
+    throw new Error(MUTATION_BLOCKED_ERROR);
+  }
+}
+
+export const __testOnly_mutationBlockedErrorMessage = MUTATION_BLOCKED_ERROR;
+
+export function __testOnly_assertGameMutable(
+  gameState: string | null | undefined,
+  endedAt: number | null | undefined,
+): void {
+  assertGameMutable(gameState, endedAt);
+}
+
+function validateGameStateSnapshot(game: Game, handsCount: number): boolean {
+  const state = game.gameState ?? 'draft';
+  if (!['draft', 'active', 'ended', 'abandoned'].includes(state)) {
+    return false;
+  }
+  if ((state === 'ended' || state === 'abandoned') && game.endedAt == null) {
+    return false;
+  }
+  if ((state === 'draft' || state === 'active') && game.endedAt != null) {
+    return false;
+  }
+  if (state === 'abandoned' && handsCount > 0) {
+    return false;
+  }
+  return true;
+}
+
+export function __testOnly_validateBackupSnapshot(snapshot: InternalBackup): BackupValidationResult {
+  if (!INTERNAL_BACKUP_SCHEMA_COMPATIBILITY.has(Number(snapshot.schemaVersion ?? -1))) {
+    return { ok: false, reason: 'schema' };
+  }
+  for (const bundle of snapshot.games) {
+    const handsCount = bundle.hands.length;
+    const summary = snapshot.gameMeta?.find((entry) => entry.gameId === bundle.game.id);
+    if (summary && summary.handsCount !== handsCount) {
+      return { ok: false, reason: 'handsCount' };
+    }
+    if ((bundle.game.handsCount ?? handsCount) !== handsCount) {
+      return { ok: false, reason: 'handsCount' };
+    }
+    if (!validateGameStateSnapshot(bundle.game, handsCount)) {
+      return { ok: false, reason: 'state' };
+    }
+    for (const hand of bundle.hands) {
+      const deltas = resolveDeltasQ(hand.deltasJson);
+      if (!deltas || deltas.length === 0) {
+        continue;
+      }
+      const sum = deltas.reduce((acc, value) => acc + Number(value ?? 0), 0);
+      if (sum !== 0) {
+        return { ok: false, reason: 'deltas' };
+      }
+    }
+  }
+  return { ok: true };
+}
+
+async function createInternalBackupSnapshot(trigger: 'insertHand' | 'endGame'): Promise<void> {
+  const storage = getKeyValueStorage();
+  const games = await listGames();
+  if (games.length === 0) {
+    return;
+  }
+  const bundles = await Promise.all(games.map((game) => getGameBundle(game.id)));
+  const snapshot: InternalBackup = {
+    id: `${trigger}-${Date.now()}`,
+    createdAt: Date.now(),
+    trigger,
+    schemaVersion: INTERNAL_BACKUP_SCHEMA_VERSION,
+    gameMeta: bundles.map((bundle) => ({
+      gameId: bundle.game.id,
+      handsCount: bundle.hands.length,
+      gameState: bundle.game.gameState ?? 'draft',
+    })),
+    games: bundles,
+  };
+  const raw = await storage.getItem(INTERNAL_BACKUPS_KEY);
+  let current: InternalBackup[] = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as InternalBackup[];
+      if (Array.isArray(parsed)) {
+        current = parsed;
+      }
+    } catch {
+      current = [];
+    }
+  }
+  const next = [snapshot, ...current].slice(0, INTERNAL_BACKUPS_LIMIT);
+  await storage.setItem(INTERNAL_BACKUPS_KEY, JSON.stringify(next));
+}
 
 async function runExplicitWriteTransaction<T>(
   context: string,
@@ -241,12 +397,53 @@ export async function getHandsCount(gameId: string): Promise<number> {
   }
 }
 
+export async function updateGameSeatRotationOffset(gameId: string, seatRotationOffset: number): Promise<void> {
+  try {
+    if (isDev) {
+      setBreadcrumb('Repo: updateGameSeatRotationOffset', { gameId, seatRotationOffset });
+    }
+    await runExplicitWriteTransaction('updateGameSeatRotationOffset', async (executeTx) => {
+      await __testOnly_applySeatRotationOffsetWithTx(gameId, seatRotationOffset, executeTx);
+    });
+  } catch (error) {
+    const wrapped = normalizeError(error, 'updateGameSeatRotationOffset failed');
+    console.error('[DB]', wrapped);
+    throw wrapped;
+  }
+}
+
+export async function __testOnly_applySeatRotationOffsetWithTx(
+  gameId: string,
+  seatRotationOffset: number,
+  executeTx: TxExecute,
+): Promise<void> {
+  const gameResult = await executeTx('SELECT endedAt, gameState, seatRotationOffset FROM games WHERE id = ? LIMIT 1;', [gameId]);
+  if (gameResult.rows.length === 0) {
+    throw new Error(`Game not found: ${gameId}`);
+  }
+  const gameRow = gameResult.rows.item(0) as {
+    endedAt?: number | null;
+    gameState?: string | null;
+    seatRotationOffset?: number | null;
+  };
+  assertGameMutable(gameRow.gameState ?? null, gameRow.endedAt ?? null);
+  const nextOffset = normalizeSeatRotationOffset(seatRotationOffset);
+  const currentOffset = normalizeSeatRotationOffset(Number(gameRow.seatRotationOffset ?? 0));
+  if (currentOffset === nextOffset) {
+    return;
+  }
+  await executeTx('UPDATE games SET seatRotationOffset = ? WHERE id = ?;', [
+    nextOffset,
+    gameId,
+  ]);
+}
+
 export async function __testOnly_insertHandWithTx(
   handInput: NewHandInput,
   executeTx: TxExecute,
 ): Promise<Hand> {
   const gameResult = await executeTx(
-    'SELECT endedAt, gameState, startingDealerSeatIndex, currentWindIndex, currentRoundNumber FROM games WHERE id = ? LIMIT 1;',
+    'SELECT endedAt, gameState, startingDealerSeatIndex, currentWindIndex, currentRoundNumber, currentRoundLabelZh, seatRotationOffset FROM games WHERE id = ? LIMIT 1;',
     [handInput.gameId],
   );
   if (gameResult.rows.length === 0) {
@@ -258,15 +455,35 @@ export async function __testOnly_insertHandWithTx(
     startingDealerSeatIndex?: number | null;
     currentWindIndex?: number | null;
     currentRoundNumber?: number | null;
+    currentRoundLabelZh?: string | null;
+    seatRotationOffset?: number | null;
   };
   const gameEndedAt = gameRow.endedAt ?? null;
   const gameState = gameRow.gameState ?? 'draft';
-  if (gameEndedAt != null || (gameState !== 'active' && gameState !== 'draft')) {
-    throw new Error('Cannot add hand to ended or abandoned game');
-  }
+  assertGameMutable(gameState, gameEndedAt);
   const startingDealerSeatIndex = Number(gameRow.startingDealerSeatIndex ?? 0);
   const currentWindIndex = Number(gameRow.currentWindIndex ?? 0);
   const currentRoundNumber = Number(gameRow.currentRoundNumber ?? 1);
+  const seatRotationOffset = normalizeSeatRotationOffset(Number(gameRow.seatRotationOffset ?? 0));
+  const playersResult = await executeTx('SELECT * FROM players WHERE gameId = ? ORDER BY seatIndex ASC;', [
+    handInput.gameId,
+  ]);
+  const players = rowsToArray<Player>(playersResult);
+  const winnerPlayer =
+    handInput.winnerSeatIndex == null
+      ? null
+      : getEffectivePlayerForSeat(players, seatRotationOffset, handInput.winnerSeatIndex);
+  const discarderPlayer =
+    handInput.discarderSeatIndex == null
+      ? null
+      : getEffectivePlayerForSeat(players, seatRotationOffset, handInput.discarderSeatIndex);
+
+  if (handInput.winnerSeatIndex != null && !winnerPlayer) {
+    throw new Error(`Winner player not found for seat ${handInput.winnerSeatIndex}`);
+  }
+  if (handInput.discarderSeatIndex != null && !discarderPlayer) {
+    throw new Error(`Discarder player not found for seat ${handInput.discarderSeatIndex}`);
+  }
 
   const maxResult = await executeTx('SELECT MAX(handIndex) as maxIndex FROM hands WHERE gameId = ?;', [
     handInput.gameId,
@@ -309,8 +526,8 @@ export async function __testOnly_insertHandWithTx(
       handInput.isDraw ? 1 : 0,
       handInput.winnerSeatIndex ?? null,
       handInput.type,
-      handInput.winnerPlayerId ?? null,
-      handInput.discarderPlayerId ?? null,
+      winnerPlayer?.id ?? handInput.winnerPlayerId ?? null,
+      discarderPlayer?.id ?? handInput.discarderPlayerId ?? null,
       handInput.inputValue ?? null,
       handInput.deltasJson ?? null,
       computedJson,
@@ -326,6 +543,7 @@ export async function __testOnly_insertHandWithTx(
   const hands = normalizeHands(handsResult);
   const computedNextLabelZh = getRoundLabel(startingDealerSeatIndex, hands).labelZh;
   const nextRoundLabelZh = computedNextLabelZh;
+  const nextSeatRotationOffset = seatRotationOffset;
 
   await executeTx('UPDATE hands SET nextRoundLabelZh = ? WHERE id = ?;', [nextRoundLabelZh, handInput.id]);
 
@@ -333,9 +551,10 @@ export async function __testOnly_insertHandWithTx(
     `UPDATE games
      SET handsCount = COALESCE(handsCount, 0) + 1,
          currentRoundLabelZh = ?,
+         seatRotationOffset = ?,
          gameState = ?
      WHERE id = ?;`,
-    [nextRoundLabelZh, nextGameState, handInput.gameId],
+    [nextRoundLabelZh, nextSeatRotationOffset, nextGameState, handInput.gameId],
   );
 
   if (isDev) {
@@ -382,8 +601,8 @@ export async function __testOnly_insertHandWithTx(
     isDraw: Boolean(handInput.isDraw),
     winnerSeatIndex: handInput.winnerSeatIndex ?? null,
     type: handInput.type,
-    winnerPlayerId: handInput.winnerPlayerId ?? null,
-    discarderPlayerId: handInput.discarderPlayerId ?? null,
+    winnerPlayerId: winnerPlayer?.id ?? handInput.winnerPlayerId ?? null,
+    discarderPlayerId: discarderPlayer?.id ?? handInput.discarderPlayerId ?? null,
     inputValue: handInput.inputValue ?? null,
     deltasJson: handInput.deltasJson ?? null,
     nextRoundLabelZh,
@@ -400,9 +619,15 @@ export async function insertHand(handInput: NewHandInput): Promise<Hand> {
       setBreadcrumb('Repo: insertHand', { gameId: handInput.gameId });
     }
 
-    return await runExplicitWriteTransaction('insertHand', async (executeTx) =>
+    const hand = await runExplicitWriteTransaction('insertHand', async (executeTx) =>
       __testOnly_insertHandWithTx(handInput, executeTx),
     );
+    createInternalBackupSnapshot('insertHand').catch((error) => {
+      if (isDev) {
+        console.warn('[DB] internal backup after insertHand failed', error);
+      }
+    });
+    return hand;
   } catch (error) {
     const wrapped = normalizeError(error, 'insertHand failed');
     console.error('[DB]', wrapped);
@@ -471,6 +696,105 @@ export async function deleteAllGames(): Promise<void> {
     console.error('[DB]', wrapped);
     throw wrapped;
   }
+}
+
+export async function restoreLastBackup(): Promise<{
+  restored: boolean;
+  reason?: BackupValidationReason | 'missing';
+}> {
+  if (!isDev) {
+    return { restored: false, reason: 'missing' };
+  }
+  const storage = getKeyValueStorage();
+  const raw = await storage.getItem(INTERNAL_BACKUPS_KEY);
+  if (!raw) {
+    return { restored: false, reason: 'missing' };
+  }
+  let backups: InternalBackup[] = [];
+  try {
+    const parsed = JSON.parse(raw) as InternalBackup[];
+    backups = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    backups = [];
+  }
+  if (backups.length === 0) {
+    return { restored: false, reason: 'missing' };
+  }
+  const latest = backups[0];
+  const validation = __testOnly_validateBackupSnapshot(latest);
+  if (!validation.ok) {
+    return { restored: false, reason: validation.reason };
+  }
+  await runExplicitWriteTransaction('restoreLastBackup', async (executeTx) => {
+    await executeTx('DELETE FROM hands;');
+    await executeTx('DELETE FROM players;');
+    await executeTx('DELETE FROM games;');
+
+    for (const bundle of latest.games) {
+      const game = bundle.game;
+      await executeTx(
+        `INSERT INTO games
+         (id, title, createdAt, endedAt, currencySymbol, variant, rulesJson, startingDealerSeatIndex, handsCount, resultStatus, resultSummaryJson, resultUpdatedAt, progressIndex, currentWindIndex, currentRoundNumber, maxWindIndex, seatRotationOffset, gameState, currentRoundLabelZh, languageOverride)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        [
+          game.id,
+          game.title,
+          game.createdAt,
+          game.endedAt ?? null,
+          game.currencySymbol,
+          game.variant,
+          game.rulesJson,
+          game.startingDealerSeatIndex,
+          game.handsCount ?? bundle.hands.length,
+          game.resultStatus ?? null,
+          game.resultSummaryJson ?? null,
+          game.resultUpdatedAt ?? null,
+          game.progressIndex ?? 0,
+          game.currentWindIndex ?? 0,
+          game.currentRoundNumber ?? 1,
+          game.maxWindIndex ?? 1,
+          normalizeSeatRotationOffset(game.seatRotationOffset ?? 0),
+          game.gameState ?? 'draft',
+          game.currentRoundLabelZh ?? INITIAL_ROUND_LABEL_ZH,
+          game.languageOverride ?? null,
+        ],
+      );
+      for (const player of bundle.players) {
+        await executeTx('INSERT INTO players (id, gameId, name, seatIndex) VALUES (?, ?, ?, ?);', [
+          player.id,
+          player.gameId,
+          player.name,
+          player.seatIndex,
+        ]);
+      }
+      for (const hand of bundle.hands) {
+        await executeTx(
+          `INSERT INTO hands
+           (id, gameId, handIndex, dealerSeatIndex, windIndex, roundNumber, isDraw, winnerSeatIndex, type, winnerPlayerId, discarderPlayerId, inputValue, deltasJson, computedJson, nextRoundLabelZh, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          [
+            hand.id,
+            hand.gameId,
+            hand.handIndex,
+            hand.dealerSeatIndex,
+            hand.windIndex ?? 0,
+            hand.roundNumber ?? 1,
+            hand.isDraw ? 1 : 0,
+            hand.winnerSeatIndex ?? null,
+            hand.type,
+            hand.winnerPlayerId ?? null,
+            hand.discarderPlayerId ?? null,
+            hand.inputValue ?? null,
+            hand.deltasJson ?? null,
+            hand.computedJson ?? null,
+            hand.nextRoundLabelZh ?? null,
+            hand.createdAt,
+          ],
+        );
+      }
+    }
+  });
+  return { restored: true };
 }
 
 function buildDemoId(prefix: string): string {
@@ -873,36 +1197,57 @@ export async function endGame(gameId: string, endedAt: number = Date.now()): Pro
       setBreadcrumb('Repo: endGame', { gameId, endedAt });
     }
     await runExplicitWriteTransaction('endGame', async (executeTx) => {
-      const gameResult = await executeTx('SELECT COALESCE(handsCount, 0) AS handsCount FROM games WHERE id = ? LIMIT 1;', [
-        gameId,
-      ]);
-      if (gameResult.rows.length === 0) {
-        throw new Error(`Game not found: ${gameId}`);
-      }
-      const { handsCount } = gameResult.rows.item(0) as { handsCount: number };
-      const normalizedHandsCount = Number(handsCount ?? 0);
-      const nextState = normalizedHandsCount === 0 ? 'abandoned' : 'ended';
-      const nextResultStatus = normalizedHandsCount === 0 ? 'abandoned' : 'none';
-      await executeTx(
-        `UPDATE games
-         SET endedAt = ?,
-             gameState = ?,
-             resultStatus = ?,
-             resultSummaryJson = NULL,
-             resultUpdatedAt = ?
-         WHERE id = ?;`,
-        [endedAt, nextState, nextResultStatus, endedAt, gameId],
-      );
+      await __testOnly_endGameWithTx(gameId, endedAt, executeTx);
     });
     const bundle = await getGameBundle(gameId);
     if (bundle.game.gameState === 'ended') {
       await updateGameResultSnapshot(gameId);
     }
+    createInternalBackupSnapshot('endGame').catch((error) => {
+      if (isDev) {
+        console.warn('[DB] internal backup after endGame failed', error);
+      }
+    });
   } catch (error) {
     const wrapped = normalizeError(error, 'endGame failed');
     console.error('[DB]', wrapped);
     throw wrapped;
   }
+}
+
+export async function __testOnly_endGameWithTx(
+  gameId: string,
+  endedAt: number,
+  executeTx: TxExecute,
+): Promise<void> {
+  const gameResult = await executeTx(
+    'SELECT COALESCE(handsCount, 0) AS handsCount, endedAt, gameState FROM games WHERE id = ? LIMIT 1;',
+    [
+      gameId,
+    ],
+  );
+  if (gameResult.rows.length === 0) {
+    throw new Error(`Game not found: ${gameId}`);
+  }
+  const gameRow = gameResult.rows.item(0) as {
+    handsCount: number;
+    endedAt?: number | null;
+    gameState?: string | null;
+  };
+  assertGameMutable(gameRow.gameState ?? null, gameRow.endedAt ?? null);
+  const normalizedHandsCount = Number(gameRow.handsCount ?? 0);
+  const nextState = normalizedHandsCount === 0 ? 'abandoned' : 'ended';
+  const nextResultStatus = normalizedHandsCount === 0 ? 'abandoned' : 'none';
+  await executeTx(
+    `UPDATE games
+     SET endedAt = ?,
+         gameState = ?,
+         resultStatus = ?,
+         resultSummaryJson = NULL,
+         resultUpdatedAt = ?
+     WHERE id = ?;`,
+    [endedAt, nextState, nextResultStatus, endedAt, gameId],
+  );
 }
 
 export async function updateGameResultSnapshot(gameId: string): Promise<void> {
@@ -933,8 +1278,9 @@ export async function updateGameResultSnapshot(gameId: string): Promise<void> {
       return;
     }
 
+    const orderedHands = bundle.hands.slice().sort((a, b) => a.handIndex - b.handIndex);
     const seatTotalsQ: number[] = [0, 0, 0, 0];
-    bundle.hands.forEach((hand) => {
+    orderedHands.forEach((hand) => {
       const deltasQ = resolveDeltasQ(hand.deltasJson);
       if (!deltasQ) {
         return;
@@ -943,28 +1289,40 @@ export async function updateGameResultSnapshot(gameId: string): Promise<void> {
         seatTotalsQ[i] += Number(deltasQ[i] ?? 0);
       }
     });
+    const playerTotalsQ = aggregatePlayerTotalsQByTimeline(
+      bundle.players,
+      orderedHands.map((hand) => ({
+        nextRoundLabelZh: hand.nextRoundLabelZh ?? null,
+        deltasQ: resolveDeltasQ(hand.deltasJson),
+      })),
+      INITIAL_ROUND_LABEL_ZH,
+      0,
+    );
 
-    const moneyTotals = seatTotalsQ.map((valueQ) => valueQ / 4);
-    let winnerIndex = 0;
-    let loserIndex = 0;
-    for (let i = 1; i < moneyTotals.length; i += 1) {
-      if (moneyTotals[i] > moneyTotals[winnerIndex]) {
-        winnerIndex = i;
+    let winnerPlayer = bundle.players[0] ?? null;
+    let loserPlayer = bundle.players[0] ?? null;
+    bundle.players.forEach((player) => {
+      if (!winnerPlayer || (playerTotalsQ.get(player.id) ?? 0) > (playerTotalsQ.get(winnerPlayer.id) ?? 0)) {
+        winnerPlayer = player;
       }
-      if (moneyTotals[i] < moneyTotals[loserIndex]) {
-        loserIndex = i;
+      if (!loserPlayer || (playerTotalsQ.get(player.id) ?? 0) < (playerTotalsQ.get(loserPlayer.id) ?? 0)) {
+        loserPlayer = player;
       }
-    }
+    });
 
-    const seatToName = new Map<number, string>();
-    bundle.players.forEach((player) => seatToName.set(player.seatIndex, player.name));
     const symbol = bundle.game.currencySymbol ?? '';
-    const winnerName = seatToName.get(winnerIndex) ?? '—';
-    const loserName = seatToName.get(loserIndex) ?? '—';
+    const winnerName = winnerPlayer?.name ?? '—';
+    const loserName = loserPlayer?.name ?? '—';
+    const winnerMoney = winnerPlayer ? (playerTotalsQ.get(winnerPlayer.id) ?? 0) / 4 : 0;
+    const loserMoney = loserPlayer ? (playerTotalsQ.get(loserPlayer.id) ?? 0) / 4 : 0;
     const summaryJson = JSON.stringify({
-      winnerText: `${winnerName} ${formatSignedMoney(moneyTotals[winnerIndex], symbol)}`,
-      loserText: `${loserName} ${formatSignedMoney(moneyTotals[loserIndex], symbol)}`,
+      winnerText: `${winnerName} ${formatSignedMoney(winnerMoney, symbol)}`,
+      loserText: `${loserName} ${formatSignedMoney(loserMoney, symbol)}`,
       seatTotalsQ,
+      playerTotalsQ: bundle.players.reduce<Record<string, number>>((acc, player) => {
+        acc[player.id] = playerTotalsQ.get(player.id) ?? 0;
+        return acc;
+      }, {}),
       playersCount: bundle.players.length,
     });
 

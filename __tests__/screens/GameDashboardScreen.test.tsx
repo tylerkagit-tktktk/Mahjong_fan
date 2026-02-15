@@ -1,9 +1,11 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Alert, Text } from 'react-native';
+import { Alert, Share, Text } from 'react-native';
 import AppButton from '../../src/components/AppButton';
 import GameDashboardScreen from '../../src/screens/GameDashboardScreen';
 import { getGameBundle } from '../../src/db/repo';
+import { aggregatePlayerTotalsQByTimeline } from '../../src/models/seatRotation';
+import { computeGameStats } from '../../src/models/gameStats';
 
 jest.mock('../../src/db/repo', () => ({
   getGameBundle: jest.fn(),
@@ -155,6 +157,79 @@ function createActiveBundle() {
   };
 }
 
+function createTieBundle() {
+  const ended = createEndedBundle();
+  return {
+    ...ended,
+    game: {
+      ...ended.game,
+      resultSummaryJson: JSON.stringify({
+        winnerText: 'Alice +HK$20',
+        loserText: 'Carol -HK$20',
+        seatTotalsQ: [80, 80, -80, -80],
+        playersCount: 4,
+      }),
+    },
+    hands: [
+      {
+        ...ended.hands[0],
+        deltasJson: JSON.stringify([80, 80, -80, -80]),
+      },
+    ],
+  };
+}
+
+function createReseatMidGameBundle() {
+  const ended = createEndedBundle();
+  return {
+    ...ended,
+    game: {
+      ...ended.game,
+      title: 'Reseat Timeline Match',
+      handsCount: 4,
+      currentRoundLabelZh: '東風南局',
+    },
+    hands: [
+      {
+        ...ended.hands[0],
+        id: 'rt-h1',
+        handIndex: 0,
+        winnerPlayerId: 'p0',
+        discarderPlayerId: 'p1',
+        deltasJson: JSON.stringify([40, -16, -12, -12]),
+        nextRoundLabelZh: '北風南局',
+      },
+      {
+        ...ended.hands[0],
+        id: 'rt-h2',
+        handIndex: 1,
+        winnerPlayerId: 'p1',
+        discarderPlayerId: 'p2',
+        deltasJson: JSON.stringify([0, 40, -20, -20]),
+        nextRoundLabelZh: '北風北局',
+      },
+      {
+        ...ended.hands[0],
+        id: 'rt-h3',
+        handIndex: 2,
+        winnerPlayerId: 'p0',
+        discarderPlayerId: 'p3',
+        deltasJson: JSON.stringify([20, -20, 0, 0]),
+        nextRoundLabelZh: '東風東局',
+      },
+      {
+        ...ended.hands[0],
+        id: 'rt-h4',
+        handIndex: 3,
+        winnerPlayerId: 'p1',
+        discarderPlayerId: 'p2',
+        deltasJson: JSON.stringify([0, 0, 24, -24]),
+        nextRoundLabelZh: '東風南局',
+      },
+    ],
+  };
+}
+
 describe('GameDashboardScreen', () => {
   const navigation = {
     navigate: jest.fn(),
@@ -275,6 +350,7 @@ describe('GameDashboardScreen', () => {
   it('blocks non-ended game and triggers warning flow', async () => {
     mockedGetGameBundle.mockResolvedValueOnce(createActiveBundle() as any);
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' as never });
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
@@ -291,9 +367,142 @@ describe('GameDashboardScreen', () => {
     expect(shareButton?.props.disabled).toBe(true);
     expect(allText).toContain('此頁僅供已結束對局查看。');
     expect(alertSpy).toHaveBeenCalled();
+    alertSpy.mockClear();
+
+    await act(async () => {
+      await shareButton?.props.onPress();
+    });
+    expect(shareSpy).not.toHaveBeenCalled();
+    expect(alertSpy).toHaveBeenCalled();
 
     alertSpy.mockRestore();
+    shareSpy.mockRestore();
 
+    await act(async () => {
+      (tree! as renderer.ReactTestRenderer).unmount();
+    });
+  });
+
+  it('shares human-readable summary without raw i18n keys', async () => {
+    mockedGetGameBundle.mockResolvedValueOnce(createEndedBundle() as any);
+    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' as never });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'k5', name: 'GameDashboard', params: { gameId: 'g-ended' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const root = (tree! as renderer.ReactTestRenderer).root;
+    const shareButton = root.findAllByType(AppButton).find((btn) => btn.props.label === '分享');
+    expect(shareButton).toBeTruthy();
+
+    await act(async () => {
+      await shareButton!.props.onPress();
+    });
+
+    expect(shareSpy).toHaveBeenCalledTimes(1);
+    const payload = shareSpy.mock.calls[0][0] as { message: string };
+    expect(payload.message).toContain('Ended Match');
+    expect(payload.message).toContain('Ended Match — 01/01/2025');
+    expect(payload.message).toContain('玩家排名');
+    expect(payload.message).toContain('最多放銃');
+    expect(payload.message).not.toMatch(/game\.detail\./);
+    expect(payload.message).not.toMatch(/share\./);
+    expect(payload.message).not.toContain('undefined');
+
+    shareSpy.mockRestore();
+    await act(async () => {
+      (tree! as renderer.ReactTestRenderer).unmount();
+    });
+  });
+
+  it('uses tie suffix in share ranking when totals tie', async () => {
+    mockedGetGameBundle.mockResolvedValueOnce(createTieBundle() as any);
+    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' as never });
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'k6', name: 'GameDashboard', params: { gameId: 'g-ended' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const shareButton = (tree! as renderer.ReactTestRenderer).root
+      .findAllByType(AppButton)
+      .find((btn) => btn.props.label === '分享');
+    await act(async () => {
+      await shareButton?.props.onPress();
+    });
+
+    const payload = shareSpy.mock.calls[0][0] as { message: string };
+    expect(payload.message).toContain('(+1 more)');
+
+    shareSpy.mockRestore();
+    await act(async () => {
+      (tree! as renderer.ReactTestRenderer).unmount();
+    });
+  });
+
+  it('keeps share totals consistent with reseat-aware timeline aggregation', async () => {
+    const bundle = createReseatMidGameBundle();
+    mockedGetGameBundle.mockResolvedValueOnce(bundle as any);
+    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' as never });
+
+    const preTotalsQ = aggregatePlayerTotalsQByTimeline(
+      bundle.players,
+      bundle.hands.slice(0, 3).map((hand) => ({
+        nextRoundLabelZh: hand.nextRoundLabelZh,
+        deltasQ: JSON.parse(hand.deltasJson ?? '[0,0,0,0]'),
+      })),
+      '東風東局',
+      0,
+    );
+    const allTotalsQ = aggregatePlayerTotalsQByTimeline(
+      bundle.players,
+      bundle.hands.map((hand) => ({
+        nextRoundLabelZh: hand.nextRoundLabelZh,
+        deltasQ: JSON.parse(hand.deltasJson ?? '[0,0,0,0]'),
+      })),
+      '東風東局',
+      0,
+    );
+    expect(preTotalsQ.get('p0')).toBe(60);
+    expect(preTotalsQ.get('p1')).toBe(4);
+    expect(allTotalsQ.get('p0')).toBe(60);
+    expect(allTotalsQ.get('p1')).toBe(28);
+    const sumAll = Array.from(allTotalsQ.values()).reduce((sum, value) => sum + value, 0);
+    expect(sumAll).toBe(0);
+    const stats = computeGameStats(bundle as any);
+    expect(stats.zeroSumOk).toBe(true);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'k7', name: 'GameDashboard', params: { gameId: 'g-ended' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const shareButton = (tree! as renderer.ReactTestRenderer).root
+      .findAllByType(AppButton)
+      .find((btn) => btn.props.label === '分享');
+    await act(async () => {
+      await shareButton?.props.onPress();
+    });
+
+    const payload = shareSpy.mock.calls[0][0] as { message: string };
+    expect(payload.message).toContain('Alice +HK$15');
+    expect(payload.message).toContain('Bob +HK$7');
+    expect(payload.message).toContain('David -HK$8');
+    expect(payload.message).toContain('Carol -HK$14');
+    expect(payload.message).not.toMatch(/game\.detail\./);
+    expect(payload.message).not.toContain('undefined');
+
+    shareSpy.mockRestore();
     await act(async () => {
       (tree! as renderer.ReactTestRenderer).unmount();
     });

@@ -11,47 +11,54 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let schemaReady = false;
 let writeQueue: Promise<void> = Promise.resolve();
 
-async function openDb(): Promise<SQLite.SQLiteDatabase> {
-  if (!dbPromise) {
-    dbPromise = SQLite.openDatabase({
-      name: DB_NAME,
-      location: 'default',
-    });
-  }
-
-  let db: SQLite.SQLiteDatabase;
-  try {
-    db = await dbPromise;
-  } catch (error) {
-    if (!error && isDev) {
-      console.error('[DB] falsy error at openDb', new Error('trace').stack, dumpBreadcrumbs(10));
-      const bug = new Error('[BUG] falsy rejection');
-      (bug as { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
-      throw bug;
+export function normalizeError(error: unknown, context: string): Error {
+  const fallback = new Error('Unable to access local data. Please try again.');
+  if (error instanceof Error) {
+    if (isDev) {
+      console.warn(`[DB] ${context}`, error);
     }
-    throw error;
+    (fallback as Error & { cause?: unknown }).cause = error;
+    return fallback;
   }
+  if (!error) {
+    if (isDev) {
+      (fallback as Error & { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
+      console.warn(`[DB] ${context} received falsy error`, dumpBreadcrumbs(10));
+    }
+    return fallback;
+  }
+  if (isDev) {
+    console.warn(`[DB] ${context} non-error rejection`, error);
+  }
+  (fallback as Error & { cause?: unknown }).cause = error;
+  return fallback;
+}
 
-  if (!schemaReady) {
-    try {
+export async function safeDbCall<T>(context: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    throw normalizeError(error, context);
+  }
+}
+
+async function openDb(): Promise<SQLite.SQLiteDatabase> {
+  return safeDbCall('openDb', async () => {
+    if (!dbPromise) {
+      dbPromise = SQLite.openDatabase({
+        name: DB_NAME,
+        location: 'default',
+      });
+    }
+
+    const db = await dbPromise;
+    if (!schemaReady) {
       await initializeSchema(db);
       schemaReady = true;
-    } catch (error) {
-      if (!error && isDev) {
-        console.error(
-          '[DB] falsy error at initializeSchema',
-          new Error('trace').stack,
-          dumpBreadcrumbs(10),
-        );
-        const bug = new Error('[BUG] falsy rejection');
-        (bug as { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
-        throw bug;
-      }
-      throw error;
     }
-  }
 
-  return db;
+    return db;
+  });
 }
 
 export async function withDb<T>(runner: (db: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
@@ -78,26 +85,17 @@ export async function executeSql<T = SQLite.ResultSet>(
   sql: string,
   params: (string | number | null)[] = [],
 ): Promise<T> {
-  try {
+  return safeDbCall('executeSql', async () => {
     const db = await openDb();
     if (isDev) {
       setBreadcrumb('SQL execute', { statement: sql, params });
     }
     const [result] = await db.executeSql(sql, params);
     return result as T;
-  } catch (error) {
-    if (!error && isDev) {
-      console.error('[DB] falsy error at executeSql', new Error('trace').stack, {
-        sql,
-        params,
-      });
-      const bug = new Error('[BUG] falsy rejection');
-      (bug as { breadcrumbs?: unknown }).breadcrumbs = dumpBreadcrumbs(10);
-      throw bug;
-    }
+  }).catch((error) => {
     console.error('[DB] executeSql failed', { sql, params, error });
     throw error;
-  }
+  });
 }
 
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {

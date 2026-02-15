@@ -781,6 +781,7 @@ function GameTableScreen({ route, navigation }: Props) {
         }
         return (prev + 1) % 4;
       });
+      await maybePromptReseat(previousRoundLabelZh, nextRoundLabelZh, wrapToken);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message || t('errors.addHand'));

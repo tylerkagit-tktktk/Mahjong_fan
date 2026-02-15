@@ -1,6 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   type LayoutChangeEvent,
@@ -125,6 +125,8 @@ function GameTableScreen({ route, navigation }: Props) {
   const [settlementType, setSettlementType] = useState<SettlementType>('discard');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [endingGame, setEndingGame] = useState(false);
+  const endingGameRef = useRef(false);
   const [elapsedNow, setElapsedNow] = useState(Date.now());
   const [tableLayout, setTableLayout] = useState<{
     x: number;
@@ -791,7 +793,7 @@ function GameTableScreen({ route, navigation }: Props) {
   };
 
   const handleEndGame = () => {
-    if (!bundle || saving || isEnded) {
+    if (!bundle || saving || endingGameRef.current || isEnded) {
       return;
     }
 
@@ -801,8 +803,12 @@ function GameTableScreen({ route, navigation }: Props) {
         text: t('gameTable.endGame.confirm'),
         style: 'destructive',
         onPress: async () => {
+          if (endingGameRef.current) {
+            return;
+          }
           try {
-            setSaving(true);
+            endingGameRef.current = true;
+            setEndingGame(true);
             const endedAt = Date.now();
             await endGame(bundle.game.id, endedAt);
             setBundle((prev) => {
@@ -817,12 +823,13 @@ function GameTableScreen({ route, navigation }: Props) {
                 },
               };
             });
-            navigation.replace('Summary', { gameId: bundle.game.id });
+            navigation.replace('GameDashboard', { gameId: bundle.game.id });
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             setError(message || t('gameTable.endGame.failed'));
           } finally {
-            setSaving(false);
+            endingGameRef.current = false;
+            setEndingGame(false);
           }
         },
       },
@@ -830,7 +837,7 @@ function GameTableScreen({ route, navigation }: Props) {
   };
 
   const handleDrawActionPress = () => {
-    if (!bundle || saving || isEnded) {
+    if (!bundle || saving || endingGame || isEnded) {
       return;
     }
     Alert.alert(t('gameTable.draw.title'), t('gameTable.draw.message'), [
@@ -960,7 +967,7 @@ function GameTableScreen({ route, navigation }: Props) {
             <AppButton
               label={t('gameTable.action.endGame')}
               onPress={handleEndGame}
-              disabled={saving || isEnded}
+              disabled={saving || endingGame || isEnded}
               style={styles.footerButton}
             />
           </View>

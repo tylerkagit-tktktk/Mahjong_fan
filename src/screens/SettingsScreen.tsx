@@ -6,7 +6,7 @@ import Card from '../components/Card';
 import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { useAppLanguage } from '../i18n/useAppLanguage';
-import { deleteAllGames, seedDemoGames } from '../db/repo';
+import { deleteAllGames, restoreLastBackup, seedDemoGames } from '../db/repo';
 import { isDev } from '../debug/isDev';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
@@ -46,6 +46,48 @@ function SettingsScreen({ navigation }: Props) {
         },
       },
     ]);
+  };
+
+  const handleRestoreBackup = () => {
+    Alert.alert(
+      t('settings.dev.restore.confirmTitle'),
+      t('settings.dev.restore.confirmMessage'),
+      [
+        { text: t('settings.dev.common.cancel'), style: 'cancel' },
+        {
+          text: t('settings.dev.restore.action'),
+          onPress: () => {
+            restoreLastBackup()
+              .then((result) => {
+                if (result.restored) {
+                  Alert.alert(t('settings.dev.restore.successTitle'), t('settings.dev.restore.successMessage'));
+                  return;
+                }
+                if (result.reason === 'missing') {
+                  Alert.alert(t('settings.dev.restore.emptyTitle'), t('settings.dev.restore.emptyMessage'));
+                  return;
+                }
+                const validationMessageKey =
+                  result.reason === 'schema'
+                    ? 'settings.dev.restore.validation.schema'
+                    : result.reason === 'handsCount'
+                      ? 'settings.dev.restore.validation.handsCount'
+                      : result.reason === 'deltas'
+                        ? 'settings.dev.restore.validation.deltas'
+                        : 'settings.dev.restore.validation.state';
+                Alert.alert(
+                  t('settings.dev.restore.validationTitle'),
+                  t(validationMessageKey),
+                );
+              })
+              .catch((error) => {
+                console.error('[DB] restoreLastBackup failed', error);
+                Alert.alert(t('settings.dev.restore.errorTitle'), t('settings.dev.restore.errorMessage'));
+              });
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -98,6 +140,9 @@ function SettingsScreen({ navigation }: Props) {
             </Pressable>
             <Pressable onPress={handleSeedDemoGames} style={styles.devSeedButton} hitSlop={10}>
               <Text style={styles.devSeedText}>{t('settings.dev.seed.button')}</Text>
+            </Pressable>
+            <Pressable onPress={handleRestoreBackup} style={styles.devSeedButton} hitSlop={10}>
+              <Text style={styles.devSeedText}>{t('settings.dev.restore.button')}</Text>
             </Pressable>
           </View>
         ) : null}

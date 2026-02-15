@@ -19,7 +19,7 @@ import AppButton from '../components/AppButton';
 import Card from '../components/Card';
 import PillGroup from '../components/PillGroup';
 import TextField from '../components/TextField';
-import { endGame, getGameBundle, insertHand } from '../db/repo';
+import { endGame, getGameBundle, insertHand, updateGameSeatRotationOffset } from '../db/repo';
 import { computeHkSettlement, toAmountFromQ } from '../domain/hk/settlement';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { GameBundle } from '../models/db';
@@ -28,12 +28,25 @@ import {
   getNextDealerSeatIndex,
   getRoundLabel,
 } from '../models/dealer';
+import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
+import {
+  normalizeSeatRotationOffset,
+} from '../models/seatRotation';
 import {
   CurrencyCode,
   getCurrencyMeta,
   inferCurrencyCodeFromSymbol,
   resolveCurrencyCode,
 } from '../models/currency';
+import ReseatFlow from './gameTable/ReseatFlow';
+import { buildPlayersBySeat, formatSeatLabel } from './gameTable/seatMapping';
+import {
+  buildWrapToken,
+  isWrapEvent,
+  loadPersistedWrapToken,
+  persistWrapToken,
+  shouldPromptReseat,
+} from './gameTable/wrap';
 import { parseRules, RulesV1, Variant } from '../models/rules';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
@@ -122,6 +135,10 @@ function GameTableScreen({ route, navigation }: Props) {
   const [showStakePaytable, setShowStakePaytable] = useState(false);
   const [paytableRows, setPaytableRows] = useState<PaytableRow[]>([]);
   const [paytableMeta, setPaytableMeta] = useState<PaytableMeta | null>(null);
+  const [reseatVisible, setReseatVisible] = useState(false);
+  const lastPromptedWrapTokenRef = useRef<string | null>(null);
+  const wrapTokenLoadedRef = useRef(false);
+  const wrapTokenLoadPromiseRef = useRef<Promise<void> | null>(null);
 
   const seatLabels = useMemo<string[]>(
     () => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')],
@@ -136,19 +153,15 @@ function GameTableScreen({ route, navigation }: Props) {
   }, [bundle?.game.currencySymbol, rules]);
 
   const sortedPlayers = useMemo(() => {
-    if (!bundle) {
-      return [];
-    }
-    return [...bundle.players].sort((a, b) => a.seatIndex - b.seatIndex);
+    const bySeat = buildPlayersBySeat(bundle);
+    return [0, 1, 2, 3]
+      .map((seat) => bySeat[seat])
+      .filter((player): player is NonNullable<typeof player> => Boolean(player));
   }, [bundle]);
 
   const playersBySeat = useMemo(() => {
-    const table: Record<number, (typeof sortedPlayers)[number] | undefined> = {};
-    for (const player of sortedPlayers) {
-      table[player.seatIndex] = player;
-    }
-    return table;
-  }, [sortedPlayers]);
+    return buildPlayersBySeat(bundle) as Record<number, (typeof sortedPlayers)[number] | undefined>;
+  }, [bundle]);
 
   const discarderOptions = useMemo(
     () =>
@@ -156,9 +169,80 @@ function GameTableScreen({ route, navigation }: Props) {
         .filter((player) => player.seatIndex !== winnerSeatIndex)
         .map((player) => ({
           key: String(player.seatIndex),
-          label: `${seatLabels[player.seatIndex]} ${player.name}`,
+          label: `${formatSeatLabel(t, player.seatIndex, player.seatIndex === dealerSeatIndex)} ${player.name}`,
         })),
-    [seatLabels, sortedPlayers, winnerSeatIndex],
+    [dealerSeatIndex, sortedPlayers, t, winnerSeatIndex],
+  );
+
+  const ensureWrapTokenLoaded = useCallback(async () => {
+    if (wrapTokenLoadedRef.current) {
+      return;
+    }
+    if (wrapTokenLoadPromiseRef.current) {
+      await wrapTokenLoadPromiseRef.current;
+      return;
+    }
+    wrapTokenLoadPromiseRef.current = (async () => {
+      try {
+        const stored = await loadPersistedWrapToken(gameId);
+        lastPromptedWrapTokenRef.current = stored;
+      } catch {
+        lastPromptedWrapTokenRef.current = null;
+      } finally {
+        wrapTokenLoadedRef.current = true;
+      }
+    })();
+    await wrapTokenLoadPromiseRef.current;
+  }, [gameId]);
+
+  useEffect(() => {
+    wrapTokenLoadedRef.current = false;
+    wrapTokenLoadPromiseRef.current = null;
+    lastPromptedWrapTokenRef.current = null;
+    ensureWrapTokenLoaded().catch(() => {});
+  }, [ensureWrapTokenLoaded]);
+
+  const maybePromptReseat = useCallback(
+    async (previousRoundLabelZh: string, nextRoundLabelZh: string, wrapToken: string) => {
+      if (!isWrapEvent(previousRoundLabelZh, nextRoundLabelZh)) {
+        return;
+      }
+      await ensureWrapTokenLoaded();
+      if (!shouldPromptReseat(lastPromptedWrapTokenRef.current, wrapToken)) {
+        return;
+      }
+      lastPromptedWrapTokenRef.current = wrapToken;
+      try {
+        await persistWrapToken(gameId, wrapToken);
+      } catch {
+        // best effort
+      }
+      setReseatVisible(true);
+    },
+    [ensureWrapTokenLoaded, gameId],
+  );
+
+  const handleApplyReseat = useCallback(
+    async ({ rotationDelta }: { rotationDelta: number }) => {
+      if (!bundle) {
+        return;
+      }
+      const currentOffset = normalizeSeatRotationOffset(bundle.game.seatRotationOffset ?? 0);
+      const nextOffset = normalizeSeatRotationOffset(currentOffset + rotationDelta);
+      await updateGameSeatRotationOffset(bundle.game.id, nextOffset);
+      setBundle((prev) =>
+        prev
+          ? {
+              ...prev,
+              game: {
+                ...prev.game,
+                seatRotationOffset: nextOffset,
+              },
+            }
+          : prev,
+      );
+    },
+    [bundle],
   );
 
   const playerPanels = useMemo(() => [2, 1, 0, 3], []);
@@ -564,11 +648,11 @@ function GameTableScreen({ route, navigation }: Props) {
         discarderSeatIndex: effectiveDiscarderSeatIndex,
       });
 
-      const winnerPlayer = bundle.players.find((player) => player.seatIndex === winnerSeatIndex) ?? null;
+      const winnerPlayer = playersBySeat[winnerSeatIndex] ?? null;
       const discarderPlayer =
         effectiveDiscarderSeatIndex === null
           ? null
-          : bundle.players.find((player) => player.seatIndex === effectiveDiscarderSeatIndex) ?? null;
+          : playersBySeat[effectiveDiscarderSeatIndex] ?? null;
 
       if (!winnerPlayer || (settlementType === 'discard' && !discarderPlayer)) {
         setError(t('errors.addHand'));
@@ -598,12 +682,24 @@ function GameTableScreen({ route, navigation }: Props) {
         }),
       });
 
+      const previousRoundLabelZh = bundle.game.currentRoundLabelZh ?? INITIAL_ROUND_LABEL_ZH;
+      const nextRoundLabelZh = inserted.nextRoundLabelZh ?? previousRoundLabelZh;
+      const wrapToken = buildWrapToken({
+        gameId: bundle.game.id,
+        handIndex: inserted.handIndex,
+        nextRoundLabelZh,
+      });
+
       setBundle((prev) => {
         if (!prev) {
           return prev;
         }
         return {
           ...prev,
+          game: {
+            ...prev.game,
+            currentRoundLabelZh: nextRoundLabelZh,
+          },
           hands: [...prev.hands, inserted],
         };
       });
@@ -621,6 +717,7 @@ function GameTableScreen({ route, navigation }: Props) {
         }),
       );
       setModalVisible(false);
+      await maybePromptReseat(previousRoundLabelZh, nextRoundLabelZh, wrapToken);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message || t('errors.addHand'));
@@ -656,12 +753,24 @@ function GameTableScreen({ route, navigation }: Props) {
         }),
       });
 
+      const previousRoundLabelZh = bundle.game.currentRoundLabelZh ?? INITIAL_ROUND_LABEL_ZH;
+      const nextRoundLabelZh = inserted.nextRoundLabelZh ?? previousRoundLabelZh;
+      const wrapToken = buildWrapToken({
+        gameId: bundle.game.id,
+        handIndex: inserted.handIndex,
+        nextRoundLabelZh,
+      });
+
       setBundle((prev) => {
         if (!prev) {
           return prev;
         }
         return {
           ...prev,
+          game: {
+            ...prev.game,
+            currentRoundLabelZh: nextRoundLabelZh,
+          },
           hands: [...prev.hands, inserted],
         };
       });
@@ -867,7 +976,11 @@ function GameTableScreen({ route, navigation }: Props) {
               <Text style={styles.readonlyWinnerText}>
                 {winnerSeatIndex === null
                   ? '--'
-                  : `${seatLabels[winnerSeatIndex]} ${playersBySeat[winnerSeatIndex]?.name ?? ''}`}
+                  : `${formatSeatLabel(
+                      t,
+                      winnerSeatIndex,
+                      winnerSeatIndex === dealerSeatIndex,
+                    )} ${playersBySeat[winnerSeatIndex]?.name ?? ''}`}
               </Text>
             </Card>
 
@@ -940,6 +1053,19 @@ function GameTableScreen({ route, navigation }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ReseatFlow
+        visible={reseatVisible}
+        currentRoundLabelZh={bundle?.game.currentRoundLabelZh ?? INITIAL_ROUND_LABEL_ZH}
+        handsCount={bundle?.hands.length ?? 0}
+        currentDealerSeatIndex={dealerSeatIndex}
+        currentPlayersBySeat={[0, 1, 2, 3]
+          .map((seat) => playersBySeat[seat])
+          .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+          .map((entry) => ({ id: entry.id, name: entry.name }))}
+        onDismiss={() => setReseatVisible(false)}
+        onApplyReseat={handleApplyReseat}
+      />
 
       <Modal
         visible={showStakePaytable}

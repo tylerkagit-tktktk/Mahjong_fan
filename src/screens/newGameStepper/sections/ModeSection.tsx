@@ -20,8 +20,6 @@ function ModeSection({ title, value, onChange, disabled, labels }: Props) {
       <SegmentedControl<Variant>
         options={[
           { value: 'HK', label: labels.hk },
-          { value: 'TW', label: labels.tw },
-          { value: 'PMA', label: labels.pma },
         ]}
         value={value}
         onChange={onChange}

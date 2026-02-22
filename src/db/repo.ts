@@ -305,6 +305,7 @@ export async function __testOnly_createGameWithPlayersWithTx(
   players: NewPlayerInput[],
   executeTx: TxExecute,
 ): Promise<void> {
+  const persistedVariant = 'HK';
   await executeTx(
     `INSERT INTO games
      (id, title, createdAt, currencySymbol, variant, rulesJson, startingDealerSeatIndex, progressIndex, currentWindIndex, currentRoundNumber, maxWindIndex, seatRotationOffset, gameState, currentRoundLabelZh, languageOverride)
@@ -314,7 +315,7 @@ export async function __testOnly_createGameWithPlayersWithTx(
       game.title,
       game.createdAt ?? Date.now(),
       game.currencySymbol,
-      game.variant,
+      persistedVariant,
       game.rulesJson,
       0,
       game.progressIndex ?? 0,

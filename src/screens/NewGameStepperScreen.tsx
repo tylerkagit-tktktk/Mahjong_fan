@@ -1,5 +1,5 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomActionBar from '../components/BottomActionBar';
@@ -70,6 +70,12 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [pendingPayload, setPendingPayload] = useState<PreparedCreateContext | null>(null);
+
+  useEffect(() => {
+    if (mode !== 'HK') {
+      setMode('HK');
+    }
+  }, [mode]);
 
   const scrollRef = useRef<ScrollView | null>(null);
   const titleInputRef = useRef<TextInput | null>(null);
@@ -369,16 +375,18 @@ function NewGameStepperScreen({ navigation }: Props) {
       seatIndex: index,
     }));
 
+    const selectedMode: Variant = 'HK';
+
     const rules: RulesV1 = {
-      ...getDefaultRules(mode),
-      variant: mode,
-      mode,
+      ...getDefaultRules(selectedMode),
+      variant: selectedMode,
+      mode: selectedMode,
       languageDefault: language,
       currencyCode,
       currencySymbol: getCurrencyMeta(currencyCode).symbol,
     };
 
-    if (mode === 'HK') {
+    if (selectedMode === 'HK') {
       const hkBase = rules.hk ?? getDefaultRules('HK').hk!;
       rules.hk = {
         ...hkBase,
@@ -389,15 +397,6 @@ function NewGameStepperScreen({ navigation }: Props) {
         capFan: hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan,
       };
       rules.minFanToWin = hkScoringPreset === 'traditionalFan' ? resolvedMinFan : rules.minFanToWin ?? 3;
-    }
-
-    if (mode === 'TW') {
-      rules.minFanToWin = resolvedMinFan;
-    }
-
-    if (mode === 'PMA') {
-      rules.minFanToWin = undefined;
-      rules.pma = { pricingMode: 'directAmount' };
     }
 
     return {

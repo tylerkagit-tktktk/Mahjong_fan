@@ -47,6 +47,21 @@ function resolveDeltasQ(deltasJson?: string | null): number[] | null {
   }
 }
 
+function resolveSettlementType(computedJson?: string | null): string | null {
+  if (!computedJson) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(computedJson) as { settlementType?: unknown };
+    if (typeof parsed.settlementType === 'string') {
+      return parsed.settlementType;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function pickTop(
   counts: Map<string, number>,
   playersById: Map<string, string>,
@@ -86,10 +101,13 @@ export function computeGameStats(bundle: GameBundle): GameStats {
     if (hand.winnerPlayerId) {
       winsByPlayerIdMap.set(hand.winnerPlayerId, (winsByPlayerIdMap.get(hand.winnerPlayerId) ?? 0) + 1);
     }
-    if (hand.type === 'zimo' && hand.winnerPlayerId) {
+    const settlementType = resolveSettlementType(hand.computedJson);
+    const isZimo = hand.type === 'zimo' || settlementType === 'zimo';
+    if (isZimo && hand.winnerPlayerId) {
       zimoByPlayerIdMap.set(hand.winnerPlayerId, (zimoByPlayerIdMap.get(hand.winnerPlayerId) ?? 0) + 1);
     }
-    if (hand.type === 'discard' && hand.discarderPlayerId) {
+    const isDiscard = !hand.isDraw && Boolean(hand.discarderPlayerId) && !isZimo;
+    if (isDiscard && hand.discarderPlayerId) {
       discarderByPlayerIdMap.set(
         hand.discarderPlayerId,
         (discarderByPlayerIdMap.get(hand.discarderPlayerId) ?? 0) + 1,

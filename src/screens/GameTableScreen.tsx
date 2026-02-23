@@ -14,11 +14,12 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
 import Card from '../components/Card';
 import PillGroup from '../components/PillGroup';
 import TextField from '../components/TextField';
+import ScreenContainer from '../components/ScreenContainer';
 import { endGame, getGameBundle, insertHand, updateGameSeatRotationOffset } from '../db/repo';
 import { computeHkSettlement, toAmountFromQ } from '../domain/hk/settlement';
 import { useAppLanguage } from '../i18n/useAppLanguage';
@@ -50,6 +51,7 @@ import {
 import { parseRules, RulesV1, Variant } from '../models/rules';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
+import { typography } from '../styles/typography';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GameTable'>;
 type SettlementType = 'discard' | 'zimo';
@@ -848,7 +850,7 @@ function GameTableScreen({ route, navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.tableScreen} edges={['bottom']}>
+    <ScreenContainer style={styles.tableScreen} includeTopInset={false} includeBottomInset={false} horizontalPadding={0}>
       <View style={styles.container}>
         <View style={styles.contentArea}>
           <View style={styles.headerInfoBlock}>
@@ -1117,7 +1119,7 @@ function GameTableScreen({ route, navigation }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </ScreenContainer>
   );
 }
 
@@ -1263,17 +1265,16 @@ const styles = StyleSheet.create({
     marginBottom: GRID.x0_5,
   },
   roundLabel: {
+    ...typography.title,
     textAlign: 'left',
-    fontSize: theme.fontSize.xl,
     fontWeight: '700',
     color: theme.colors.textPrimary,
     marginBottom: 0,
   },
   roundSummaryLine: {
+    ...typography.body,
     textAlign: 'left',
-    fontSize: 14,
     color: theme.colors.textSecondary,
-    fontWeight: '400',
     lineHeight: 18,
     marginTop: 2,
     marginBottom: GRID.x0_5,
@@ -1315,6 +1316,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ruleTagText: {
+    ...typography.caption,
     fontSize: 13,
     fontWeight: '500',
     color: theme.colors.textPrimary,
@@ -1352,15 +1354,16 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
   },
   rulesStatValue: {
+    ...typography.caption,
     fontSize: 12,
     lineHeight: 18,
     fontWeight: '400',
     color: theme.colors.textPrimary,
   },
   readonlyText: {
+    ...typography.body,
     textAlign: 'center',
     color: theme.colors.danger,
-    fontSize: theme.fontSize.sm,
     marginBottom: GRID.x1,
   },
   tableWrap: {
@@ -1431,7 +1434,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   centerBadgeLabel: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textSecondary,
     opacity: 0.8,
     fontWeight: '500',
@@ -1469,6 +1472,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   playerName: {
+    ...typography.subtitle,
     fontSize: 15,
     fontWeight: '700',
     color: theme.colors.textPrimary,
@@ -1480,26 +1484,26 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   playerSeat: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     color: theme.colors.textSecondary,
     fontWeight: '600',
   },
   dealerText: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     fontWeight: '700',
     color: theme.colors.danger,
   },
   playerAmount: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     fontWeight: '800',
     color: theme.colors.textSecondary,
     letterSpacing: 0.4,
   },
   errorBanner: {
+    ...typography.body,
     marginTop: GRID.x1,
     marginBottom: GRID.x1,
     paddingHorizontal: GRID.x1,
-    fontSize: theme.fontSize.sm,
     color: theme.colors.danger,
     textAlign: 'center',
   },
@@ -1519,8 +1523,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   elapsedText: {
+    ...typography.caption,
     textAlign: 'center',
-    fontSize: 12,
     color: theme.colors.textSecondary,
     opacity: 0.9,
     marginBottom: 4,
@@ -1540,6 +1544,7 @@ const styles = StyleSheet.create({
     maxHeight: '82%',
   },
   modalTitle: {
+    ...typography.title,
     fontSize: theme.fontSize.lg,
     fontWeight: '700',
     color: theme.colors.textPrimary,
@@ -1549,12 +1554,14 @@ const styles = StyleSheet.create({
     marginBottom: GRID.x1_5,
   },
   sectionTitle: {
+    ...typography.subtitle,
     fontSize: theme.fontSize.md,
     fontWeight: '600',
     color: theme.colors.textPrimary,
     marginBottom: GRID.x1,
   },
   readonlyWinnerText: {
+    ...typography.subtitle,
     color: theme.colors.textPrimary,
     fontSize: theme.fontSize.md,
     fontWeight: '600',
@@ -1576,8 +1583,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(58,136,132,0.16)',
   },
   modeButtonText: {
+    ...typography.body,
     color: theme.colors.textPrimary,
-    fontSize: theme.fontSize.sm,
     fontWeight: '600',
   },
   modeButtonTextActive: {
@@ -1585,9 +1592,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   modalErrorText: {
+    ...typography.body,
     marginTop: GRID.x1,
     marginBottom: GRID.x1,
-    fontSize: theme.fontSize.sm,
     color: theme.colors.danger,
   },
   modalActions: {
@@ -1622,16 +1629,19 @@ const styles = StyleSheet.create({
     marginBottom: GRID.x1,
   },
   paytableTitle: {
+    ...typography.subtitle,
     fontSize: theme.fontSize.md,
     fontWeight: '600',
     color: theme.colors.textPrimary,
   },
   paytableSubtitle: {
+    ...typography.caption,
     marginTop: 2,
     fontSize: 12,
     color: theme.colors.textSecondary,
   },
   paytableCaption: {
+    ...typography.caption,
     marginTop: 2,
     fontSize: 11,
     color: theme.colors.textSecondary,
@@ -1652,6 +1662,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   paytableCell: {
+    ...typography.caption,
     width: 128,
     fontSize: 11,
     color: theme.colors.textPrimary,
@@ -1669,6 +1680,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#EEF3F8',
   },
   paytableCloseText: {
+    ...typography.caption,
     fontSize: 13,
     color: theme.colors.primary,
     fontWeight: '500',

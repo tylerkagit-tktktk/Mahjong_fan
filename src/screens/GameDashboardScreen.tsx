@@ -2,9 +2,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, SectionList, Share, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
 import Card from '../components/Card';
+import ScreenContainer from '../components/ScreenContainer';
 import { getGameBundle } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
@@ -14,6 +14,7 @@ import { computeGameStats } from '../models/gameStats';
 import { parseRules, RulesV1, Variant } from '../models/rules';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
+import { typography } from '../styles/typography';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GameDashboard'>;
 
@@ -88,6 +89,19 @@ function formatSignedMoney(value: number, symbol: string): string {
     return '0';
   }
   return `${sign}${symbol ?? ''}${abs}`;
+}
+
+function getRankPrefix(index: number): string {
+  if (index === 0) {
+    return '🥇';
+  }
+  if (index === 1) {
+    return '🥈';
+  }
+  if (index === 2) {
+    return '🥉';
+  }
+  return `${index + 1}.`;
 }
 
 function formatHighlight(value: { name: string; count: number; tiedCount: number } | null, t: (key: TranslationKey) => string): string {
@@ -411,7 +425,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
       `${translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', { count: handsCount })}`,
       `${translateWithFallback(t, 'game.detail.stats.draws', '流局')}: ${gameStats?.draws ?? 0}`,
       ...playerStatsLines,
-      `${translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多放銃')}: ${formatHighlight(gameStats?.mostDiscarder ?? null, t)}`,
+      `${translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}: ${formatHighlight(gameStats?.mostDiscarder ?? null, t)}`,
       `${translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}: ${formatHighlight(gameStats?.mostZimo ?? null, t)}`,
     ].join('\n');
     await Share.share({ title: bundle.game.title, message: summaryText });
@@ -546,7 +560,10 @@ function GameDashboardScreen({ navigation, route }: Props) {
       <Pressable
         testID={`wind-section-${section.title}`}
         onPress={() => {
-          setCollapsedSections((prev) => ({ ...prev, [section.title]: !prev[section.title] }));
+          setCollapsedSections((prev) => {
+            const isCollapsed = prev[section.title] !== false;
+            return { ...prev, [section.title]: isCollapsed ? false : true };
+          });
         }}
         style={styles.windSectionHeader}
       >
@@ -564,7 +581,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
               )
             : section.title}
         </Text>
-        <Text style={styles.windSectionToggle}>{collapsedSections[section.title] ? '＋' : '－'}</Text>
+        <Text style={styles.windSectionToggle}>{collapsedSections[section.title] !== false ? '＋' : '－'}</Text>
       </Pressable>
     ),
     [collapsedSections, t],
@@ -581,17 +598,17 @@ function GameDashboardScreen({ navigation, route }: Props) {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
+      <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
         <View style={styles.loadingWrap}>
           <Text style={styles.metaText}>{translateWithFallback(t, 'game.detail.loading', '載入中…')}</Text>
         </View>
-      </SafeAreaView>
+      </ScreenContainer>
     );
   }
 
   if (!bundle) {
     return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
+      <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
         <View style={styles.loadingWrap}>
           <Text style={styles.errorText}>{error ?? translateWithFallback(t, 'errors.loadGame', '載入對局失敗')}</Text>
           <AppButton
@@ -600,17 +617,17 @@ function GameDashboardScreen({ navigation, route }: Props) {
             variant="secondary"
           />
         </View>
-      </SafeAreaView>
+      </ScreenContainer>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
       <SectionList
         ref={sectionListRef}
         sections={handSections.map((section) => ({
           ...section,
-          data: collapsedSections[section.title] ? [] : section.data,
+          data: collapsedSections[section.title] !== false ? [] : section.data,
         }))}
         keyExtractor={(item) => item.hand.id}
         renderItem={renderHandItem}
@@ -621,24 +638,27 @@ function GameDashboardScreen({ navigation, route }: Props) {
         ListHeaderComponent={(
           <>
             <Card style={styles.card}>
-              <Text style={styles.headerTitle}>{bundle.game.title}</Text>
-              <Text style={styles.metaText}>
-                {translateWithFallback(t, 'game.detail.header.date', '日期')}：{formatDate(bundle.game.createdAt)}
-              </Text>
-              <View style={styles.headerRow}>
+              <View style={styles.heroTopRow}>
+                <Text style={styles.heroLabel}>
+                  {translateWithFallback(t, 'game.detail.header.title', '對局總結')}
+                </Text>
                 <View style={styles.statusBadge}>
                   <Text style={styles.statusBadgeText}>
                     {translateWithFallback(t, 'game.detail.header.statusEnded', '已結束')}
                   </Text>
                 </View>
-                <View style={styles.headerRightWrap}>
-                  <Text style={styles.metaText}>{bundle.game.currentRoundLabelZh ?? '—'}</Text>
-                  <Text style={styles.handsCountText}>
-                    {translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', {
-                      count: handsCount,
-                    })}
-                  </Text>
-                </View>
+              </View>
+              <Text style={styles.headerTitle}>{bundle.game.title}</Text>
+              <Text style={styles.heroSubTitle}>
+                {`${bundle.game.currentRoundLabelZh ?? '—'} · ${translateWithFallback(
+                  t,
+                  'game.detail.header.handsPlayed',
+                  '已打 {count} 鋪',
+                  { count: handsCount },
+                )}`}
+              </Text>
+              <View style={styles.headerRow}>
+                <Text style={styles.heroDateText}>{formatDate(bundle.game.createdAt)}</Text>
               </View>
             </Card>
 
@@ -656,7 +676,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
               </Text>
               {rankedPlayers.map((player, index) => (
                 <View key={`rank-${player.playerId}`} style={styles.playerRow}>
-                  <Text style={styles.playerRank}>{index + 1}.</Text>
+                  <Text style={styles.playerRank}>{getRankPrefix(index)}</Text>
                   <View style={styles.playerMetaWrap}>
                     <Text style={styles.playerName}>{player.name}</Text>
                   </View>
@@ -717,32 +737,31 @@ function GameDashboardScreen({ navigation, route }: Props) {
 
             <Card style={styles.card}>
               <Text style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.stats.title', '統計')}</Text>
-              <Text style={styles.metaText}>
+              <Text style={styles.statsHeadline}>
                 {translateWithFallback(t, 'game.detail.stats.hands', '手數')}：{handsCount}
-              </Text>
-              <Text style={styles.metaText}>
+                {'  ·  '}
                 {translateWithFallback(t, 'game.detail.stats.draws', '流局')}：{gameStats?.draws ?? 0}
               </Text>
               {rankedPlayers.map((player) => (
-                <Text key={`wins-${player.playerId}`} style={styles.metaText}>
+                <Text key={`wins-${player.playerId}`} style={styles.statsPlayerLine}>
                   {player.name}：
                   {translateWithFallback(t, 'game.detail.stats.wins', '胡牌')} {gameStats?.winsByPlayerId[player.playerId] ?? 0}
                   {' ｜ '}
                   {translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} {gameStats?.zimoByPlayerId[player.playerId] ?? 0}
                 </Text>
               ))}
-              <Text style={styles.metaText}>
-                {translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多放銃')}：
+              <Text style={styles.statsHighlightLine}>
+                {translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}：
                 {gameStats?.mostDiscarder ? `${gameStats.mostDiscarder.name} (${gameStats.mostDiscarder.count})` : '—'}
               </Text>
-              <Text style={styles.metaText}>
+              <Text style={styles.statsHighlightLine}>
                 {translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}：
                 {gameStats?.mostZimo ? `${gameStats.mostZimo.name} (${gameStats.mostZimo.count})` : '—'}
               </Text>
             </Card>
 
             <Card style={styles.card}>
-              <Text style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.hands.title', '全部手牌')}</Text>
+              <Text style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.hands.title', '全部牌局')}</Text>
               <View style={styles.filterWrap}>
                 {filterOptions.map((option) => {
                   const selected = handFilter === option.key;
@@ -808,7 +827,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
           </>
         }
       />
-    </SafeAreaView>
+    </ScreenContainer>
   );
 }
 
@@ -830,18 +849,38 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: theme.spacing.md,
   },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.sm,
+  },
+  heroLabel: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
   headerTitle: {
-    fontSize: theme.fontSize.lg,
+    ...typography.title,
     fontWeight: '700',
     color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.xs,
+    marginBottom: theme.spacing.sm,
+  },
+  heroSubTitle: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.sm,
   },
   headerRow: {
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.xs,
+    marginTop: 2,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     alignItems: 'center',
+  },
+  heroDateText: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
   },
   statusBadge: {
     paddingHorizontal: theme.spacing.sm,
@@ -850,35 +889,27 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(70,63,56,0.12)',
   },
   statusBadgeText: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     fontWeight: '600',
     color: theme.colors.textSecondary,
   },
-  headerRightWrap: {
-    alignItems: 'flex-end',
-  },
-  handsCountText: {
-    fontSize: theme.fontSize.xs,
-    color: theme.colors.textSecondary,
-    marginTop: 2,
-  },
   warningText: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.danger,
   },
   sectionTitle: {
-    fontSize: theme.fontSize.md,
+    ...typography.subtitle,
     fontWeight: '700',
     color: theme.colors.textPrimary,
     marginBottom: theme.spacing.sm,
   },
   metaText: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textSecondary,
     marginBottom: theme.spacing.xs,
   },
   metaHintText: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     color: theme.colors.textSecondary,
     marginBottom: theme.spacing.xs,
   },
@@ -888,22 +919,38 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.sm,
   },
   playerRank: {
-    width: 28,
-    fontSize: theme.fontSize.sm,
+    width: 34,
+    ...typography.body,
     color: theme.colors.textSecondary,
   },
   playerMetaWrap: {
     flex: 1,
   },
   playerName: {
-    fontSize: theme.fontSize.md,
+    ...typography.subtitle,
     color: theme.colors.textPrimary,
     fontWeight: '600',
   },
   playerTotal: {
-    fontSize: theme.fontSize.md,
+    ...typography.subtitle,
     color: theme.colors.textPrimary,
     fontWeight: '700',
+  },
+  statsHeadline: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.sm,
+    fontWeight: '600',
+  },
+  statsPlayerLine: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+    marginBottom: 6,
+  },
+  statsHighlightLine: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    marginTop: 4,
   },
   filterWrap: {
     flexDirection: 'row',
@@ -923,7 +970,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(53,92,86,0.24)',
   },
   filterChipText: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     color: theme.colors.textSecondary,
     fontWeight: '600',
   },
@@ -937,7 +984,7 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.xs,
   },
   jumpLabel: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     color: theme.colors.textSecondary,
     marginRight: theme.spacing.xs,
   },
@@ -950,7 +997,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   jumpButtonText: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     color: theme.colors.textSecondary,
     fontWeight: '600',
   },
@@ -974,12 +1021,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.xs,
   },
   windSectionTitle: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     fontWeight: '700',
     color: theme.colors.textPrimary,
   },
   windSectionToggle: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textSecondary,
     fontWeight: '600',
   },
@@ -989,12 +1036,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   handIndex: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     fontWeight: '700',
     color: theme.colors.textPrimary,
   },
   handRound: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     color: theme.colors.textSecondary,
   },
   handOutcomeRow: {
@@ -1003,12 +1050,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   handOutcomeIcon: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textPrimary,
     marginRight: 6,
   },
   handOutcomeText: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     fontWeight: '600',
     color: theme.colors.textPrimary,
   },
@@ -1020,13 +1067,13 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   dealerActionText: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     color: theme.colors.textSecondary,
     fontWeight: '600',
   },
   handMetaText: {
     marginTop: 6,
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textSecondary,
   },
   deltaChipsRow: {
@@ -1044,12 +1091,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   deltaChipSeat: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     color: theme.colors.textSecondary,
   },
   deltaChipValue: {
     marginTop: 2,
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     fontWeight: '700',
     color: theme.colors.textPrimary,
   },
@@ -1060,7 +1107,7 @@ const styles = StyleSheet.create({
     borderTopColor: theme.colors.border,
   },
   expandedText: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     color: theme.colors.textSecondary,
     marginBottom: 4,
   },
@@ -1073,7 +1120,7 @@ const styles = StyleSheet.create({
   errorText: {
     color: theme.colors.danger,
     marginBottom: theme.spacing.md,
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
   },
 });
 

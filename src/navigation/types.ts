@@ -8,4 +8,5 @@ export type RootStackParamList = {
   AddHand: { gameId: string };
   Summary: { gameId: string };
   Settings: undefined;
+  About: undefined;
 };

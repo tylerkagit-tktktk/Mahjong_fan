@@ -1,7 +1,7 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
-import { Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Image, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { endGame, listGames } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
@@ -9,6 +9,7 @@ import { TranslationKey } from '../i18n/types';
 import { Game } from '../models/db';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
+import { typography } from '../styles/typography';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 const ONBOARDING_SEEN_KEY = 'home_onboarding_seen_v1';
@@ -44,6 +45,36 @@ const DICE_SHADOW = {
   shadowOffset: SHADOW_OFFSET_BASE,
   elevation: 12,
 } as const;
+
+const HERO_HALO_SURFACE = Platform.select({
+  ios: 'rgba(255,255,255,0.14)',
+  android: 'rgba(255,255,255,0.06)',
+  default: 'rgba(255,255,255,0.12)',
+});
+
+const HERO_HALO_SHADOW = Platform.select({
+  ios: {
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 1,
+  },
+  android: {
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 0,
+  },
+  default: {
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 0,
+  },
+});
 
 const DEPTH_BACKGROUND = 0;
 const DEPTH_ELEMENT = 2;
@@ -139,6 +170,10 @@ function HomeScreen({ navigation }: Props) {
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   const ctaWidth = Math.min(width - 96, 320);
+  const heroCardMaxWidth = width * 0.88;
+  const heroCardMaxHeight = height * 0.38;
+  const heroCardWidth = Math.min(heroCardMaxWidth, 560);
+  const heroCardHeight = Math.min(heroCardMaxHeight, 248);
   const heroSafeTop = clampNumber(height * 0.22, insets.top + 130, insets.top + 210);
   const heroSafeBottom = clampNumber(height * 0.80, height * 0.74, height * 0.84);
   const tileRedTop = clampNumber(insets.top + 104, insets.top + 88, heroSafeTop - 30);
@@ -359,26 +394,46 @@ function HomeScreen({ navigation }: Props) {
       </View>
 
       <View style={styles.heroContainer}>
-        <View style={[styles.heroFocusGlow, { width: Math.min(width * 0.95, 560) }]} pointerEvents="none" />
-        <View style={styles.heroGroup}>
-          <Text style={styles.brandTitle}>{t('home.brandTitle')}</Text>
-          <Text style={styles.tagline}>{copy.tagline}</Text>
+        <View
+          style={[
+            styles.heroFocusGlow,
+            {
+              width: heroCardWidth,
+              height: heroCardHeight,
+              maxHeight: heroCardMaxHeight,
+            },
+          ]}
+          pointerEvents="none"
+        />
+        <View
+          style={[
+            styles.heroCard,
+            {
+              maxWidth: heroCardMaxWidth,
+              maxHeight: heroCardMaxHeight,
+            },
+          ]}
+        >
+          <View style={styles.heroGroup}>
+            <Text style={styles.brandTitle}>{t('home.brandTitle')}</Text>
+            <Text style={styles.tagline}>{copy.tagline}</Text>
 
-          <Pressable
-            onPress={handleNewGamePress}
-            style={({ pressed }) => [styles.primaryPressable, { width: ctaWidth }, pressed && styles.primaryPressed]}
-          >
-            <View style={styles.primaryButton}>
-                <Text style={styles.primaryButtonText}>{copy.newGame}</Text>
-            </View>
-          </Pressable>
+            <Pressable
+              onPress={handleNewGamePress}
+              style={({ pressed }) => [styles.primaryPressable, { width: ctaWidth }, pressed && styles.primaryPressed]}
+            >
+              <View style={styles.primaryButton}>
+                  <Text style={styles.primaryButtonText}>{copy.newGame}</Text>
+              </View>
+            </Pressable>
 
-          <Pressable
-            onPress={() => navigation.navigate('History')}
-            style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryPressed]}
-          >
-            <Text style={styles.secondaryButtonText}>{copy.historyAll}</Text>
-          </Pressable>
+            <Pressable
+              onPress={() => navigation.navigate('History')}
+              style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryPressed]}
+            >
+              <Text style={styles.secondaryButtonText}>{copy.historyAll}</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
 
@@ -530,20 +585,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
-    transform: [{ translateY: -10 }],
     zIndex: DEPTH_FOCUS,
   },
   heroFocusGlow: {
     position: 'absolute',
     height: 260,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.13)',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 26,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 2,
+    backgroundColor: HERO_HALO_SURFACE,
+    ...(HERO_HALO_SHADOW ?? {}),
     zIndex: DEPTH_BACKGROUND + 1,
+  },
+  heroCard: {
+    width: '88%',
+    alignSelf: 'center',
   },
   heroGroup: {
     alignItems: 'center',
@@ -551,15 +605,16 @@ const styles = StyleSheet.create({
     zIndex: DEPTH_ELEMENT,
   },
   brandTitle: {
+    ...typography.title,
     fontSize: 32,
     lineHeight: 40,
-    fontWeight: '800',
     color: theme.colors.textPrimary,
     textAlign: 'center',
     marginBottom: 9,
     letterSpacing: 0.3,
   },
   tagline: {
+    ...typography.body,
     fontSize: theme.fontSize.md,
     color: theme.colors.textSecondary,
     textAlign: 'center',
@@ -583,9 +638,8 @@ const styles = StyleSheet.create({
     ...CTA_SHADOW,
   },
   primaryButtonText: {
+    ...typography.button,
     color: '#FFFFFF',
-    fontSize: theme.fontSize.md,
-    fontWeight: '600',
     letterSpacing: 0.5,
   },
   secondaryButton: {
@@ -599,6 +653,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   secondaryButtonText: {
+    ...typography.body,
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
     fontWeight: '500',
@@ -715,6 +770,7 @@ const styles = StyleSheet.create({
     height: 84,
   },
   tileGlyph: {
+    ...typography.title,
     fontSize: 46,
     lineHeight: 52,
     fontWeight: '800',
@@ -816,35 +872,36 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.md,
   },
   promptTitle: {
+    ...typography.title,
     fontSize: theme.fontSize.lg,
     fontWeight: '700',
     color: theme.colors.textPrimary,
   },
   promptMessage: {
     marginTop: theme.spacing.sm,
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textSecondary,
   },
   onboardingStep: {
     marginTop: theme.spacing.xs,
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textPrimary,
     lineHeight: 20,
   },
   promptGameTitle: {
     marginTop: 4,
-    fontSize: theme.fontSize.md,
+    ...typography.subtitle,
     fontWeight: '600',
     color: theme.colors.textPrimary,
   },
   promptDuration: {
     marginTop: 2,
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textSecondary,
   },
   promptHint: {
     marginTop: theme.spacing.sm,
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textSecondary,
   },
   promptPrimaryButton: {
@@ -858,9 +915,8 @@ const styles = StyleSheet.create({
     opacity: 0.92,
   },
   promptPrimaryText: {
+    ...typography.button,
     color: theme.colors.surface,
-    fontSize: theme.fontSize.md,
-    fontWeight: '600',
   },
   promptSecondaryButton: {
     marginTop: theme.spacing.sm,
@@ -875,9 +931,8 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   promptSecondaryText: {
+    ...typography.button,
     color: theme.colors.primary,
-    fontSize: theme.fontSize.sm,
-    fontWeight: '600',
   },
   promptDisabledButton: {
     marginTop: theme.spacing.sm,
@@ -890,8 +945,8 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
   promptDisabledText: {
+    ...typography.body,
     color: theme.colors.textSecondary,
-    fontSize: theme.fontSize.sm,
     fontWeight: '500',
   },
   promptCancelButton: {
@@ -903,8 +958,8 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   promptCancelText: {
+    ...typography.body,
     color: theme.colors.textSecondary,
-    fontSize: theme.fontSize.sm,
     fontWeight: '500',
   },
   promptButtonDisabled: {

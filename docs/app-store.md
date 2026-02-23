@@ -22,5 +22,5 @@
 - 使用者可在裝置內管理與清除資料。
 
 ## Support
-- Support URL: `https://example.com/support`（待替換）
-- Contact Email: `support@example.com`（待替換）
+- Privacy URL: `https://tylerkagit-tktktk.github.io/Mahjong_fan/privacy/`
+- Contact Email: `mahjongfan.app@outlook.com`

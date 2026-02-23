@@ -24,6 +24,12 @@ type SeatSummary = {
   total: number;
 };
 
+type SettlementTransfer = {
+  fromPlayerId: string;
+  toPlayerId: string;
+  amount: number;
+};
+
 type HandDisplay = {
   hand: Hand;
   index: number;
@@ -47,20 +53,22 @@ const SEAT_KEYS: Array<'seat.east' | 'seat.south' | 'seat.west' | 'seat.north'> 
 ];
 
 function translateWithFallback(
-  t: (key: TranslationKey) => string,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
   key: string,
   fallback: string,
   replacements?: Record<string, string | number>,
 ): string {
-  const raw = t(key as TranslationKey);
+  const raw = t(key as TranslationKey, replacements);
   const base = raw === key ? fallback : raw;
   if (!replacements) {
     return base;
   }
-  return Object.entries(replacements).reduce(
-    (result, [token, value]) => result.replace(new RegExp(`\\{${token}\\}`, 'g'), String(value)),
-    base,
-  );
+  return Object.entries(replacements).reduce((result, [token, value]) => {
+    const valueText = String(value);
+    const doublePattern = new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`, 'g');
+    const singlePattern = new RegExp(`\\{${token}\\}`, 'g');
+    return result.replace(doublePattern, valueText).replace(singlePattern, valueText);
+  }, base);
 }
 
 function normalizeVariant(value: string): Variant {
@@ -104,16 +112,9 @@ function getRankPrefix(index: number): string {
   return `${index + 1}.`;
 }
 
-function formatHighlight(value: { name: string; count: number; tiedCount: number } | null, t: (key: TranslationKey) => string): string {
+function formatHighlight(value: { name: string; count: number } | null): string {
   if (!value) {
     return '—';
-  }
-  if (value.tiedCount > 1) {
-    return `${value.name} (${value.count}) (+${value.tiedCount - 1} ${translateWithFallback(
-      t,
-      'game.detail.share.more',
-      'more',
-    )})`;
   }
   return `${value.name} (${value.count})`;
 }
@@ -121,25 +122,71 @@ function formatHighlight(value: { name: string; count: number; tiedCount: number
 function buildShareRankingLines(
   rankedPlayers: SeatSummary[],
   symbol: string,
-  t: (key: TranslationKey) => string,
 ): string[] {
-  const tieCountByTotal = new Map<number, number>();
-  rankedPlayers.forEach((player) => {
-    tieCountByTotal.set(player.total, (tieCountByTotal.get(player.total) ?? 0) + 1);
+  return rankedPlayers.map((player, index) => {
+    return `${index + 1}. ${player.name} ${formatSignedMoney(player.total, symbol)}`;
+  });
+}
+
+function buildSettlementTransfers(rankedPlayers: SeatSummary[]): SettlementTransfer[] {
+  const winners = rankedPlayers
+    .filter((player) => player.total > 0)
+    .map((player) => ({ ...player, remaining: Math.round(player.total) }))
+    .sort((a, b) => b.remaining - a.remaining);
+  const losers = rankedPlayers
+    .filter((player) => player.total < 0)
+    .map((player) => ({ ...player, remaining: Math.abs(Math.round(player.total)) }))
+    .sort((a, b) => b.remaining - a.remaining);
+
+  const transfers: SettlementTransfer[] = [];
+  losers.forEach((loser) => {
+    for (const winner of winners) {
+      if (loser.remaining <= 0) {
+        break;
+      }
+      if (winner.remaining <= 0) {
+        continue;
+      }
+      const amount = Math.min(loser.remaining, winner.remaining);
+      if (amount <= 0) {
+        continue;
+      }
+      transfers.push({ fromPlayerId: loser.playerId, toPlayerId: winner.playerId, amount });
+      loser.remaining -= amount;
+      winner.remaining -= amount;
+    }
   });
 
-  const emittedTotals = new Set<number>();
-  return rankedPlayers.map((player, index) => {
-    const sameTotalCount = tieCountByTotal.get(player.total) ?? 1;
-    const tieSuffix =
-      sameTotalCount > 1 && !emittedTotals.has(player.total)
-        ? ` ${translateWithFallback(t, 'game.detail.share.tieSuffix', '(+{count} more)', {
-            count: sameTotalCount - 1,
-          })}`
-        : '';
-    emittedTotals.add(player.total);
-    return `${index + 1}. ${player.name} ${formatSignedMoney(player.total, symbol)}${tieSuffix}`;
+  return transfers.filter((transfer) => transfer.amount > 0);
+}
+
+function buildSettlementDirectionLines(
+  rankedPlayers: SeatSummary[],
+  symbol: string,
+  t: (key: TranslationKey) => string,
+): string[] {
+  const transfers = buildSettlementTransfers(rankedPlayers);
+  if (transfers.length === 0) {
+    return ['—'];
+  }
+  const byFromPlayer = new Map<string, SettlementTransfer[]>();
+  transfers.forEach((transfer) => {
+    const list = byFromPlayer.get(transfer.fromPlayerId) ?? [];
+    list.push(transfer);
+    byFromPlayer.set(transfer.fromPlayerId, list);
   });
+  const nameById = new Map(rankedPlayers.map((player) => [player.playerId, player.name]));
+  const loserOrder = rankedPlayers.filter((player) => player.total < 0).map((player) => player.playerId);
+
+  return loserOrder
+    .filter((loserId) => byFromPlayer.has(loserId))
+    .map((loserId) => {
+      const transfersByLoser = byFromPlayer.get(loserId) ?? [];
+      const details = transfersByLoser
+        .map((transfer) => `${nameById.get(transfer.toPlayerId) ?? transfer.toPlayerId} ${symbol}${Math.round(transfer.amount)}`)
+        .join(' / ');
+      return `${nameById.get(loserId) ?? loserId} ${translateWithFallback(t, 'game.detail.share.settlementArrow', '→')} ${details}`;
+    });
 }
 
 function resolveDeltasQ(deltasJson?: string | null): number[] | null {
@@ -178,6 +225,78 @@ function parseDealerAction(computedJson: string | null | undefined): 'stick' | '
   }
 }
 
+function parseSettlementType(computedJson: string | null | undefined): 'zimo' | 'discard' | 'draw' | null {
+  if (!computedJson) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(computedJson) as { settlementType?: unknown };
+    if (parsed.settlementType === 'zimo' || parsed.settlementType === 'discard' || parsed.settlementType === 'draw') {
+      return parsed.settlementType;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function parseHandFan(computedJson: string | null | undefined): number | null {
+  if (!computedJson) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(computedJson) as { fan?: unknown; effectiveFan?: unknown };
+    const coerceNumber = (value: unknown): number | null => {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+      }
+      if (typeof value === 'string') {
+        const parsedValue = Number(value);
+        if (Number.isFinite(parsedValue)) {
+          return parsedValue;
+        }
+      }
+      return null;
+    };
+    const effectiveFan = coerceNumber(parsed.effectiveFan);
+    if (effectiveFan !== null) {
+      return effectiveFan;
+    }
+    return coerceNumber(parsed.fan);
+  } catch {
+    return null;
+  }
+}
+
+function getHandSummary(
+  hand: Hand,
+  winnerName: string,
+  discarderName: string | null,
+  t: (key: TranslationKey) => string,
+): string {
+  const settlementType = parseSettlementType(hand.computedJson);
+  const isDraw = hand.isDraw || hand.type === 'draw' || settlementType === 'draw';
+  if (isDraw) {
+    return translateWithFallback(t, 'game.detail.hand.summary.draw', '流局');
+  }
+
+  const fanValueRaw = parseHandFan(hand.computedJson);
+  const fanValue = fanValueRaw === null || fanValueRaw === undefined ? '—' : String(fanValueRaw);
+  const isZimo = hand.type === 'zimo' || settlementType === 'zimo';
+  if (isZimo) {
+    return translateWithFallback(t, 'game.detail.hand.summary.zimo', '{name} 自摸 {fan} 番', {
+      name: winnerName || '—',
+      fan: fanValue,
+    });
+  }
+
+  return translateWithFallback(t, 'game.detail.hand.summary.discard', '{loser} 出銃比 {winner} {fan} 番', {
+    loser: discarderName || '—',
+    winner: winnerName || '—',
+    fan: fanValue,
+  });
+}
+
 function GameDashboardScreen({ navigation, route }: Props) {
   const { gameId } = route.params;
   const { t } = useAppLanguage();
@@ -188,7 +307,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [expandedHands, setExpandedHands] = useState<Record<string, boolean>>({});
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
-  const [visibleHandsCount, setVisibleHandsCount] = useState(20);
   const [handFilter, setHandFilter] = useState<HandFilter>('all');
 
   const sectionListRef = useRef<SectionList<HandDisplay, HandSection>>(null);
@@ -200,7 +318,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
     setBundle(data);
     setRules(parseRules(data.game.rulesJson, normalizeVariant(data.game.variant)));
     setCollapsedSections({});
-    setVisibleHandsCount(20);
     setHandFilter('all');
     setLoading(false);
   }, [gameId]);
@@ -287,13 +404,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
     return handDisplayList;
   }, [handDisplayList, handFilter]);
 
-  const visibleHandDisplayList = useMemo(() => {
-    if (visibleHandsCount >= filteredHandDisplayList.length) {
-      return filteredHandDisplayList;
-    }
-    return filteredHandDisplayList.slice(filteredHandDisplayList.length - visibleHandsCount);
-  }, [filteredHandDisplayList, visibleHandsCount]);
-
   const totalCountByWind = useMemo(() => {
     const counts = new Map<string, number>();
     filteredHandDisplayList.forEach((entry) => {
@@ -304,7 +414,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
 
   const handSections = useMemo(() => {
     const sections = new Map<string, HandDisplay[]>();
-    visibleHandDisplayList.forEach((entry) => {
+    filteredHandDisplayList.forEach((entry) => {
       const list = sections.get(entry.windLabel) ?? [];
       list.push(entry);
       sections.set(entry.windLabel, list);
@@ -314,7 +424,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
       data,
       totalCount: totalCountByWind.get(title) ?? data.length,
     }));
-  }, [totalCountByWind, visibleHandDisplayList]);
+  }, [filteredHandDisplayList, totalCountByWind]);
 
   const handsCount = bundle?.game.handsCount ?? orderedHands.length;
 
@@ -406,12 +516,17 @@ function GameDashboardScreen({ navigation, route }: Props) {
       );
       return;
     }
-    const rankingLines = buildShareRankingLines(rankedPlayers, bundle.game.currencySymbol ?? '', t);
+    const rankingLines = buildShareRankingLines(rankedPlayers, bundle.game.currencySymbol ?? '');
+    const settlementLines = buildSettlementDirectionLines(rankedPlayers, bundle.game.currencySymbol ?? '', t);
     const playerStatsLines = rankedPlayers.map(
       (player) =>
         `${player.name}：${translateWithFallback(t, 'game.detail.stats.wins', '胡牌')} ${
           gameStats?.winsByPlayerId[player.playerId] ?? 0
-        }｜${translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} ${gameStats?.zimoByPlayerId[player.playerId] ?? 0}`,
+        }｜${translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} ${
+          gameStats?.zimoByPlayerId[player.playerId] ?? 0
+        }｜${translateWithFallback(t, 'game.detail.stats.discards', '出銃')} ${
+          gameStats?.discardByPlayerId[player.playerId] ?? 0
+        }`,
     );
     const titleText = bundle.game.title || translateWithFallback(t, 'game.detail.header.title', '對局總結');
     const dateText = formatDate(bundle.game.createdAt);
@@ -421,12 +536,15 @@ function GameDashboardScreen({ navigation, route }: Props) {
       `${translateWithFallback(t, 'game.detail.players.title', '玩家排名')}:`,
       ...rankingLines,
       '',
+      `${translateWithFallback(t, 'game.detail.share.settlementTitle', '結算方向')}:`,
+      ...settlementLines,
+      '',
       `${translateWithFallback(t, 'game.detail.stats.title', '統計')}:`,
       `${translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', { count: handsCount })}`,
       `${translateWithFallback(t, 'game.detail.stats.draws', '流局')}: ${gameStats?.draws ?? 0}`,
       ...playerStatsLines,
-      `${translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}: ${formatHighlight(gameStats?.mostDiscarder ?? null, t)}`,
-      `${translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}: ${formatHighlight(gameStats?.mostZimo ?? null, t)}`,
+      `${translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}: ${formatHighlight(gameStats?.mostDiscarder ?? null)}`,
+      `${translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}: ${formatHighlight(gameStats?.mostZimo ?? null)}`,
     ].join('\n');
     await Share.share({ title: bundle.game.title, message: summaryText });
   }, [bundle, gameStats, handsCount, isEnded, rankedPlayers, t]);
@@ -502,13 +620,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
             ) : null}
           </View>
 
-          <Text style={styles.handMetaText}>
-            {hand.isDraw
-              ? translateWithFallback(t, 'game.detail.hand.drawMeta', '流局')
-              : discarderName
-                ? `${winnerName} ← ${discarderName}`
-                : winnerName}
-          </Text>
+          <Text style={styles.handMetaText}>{getHandSummary(hand, winnerName, discarderName, t)}</Text>
 
           <View style={styles.deltaChipsRow}>
             {seatLabels.map((seat) => (
@@ -718,19 +830,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
                     {translateWithFallback(t, 'game.detail.rules.hkCapFan', '爆棚')}：
                     {rules.hk?.capFan == null ? '∞' : rules.hk.capFan}
                   </Text>
-                  <Text style={styles.metaText}>
-                    {translateWithFallback(t, 'game.detail.rules.hkDealerMultiplier', '莊家加倍')}：
-                    {rules.hk?.applyDealerMultiplier
-                      ? translateWithFallback(t, 'game.detail.common.on', '開')
-                      : translateWithFallback(t, 'game.detail.common.off', '關')}
-                  </Text>
-                  <Text style={styles.metaHintText}>
-                    {translateWithFallback(
-                      t,
-                      'game.detail.rules.hkDealerMultiplier.hint',
-                      '開啟時莊家相關結算會按規則加權。',
-                    )}
-                  </Text>
                 </>
               ) : null}
             </Card>
@@ -748,6 +847,8 @@ function GameDashboardScreen({ navigation, route }: Props) {
                   {translateWithFallback(t, 'game.detail.stats.wins', '胡牌')} {gameStats?.winsByPlayerId[player.playerId] ?? 0}
                   {' ｜ '}
                   {translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} {gameStats?.zimoByPlayerId[player.playerId] ?? 0}
+                  {' ｜ '}
+                  {translateWithFallback(t, 'game.detail.stats.discards', '出銃')} {gameStats?.discardByPlayerId[player.playerId] ?? 0}
                 </Text>
               ))}
               <Text style={styles.statsHighlightLine}>
@@ -771,7 +872,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
                       testID={`hands-filter-${option.key}`}
                       onPress={() => {
                         setHandFilter(option.key);
-                        setVisibleHandsCount(20);
                         setCollapsedSections({});
                       }}
                       style={[styles.filterChip, selected && styles.filterChipActive]}
@@ -806,15 +906,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
         )}
         ListFooterComponent={
           <>
-            {visibleHandsCount < filteredHandDisplayList.length ? (
-              <AppButton
-                label={translateWithFallback(t, 'game.detail.hands.loadMore', '載入更多')}
-                onPress={() => setVisibleHandsCount((prev) => prev + 20)}
-                variant="secondary"
-                style={styles.loadMoreButton}
-              />
-            ) : null}
-
             <View style={styles.actionsWrap}>
               <AppButton
                 label={translateWithFallback(t, 'game.detail.action.share', '分享')}
@@ -1112,9 +1203,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   actionsWrap: {
-    marginTop: theme.spacing.sm,
-  },
-  loadMoreButton: {
     marginTop: theme.spacing.sm,
   },
   errorText: {

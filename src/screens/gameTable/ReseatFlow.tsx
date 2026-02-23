@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import AppButton from '../../components/AppButton';
 import { useAppLanguage } from '../../i18n/useAppLanguage';
 import theme from '../../theme/theme';
@@ -8,23 +8,39 @@ import { PLAYER_COUNT } from '../newGameStepper/constants';
 import PlayersSection from '../newGameStepper/sections/PlayersSection';
 import { SeatMode, StartingDealerMode } from '../newGameStepper/types';
 
+const MAX_PLAYER_NAME_LENGTH = 10;
+
 type PlayerSeatEntry = {
   id: string;
   name: string;
 };
 
+type ReseatPlayerSeat = {
+  id: string;
+  name: string;
+  seatIndex: number;
+};
+
+const seatOrder: number[] = [0, 1, 2, 3];
+
+function sortPlayersBySeat(players: ReseatPlayerSeat[]): ReseatPlayerSeat[] {
+  return [...players].sort((a, b) => seatOrder.indexOf(a.seatIndex) - seatOrder.indexOf(b.seatIndex));
+}
+
 type Props = {
   visible: boolean;
+  allowNameEdit?: boolean;
   currentRoundLabelZh: string;
   handsCount: number;
   currentDealerSeatIndex: number;
   currentPlayersBySeat: PlayerSeatEntry[];
   onDismiss: () => void;
-  onApplyReseat: (seatConfig: { rotationDelta: number }) => Promise<void>;
+  onApplyReseat: (seatConfig: { seatByPlayerId: Record<string, number> }) => Promise<void>;
 };
 
 function ReseatFlow({
   visible,
+  allowNameEdit = true,
   currentRoundLabelZh,
   handsCount,
   currentDealerSeatIndex,
@@ -38,6 +54,7 @@ function ReseatFlow({
   const [error, setError] = useState<string | null>(null);
   const [seatMode, setSeatMode] = useState<SeatMode>('manual');
   const [players, setPlayers] = useState<string[]>(['', '', '', '']);
+  const [lockedPlayers, setLockedPlayers] = useState<ReseatPlayerSeat[]>([]);
   const [autoNames, setAutoNames] = useState<string[]>(['', '', '', '']);
   const [autoAssigned, setAutoAssigned] = useState<string[] | null>(null);
   const [startingDealerMode, setStartingDealerMode] = useState<StartingDealerMode>('manual');
@@ -76,9 +93,17 @@ function ReseatFlow({
         {
           text: t('gameTable.reseat.action.open'),
           onPress: () => {
-            const names = currentPlayersBySeat.map((entry) => entry.name);
+            const names = currentPlayersBySeat.map((entry) => entry.name.slice(0, MAX_PLAYER_NAME_LENGTH));
+            const baseLockedPlayers = sortPlayersBySeat(
+              currentPlayersBySeat.map((entry, seatIndex) => ({
+                id: entry.id,
+                name: entry.name.slice(0, MAX_PLAYER_NAME_LENGTH),
+                seatIndex,
+              })),
+            );
             setPlayers(names);
             setAutoNames(names);
+            setLockedPlayers(baseLockedPlayers);
             setAutoAssigned(null);
             setSeatMode('manual');
             setStartingDealerMode('manual');
@@ -101,6 +126,26 @@ function ReseatFlow({
     setError(null);
   };
 
+  const handleSelectLockedSeat = (rowIndex: number, seatIndex: number) => {
+    setLockedPlayers((prev) => {
+      if (prev.length !== PLAYER_COUNT) {
+        return prev;
+      }
+      if (rowIndex < 0 || rowIndex >= PLAYER_COUNT || seatIndex < 0 || seatIndex >= PLAYER_COUNT) {
+        return prev;
+      }
+      const next = prev.map((entry) => ({ ...entry }));
+      const originalSeat = next[rowIndex].seatIndex;
+      const duplicateIndex = next.findIndex((entry, index) => entry.seatIndex === seatIndex && index !== rowIndex);
+      if (duplicateIndex >= 0) {
+        next[duplicateIndex].seatIndex = originalSeat;
+      }
+      next[rowIndex].seatIndex = seatIndex;
+      return sortPlayersBySeat(next);
+    });
+    setError(null);
+  };
+
   const handleConfirm = async () => {
     if (busy) {
       return;
@@ -114,42 +159,57 @@ function ReseatFlow({
     }
 
     const currentIds = currentPlayersBySeat.map((entry) => entry.id);
-    const usedIndices = new Set<number>();
-    const selectedIds: string[] = [];
-
-    for (const name of resolvedPlayers) {
-      const index = currentIds.findIndex((id, idx) => {
-        if (usedIndices.has(idx)) {
-          return false;
-        }
-        const player = currentPlayersBySeat.find((entry) => entry.id === id);
-        return player?.name === name;
-      });
-      if (index < 0) {
+    let selectedIds: string[] = [];
+    if (!allowNameEdit && seatMode === 'manual') {
+      if (lockedPlayers.length !== PLAYER_COUNT) {
         setError(t('gameTable.reseat.unsupported'));
         return;
       }
-      usedIndices.add(index);
-      selectedIds.push(currentIds[index]);
-    }
-
-    let rotationDelta: number | null = null;
-    for (let delta = 0; delta < 4; delta += 1) {
-      const isMatch = selectedIds.every((id, seatIndex) => id === currentIds[(seatIndex - delta + 4) % 4]);
-      if (isMatch) {
-        rotationDelta = delta;
-        break;
+      const idsBySeat: Array<string | null> = Array.from({ length: PLAYER_COUNT }, () => null);
+      for (const player of lockedPlayers) {
+        const seatIndex = player.seatIndex;
+        if (seatIndex < 0 || seatIndex >= PLAYER_COUNT || idsBySeat[seatIndex]) {
+          setError(t('gameTable.reseat.unsupported'));
+          return;
+        }
+        idsBySeat[seatIndex] = player.id ?? null;
+      }
+      if (idsBySeat.some((id) => !id)) {
+        setError(t('gameTable.reseat.unsupported'));
+        return;
+      }
+      selectedIds = idsBySeat as string[];
+    } else {
+      const usedIndices = new Set<number>();
+      for (const name of resolvedPlayers) {
+        const index = currentIds.findIndex((id, idx) => {
+          if (usedIndices.has(idx)) {
+            return false;
+          }
+          const player = currentPlayersBySeat.find((entry) => entry.id === id);
+          return player?.name === name;
+        });
+        if (index < 0) {
+          setError(t('gameTable.reseat.unsupported'));
+          return;
+        }
+        usedIndices.add(index);
+        selectedIds.push(currentIds[index]);
       }
     }
 
-    if (rotationDelta == null) {
+    if (selectedIds.length !== PLAYER_COUNT) {
       setError(t('gameTable.reseat.unsupported'));
       return;
     }
+    const seatByPlayerId = selectedIds.reduce<Record<string, number>>((acc, playerId, seatIndex) => {
+      acc[playerId] = seatIndex;
+      return acc;
+    }, {});
 
     setBusy(true);
     try {
-      await onApplyReseat({ rotationDelta });
+      await onApplyReseat({ seatByPlayerId });
       setModalVisible(false);
       onDismiss();
     } catch (err) {
@@ -172,16 +232,21 @@ function ReseatFlow({
         }
       }}
     >
-      <Pressable style={styles.modalOverlay} onPress={() => (!busy ? (setModalVisible(false), onDismiss()) : undefined)}>
-        <Pressable style={styles.modalCardLarge} onPress={(event) => event.stopPropagation()}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCardLarge}>
           <Text style={styles.modalTitle}>{t('gameTable.reseat.modalTitle')}</Text>
           <Text style={styles.modalSubtitleText}>{t('gameTable.reseat.modalSubtitle')}</Text>
 
-          <ScrollView style={styles.reseatScroll} contentContainerStyle={styles.reseatScrollContent}>
+          <ScrollView
+            style={styles.reseatScroll}
+            contentContainerStyle={styles.reseatScrollContent}
+            keyboardShouldPersistTaps="handled"
+          >
             <PlayersSection
+              allowNameEdit={allowNameEdit}
               seatMode={seatMode}
               seatLabels={seatLabels}
-              players={players}
+              players={allowNameEdit ? players : lockedPlayers.map((entry) => entry.name)}
               autoNames={autoNames}
               autoAssigned={autoAssigned}
               startingDealerMode={startingDealerMode}
@@ -190,13 +255,16 @@ function ReseatFlow({
               disabled={busy}
               manualPlayerRefs={manualPlayerRefs}
               autoPlayerRefs={autoPlayerRefs}
+              lockedSeatByRow={allowNameEdit ? undefined : lockedPlayers.map((entry) => entry.seatIndex)}
               labels={{
                 sectionTitle: t('newGame.confirmModal.section.players'),
                 seatModeTitle: t('newGame.seatModeTitle'),
                 seatModeManual: t('newGame.seatMode.manual'),
                 seatModeAuto: t('newGame.seatMode.auto'),
-                playerManualHintPrefix: t('newGame.playerManualHintPrefix'),
-                playerManualHintSuffix: t('newGame.playerManualHintSuffix'),
+                playerManualHintPrefix: allowNameEdit
+                  ? t('newGame.playerManualHintPrefix')
+                  : t('gameTable.reseat.playerSeatHint'),
+                playerManualHintSuffix: allowNameEdit ? t('newGame.playerManualHintSuffix') : '',
                 playerAutoHintPrefix: t('newGame.playerAutoHintPrefix'),
                 playerAutoHintSuffix: t('newGame.playerAutoHintSuffix'),
                 playerNameBySeatSuffix: t('newGame.playerNameBySeatSuffix'),
@@ -221,17 +289,18 @@ function ReseatFlow({
               onSetPlayer={(index, value) => {
                 setPlayers((prev) => {
                   const next = [...prev];
-                  next[index] = value;
+                  next[index] = value.slice(0, MAX_PLAYER_NAME_LENGTH);
                   return next;
                 });
               }}
               onSetAutoName={(index, value) => {
                 setAutoNames((prev) => {
                   const next = [...prev];
-                  next[index] = value;
+                  next[index] = value.slice(0, MAX_PLAYER_NAME_LENGTH);
                   return next;
                 });
               }}
+              onSelectLockedSeat={!allowNameEdit ? handleSelectLockedSeat : undefined}
               onConfirmAutoSeat={handleConfirmReseatAuto}
               onStartingDealerModeChange={(mode) => {
                 setStartingDealerMode(mode);
@@ -258,8 +327,8 @@ function ReseatFlow({
               style={styles.primaryButton}
             />
           </View>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -286,6 +355,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: GRID.x2,
     paddingVertical: GRID.x2,
     maxHeight: '88%',
+    width: '100%',
   },
   modalTitle: {
     fontSize: theme.fontSize.lg,
@@ -302,7 +372,7 @@ const styles = StyleSheet.create({
     maxHeight: 360,
   },
   reseatScrollContent: {
-    paddingBottom: GRID.x1,
+    paddingBottom: 24,
   },
   modalActions: {
     marginTop: GRID.x2,

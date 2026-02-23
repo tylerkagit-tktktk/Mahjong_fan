@@ -20,7 +20,7 @@ import Card from '../components/Card';
 import PillGroup from '../components/PillGroup';
 import TextField from '../components/TextField';
 import ScreenContainer from '../components/ScreenContainer';
-import { endGame, getGameBundle, insertHand, updateGameSeatRotationOffset } from '../db/repo';
+import { endGame, getGameBundle, insertHand, updateGamePlayerSeats } from '../db/repo';
 import { computeHkSettlement, toAmountFromQ } from '../domain/hk/settlement';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { GameBundle } from '../models/db';
@@ -30,9 +30,6 @@ import {
   getRoundLabel,
 } from '../models/dealer';
 import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
-import {
-  normalizeSeatRotationOffset,
-} from '../models/seatRotation';
 import {
   CurrencyCode,
   getCurrencyMeta,
@@ -140,6 +137,7 @@ function GameTableScreen({ route, navigation }: Props) {
   const [paytableRows, setPaytableRows] = useState<PaytableRow[]>([]);
   const [paytableMeta, setPaytableMeta] = useState<PaytableMeta | null>(null);
   const [reseatVisible, setReseatVisible] = useState(false);
+  const [reseatAllowNameEdit, setReseatAllowNameEdit] = useState(true);
   const lastPromptedWrapTokenRef = useRef<string | null>(null);
   const wrapTokenLoadedRef = useRef(false);
   const wrapTokenLoadPromiseRef = useRef<Promise<void> | null>(null);
@@ -208,7 +206,8 @@ function GameTableScreen({ route, navigation }: Props) {
 
   const maybePromptReseat = useCallback(
     async (previousRoundLabelZh: string, nextRoundLabelZh: string, wrapToken: string) => {
-      if (!isWrapEvent(previousRoundLabelZh, nextRoundLabelZh)) {
+      const isFullWrapEnd = isWrapEvent(previousRoundLabelZh, nextRoundLabelZh);
+      if (!isFullWrapEnd) {
         return;
       }
       await ensureWrapTokenLoaded();
@@ -221,27 +220,31 @@ function GameTableScreen({ route, navigation }: Props) {
       } catch {
         // best effort
       }
+      setReseatAllowNameEdit(!isFullWrapEnd);
       setReseatVisible(true);
     },
     [ensureWrapTokenLoaded, gameId],
   );
 
   const handleApplyReseat = useCallback(
-    async ({ rotationDelta }: { rotationDelta: number }) => {
+    async ({ seatByPlayerId }: { seatByPlayerId: Record<string, number> }) => {
       if (!bundle) {
         return;
       }
-      const currentOffset = normalizeSeatRotationOffset(bundle.game.seatRotationOffset ?? 0);
-      const nextOffset = normalizeSeatRotationOffset(currentOffset + rotationDelta);
-      await updateGameSeatRotationOffset(bundle.game.id, nextOffset);
+      await updateGamePlayerSeats(bundle.game.id, seatByPlayerId);
       setBundle((prev) =>
         prev
           ? {
               ...prev,
               game: {
                 ...prev.game,
-                seatRotationOffset: nextOffset,
+                seatRotationOffset: 0,
               },
+              players: prev.players.map((player) =>
+                Object.prototype.hasOwnProperty.call(seatByPlayerId, player.id)
+                  ? { ...player, seatIndex: seatByPlayerId[player.id] ?? player.seatIndex }
+                  : player,
+              ),
             }
           : prev,
       );
@@ -626,6 +629,11 @@ function GameTableScreen({ route, navigation }: Props) {
       const fan = Number(fanInput.trim());
       if (!Number.isInteger(fan) || fan < 1) {
         setError(t('errors.invalidFan'));
+        return;
+      }
+      const minFanToWin = Number.isInteger(rules.minFanToWin) ? Number(rules.minFanToWin) : 0;
+      if (fan < minFanToWin) {
+        setError(t('hand.validation.minFan', { minFan: minFanToWin }));
         return;
       }
       if (winnerSeatIndex === null) {
@@ -1066,6 +1074,7 @@ function GameTableScreen({ route, navigation }: Props) {
 
       <ReseatFlow
         visible={reseatVisible}
+        allowNameEdit={reseatAllowNameEdit}
         currentRoundLabelZh={bundle?.game.currentRoundLabelZh ?? INITIAL_ROUND_LABEL_ZH}
         handsCount={bundle?.hands.length ?? 0}
         currentDealerSeatIndex={dealerSeatIndex}
@@ -1073,7 +1082,10 @@ function GameTableScreen({ route, navigation }: Props) {
           .map((seat) => playersBySeat[seat])
           .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
           .map((entry) => ({ id: entry.id, name: entry.name }))}
-        onDismiss={() => setReseatVisible(false)}
+        onDismiss={() => {
+          setReseatVisible(false);
+          setReseatAllowNameEdit(true);
+        }}
         onApplyReseat={handleApplyReseat}
       />
 
@@ -1150,7 +1162,7 @@ function PlayerPanel({
       disabled={disabled}
     >
       <View style={styles.playerPanelCard}>
-        <Text numberOfLines={1} ellipsizeMode="tail" style={styles.playerName}>
+        <Text style={styles.playerName}>
           {name}
         </Text>
         <View style={styles.playerMetaRow}>
@@ -1565,6 +1577,8 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     fontSize: theme.fontSize.md,
     fontWeight: '600',
+    flexShrink: 1,
+    minWidth: 0,
   },
   modeRow: {
     flexDirection: 'row',

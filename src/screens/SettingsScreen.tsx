@@ -7,8 +7,8 @@ import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { deleteAllGames, restoreLastBackup, seedDemoGames } from '../db/repo';
-import { isDev } from '../debug/isDev';
 import { typography } from '../styles/typography';
+import { IS_DEV_TOOLS_ENABLED } from '../config/appEnv';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
@@ -141,7 +141,7 @@ function SettingsScreen({ navigation }: Props) {
           style={styles.aboutButton}
         />
 
-        {isDev ? (
+        {IS_DEV_TOOLS_ENABLED && (
           <View style={styles.devSection}>
             <Pressable onPress={handleDeleteAllGames} style={styles.devDangerButton} hitSlop={10}>
               <Text style={styles.devDangerText}>{t('settings.dev.delete.button')}</Text>
@@ -153,7 +153,7 @@ function SettingsScreen({ navigation }: Props) {
               <Text style={styles.devSeedText}>{t('settings.dev.restore.button')}</Text>
             </Pressable>
           </View>
-        ) : null}
+        )}
       </ScrollView>
     </ScreenContainer>
   );

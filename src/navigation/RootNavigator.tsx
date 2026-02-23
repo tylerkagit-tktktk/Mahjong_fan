@@ -2,6 +2,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Pressable, Text } from 'react-native';
 import AddHandScreen from '../screens/AddHandScreen';
+import AboutScreen from '../screens/AboutScreen';
 import GameDashboardScreen from '../screens/GameDashboardScreen';
 import GameTableScreen from '../screens/GameTableScreen';
 import HomeScreen from '../screens/HomeScreen';
@@ -75,6 +76,7 @@ function RootNavigator() {
       <Stack.Screen name="AddHand" component={AddHandScreen} options={{ title: t('nav.addHand') }} />
       <Stack.Screen name="Summary" component={SummaryScreen} options={{ title: t('nav.summary') }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: t('nav.settings') }} />
+      <Stack.Screen name="About" component={AboutScreen} options={{ title: t('about.title') }} />
     </Stack.Navigator>
   );
 }

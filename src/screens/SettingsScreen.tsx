@@ -1,13 +1,14 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
 import Card from '../components/Card';
+import ScreenContainer from '../components/ScreenContainer';
 import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { deleteAllGames, restoreLastBackup, seedDemoGames } from '../db/repo';
 import { isDev } from '../debug/isDev';
+import { typography } from '../styles/typography';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
@@ -91,7 +92,7 @@ function SettingsScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <ScreenContainer style={styles.container} horizontalPadding={0} includeTopInset={false}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.title}>{t('settings.title')}</Text>
 
@@ -133,6 +134,13 @@ function SettingsScreen({ navigation }: Props) {
           style={styles.backButton}
         />
 
+        <AppButton
+          label={t('settings.about')}
+          onPress={() => navigation.push('About')}
+          variant="secondary"
+          style={styles.aboutButton}
+        />
+
         {isDev ? (
           <View style={styles.devSection}>
             <Pressable onPress={handleDeleteAllGames} style={styles.devDangerButton} hitSlop={10}>
@@ -147,7 +155,7 @@ function SettingsScreen({ navigation }: Props) {
           </View>
         ) : null}
       </ScrollView>
-    </SafeAreaView>
+    </ScreenContainer>
   );
 }
 
@@ -162,6 +170,7 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.xl,
   },
   title: {
+    ...typography.title,
     fontSize: theme.fontSize.lg,
     fontWeight: '700',
     color: theme.colors.textPrimary,
@@ -172,7 +181,7 @@ const styles = StyleSheet.create({
     padding: theme.spacing.lg,
   },
   sectionTitle: {
-    fontSize: theme.fontSize.md,
+    ...typography.subtitle,
     fontWeight: '600',
     color: theme.colors.textPrimary,
     marginBottom: theme.spacing.sm,
@@ -181,6 +190,9 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
   },
   backButton: {
+    marginTop: theme.spacing.sm,
+  },
+  aboutButton: {
     marginTop: theme.spacing.sm,
   },
   devSection: {
@@ -199,7 +211,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   devDangerText: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: '#B23A34',
     fontWeight: '600',
   },
@@ -214,7 +226,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   devSeedText: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textPrimary,
     fontWeight: '600',
   },

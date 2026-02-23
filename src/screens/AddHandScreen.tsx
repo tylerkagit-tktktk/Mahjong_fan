@@ -9,11 +9,13 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomActionBar from '../components/BottomActionBar';
 import TextField from '../components/TextField';
 import Card from '../components/Card';
 import SegmentedControl from '../components/SegmentedControl';
 import PillGroup from '../components/PillGroup';
+import ScreenContainer from '../components/ScreenContainer';
 import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { getGameBundle, insertHand } from '../db/repo';
@@ -47,6 +49,7 @@ const GRID = {
 function AddHandScreen({ navigation, route }: Props) {
   const { gameId } = route.params;
   const { t } = useAppLanguage();
+  const insets = useSafeAreaInsets();
 
   const [bundle, setBundle] = useState<GameBundle | null>(null);
   const [hkScoringPreset, setHkScoringPreset] = useState<'traditionalFan' | 'customTable'>(
@@ -130,6 +133,7 @@ function AddHandScreen({ navigation, route }: Props) {
     () => (bundle?.players ?? []).map((player) => ({ key: player.id, label: player.name })),
     [bundle?.players],
   );
+  const contentTopPadding = Math.max(Math.round(insets.top * 0.35), GRID.x2);
 
   const loadBundle = useCallback(async () => {
     try {
@@ -368,17 +372,24 @@ function AddHandScreen({ navigation, route }: Props) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={0}
-    >
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets
+    <ScreenContainer style={styles.container} horizontalPadding={0} includeTopInset={false} includeBottomInset={false}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
       >
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingTop: contentTopPadding,
+              paddingBottom: 168 + insets.bottom,
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
+        >
         <Text style={styles.pageTitle}>{t('addHand.title')}</Text>
         <Text style={styles.currencyText}>
           {`${t('addHand.currency')}${formatCurrencyUnit(currencyCode)}`}
@@ -491,20 +502,21 @@ function AddHandScreen({ navigation, route }: Props) {
         ) : null}
 
         {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
-      </ScrollView>
+        </ScrollView>
 
-      <BottomActionBar
-        primaryLabel={t('addHand.save')}
-        onPrimaryPress={() => {
-          handleSave().catch((err) => {
-            console.error('[AddHand] save press failed', err);
-          });
-        }}
-        secondaryLabel={t('common.back')}
-        onSecondaryPress={() => navigation.goBack()}
-        disabled={saving}
-      />
-    </KeyboardAvoidingView>
+        <BottomActionBar
+          primaryLabel={t('addHand.save')}
+          onPrimaryPress={() => {
+            handleSave().catch((err) => {
+              console.error('[AddHand] save press failed', err);
+            });
+          }}
+          secondaryLabel={t('common.back')}
+          onSecondaryPress={() => navigation.goBack()}
+          disabled={saving}
+        />
+      </KeyboardAvoidingView>
+    </ScreenContainer>
   );
 }
 
@@ -535,7 +547,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: GRID.x2,
-    paddingTop: GRID.x3,
     paddingBottom: 168,
   },
   pageTitle: {

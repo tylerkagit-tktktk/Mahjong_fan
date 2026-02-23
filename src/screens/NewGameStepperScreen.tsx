@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomActionBar from '../components/BottomActionBar';
+import ScreenContainer from '../components/ScreenContainer';
 import { createGameWithPlayers } from '../db/repo';
 import { DEBUG_FLAGS } from '../debug/debugFlags';
 import { useAppLanguage } from '../i18n/useAppLanguage';
@@ -11,6 +12,7 @@ import { DEFAULT_CURRENCY_CODE, CurrencyCode, formatCurrencyUnit, getCurrencyMet
 import { getDefaultRules, HkGunMode, HkScoringPreset, HkStakePreset, RulesV1, serializeRules, Variant } from '../models/rules';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
+import { typography } from '../styles/typography';
 import {
   CAP_FAN_MAX,
   CAP_FAN_MIN,
@@ -111,6 +113,7 @@ function NewGameStepperScreen({ navigation }: Props) {
       : null;
 
   const minFanForHint = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX) ?? minFanToWin;
+  const contentTopPadding = Math.max(Math.round(insets.top * 0.35), GRID.x2);
   const parsedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
   const sampleCapFan = hkScoringPreset === 'traditionalFan' ? capFan : customCapFanForCalc;
   const sampleEffectiveFan = sampleCapFan !== null ? Math.min(sampleFan, sampleCapFan) : sampleFan;
@@ -546,14 +549,18 @@ function NewGameStepperScreen({ navigation }: Props) {
   const scoringHintLines = getStakePresetHintLines(hkStakePreset, hkGunMode, minFanForHint, capFan, t);
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
-      <ScrollView
-        ref={scrollRef}
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom, GRID.x2) + 64 }]}
-        keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets
-      >
+    <ScreenContainer style={styles.container} horizontalPadding={0} includeTopInset={false} includeBottomInset={false}>
+      <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+        <ScrollView
+          ref={scrollRef}
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: contentTopPadding, paddingBottom: Math.max(insets.bottom, GRID.x2) + 64 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
+        >
         <View
           onLayout={(event) => {
             sectionY.current.title = event.nativeEvent.layout.y;
@@ -769,36 +776,37 @@ function NewGameStepperScreen({ navigation }: Props) {
 
         {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
         {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
-      </ScrollView>
+        </ScrollView>
 
-      <BottomActionBar
-        primaryLabel={loading ? t('newGame.creating') : t('newGame.create')}
-        onPrimaryPress={handlePressCreate}
-        disabled={loading || confirmBusy}
-      />
+        <BottomActionBar
+          primaryLabel={loading ? t('newGame.creating') : t('newGame.create')}
+          onPrimaryPress={handlePressCreate}
+          disabled={loading || confirmBusy}
+        />
 
-      <CreateConfirmModal
-        visible={confirmVisible}
-        busy={confirmBusy}
-        sections={confirmSections}
-        labels={{
-          title: t('newGame.confirmModal.title'),
-          subtitle: t('newGame.confirmModal.subtitle'),
-          sectionGame: t('newGame.confirmModal.section.game'),
-          sectionScoring: t('newGame.confirmModal.section.scoring'),
-          sectionPlayers: t('newGame.confirmModal.section.players'),
-          backToEdit: t('newGame.confirmModal.action.backToEdit'),
-          confirmCreate: t('newGame.confirmModal.action.confirmCreate'),
-          creating: t('newGame.creating'),
-        }}
-        onClose={() => setConfirmVisible(false)}
-        onConfirm={() => {
-          handleConfirmCreate().catch((error) => {
-            console.error('[NewGame] confirm create failed', error);
-          });
-        }}
-      />
-    </KeyboardAvoidingView>
+        <CreateConfirmModal
+          visible={confirmVisible}
+          busy={confirmBusy}
+          sections={confirmSections}
+          labels={{
+            title: t('newGame.confirmModal.title'),
+            subtitle: t('newGame.confirmModal.subtitle'),
+            sectionGame: t('newGame.confirmModal.section.game'),
+            sectionScoring: t('newGame.confirmModal.section.scoring'),
+            sectionPlayers: t('newGame.confirmModal.section.players'),
+            backToEdit: t('newGame.confirmModal.action.backToEdit'),
+            confirmCreate: t('newGame.confirmModal.action.confirmCreate'),
+            creating: t('newGame.creating'),
+          }}
+          onClose={() => setConfirmVisible(false)}
+          onConfirm={() => {
+            handleConfirmCreate().catch((error) => {
+              console.error('[NewGame] confirm create failed', error);
+            });
+          }}
+        />
+      </KeyboardAvoidingView>
+    </ScreenContainer>
   );
 }
 
@@ -812,13 +820,12 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: GRID.x2,
-    paddingTop: GRID.x3,
   },
   errorText: {
+    ...typography.body,
     marginTop: GRID.x1,
     marginBottom: GRID.x2,
     color: theme.colors.danger,
-    fontSize: theme.fontSize.sm,
   },
   debugSpacer: {
     height: 800,

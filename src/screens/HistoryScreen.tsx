@@ -2,7 +2,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ScreenContainer from '../components/ScreenContainer';
 import { listGames } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
@@ -10,6 +11,7 @@ import { Game } from '../models/db';
 import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
+import { typography } from '../styles/typography';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'History'>;
 
@@ -421,7 +423,7 @@ function HistoryScreen({ navigation }: Props) {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <ScreenContainer style={styles.container} horizontalPadding={0} includeTopInset={false}>
       <View style={styles.headerArea}>
         <View style={styles.filterWrap}>
           {filterOptions.map((option) => {
@@ -471,7 +473,7 @@ function HistoryScreen({ navigation }: Props) {
             : {})}
         />
       )}
-    </SafeAreaView>
+    </ScreenContainer>
   );
 }
 
@@ -528,10 +530,10 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   summaryKicker: {
+    ...typography.caption,
     fontSize: 11,
     lineHeight: 13,
     color: 'rgba(70,63,56,0.58)',
-    fontWeight: '500',
     letterSpacing: 0.2,
     marginBottom: 2,
   },
@@ -541,9 +543,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(70,63,56,0.08)',
   },
   summaryValue: {
+    ...typography.subtitle,
     marginTop: 4,
-    fontSize: theme.fontSize.md,
-    lineHeight: 22,
     color: theme.colors.textPrimary,
     fontWeight: '700',
   },
@@ -562,7 +563,7 @@ const styles = StyleSheet.create({
     ...FILTER_SHADOW,
   },
   filterText: {
-    fontSize: theme.fontSize.sm,
+    ...typography.body,
     color: theme.colors.textSecondary,
     fontWeight: '600',
     letterSpacing: 0.1,
@@ -576,9 +577,9 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.xl,
   },
   groupHeader: {
+    ...typography.caption,
     marginTop: theme.spacing.md,
     marginBottom: 6,
-    fontSize: theme.fontSize.xs,
     color: theme.colors.textSecondary,
     fontWeight: '600',
     letterSpacing: 0.3,
@@ -606,15 +607,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   itemTitle: {
+    ...typography.subtitle,
     flex: 1,
-    fontSize: theme.fontSize.md,
     fontWeight: '700',
     color: theme.colors.textPrimary,
     marginRight: theme.spacing.sm,
     lineHeight: 22,
   },
   itemDateText: {
-    fontSize: theme.fontSize.xs,
+    ...typography.caption,
     lineHeight: 16,
     color: theme.colors.textSecondary,
     fontWeight: '500',
@@ -647,6 +648,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(120,120,120,0.16)',
   },
   itemStatusText: {
+    ...typography.caption,
     fontSize: 10,
     fontWeight: '500',
     color: theme.colors.textSecondary,
@@ -660,21 +662,21 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   itemMeta: {
+    ...typography.body,
     flex: 1,
-    fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
     lineHeight: 18,
   },
   itemSummary: {
+    ...typography.body,
     marginTop: 8,
-    fontSize: theme.fontSize.sm,
     color: theme.colors.textPrimary,
     fontWeight: '600',
     lineHeight: 19,
   },
   itemSummaryMuted: {
+    ...typography.body,
     marginTop: 8,
-    fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
     fontWeight: '500',
   },
@@ -697,13 +699,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
   },
   emptyTitle: {
-    fontSize: theme.fontSize.md,
+    ...typography.subtitle,
     fontWeight: '700',
     color: theme.colors.textPrimary,
   },
   emptySubtitle: {
+    ...typography.body,
     marginTop: theme.spacing.xs,
-    fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
   },
   emptyAction: {
@@ -714,8 +716,8 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.sm,
   },
   emptyActionText: {
+    ...typography.button,
     color: theme.colors.surface,
-    fontWeight: '600',
     fontSize: theme.fontSize.sm,
   },
 });

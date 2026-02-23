@@ -1,5 +1,5 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { StyleSheet, Text } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text } from 'react-native';
 import Card from '../components/Card';
 import ScreenContainer from '../components/ScreenContainer';
 import { useAppLanguage } from '../i18n/useAppLanguage';
@@ -10,10 +10,18 @@ import theme from '../theme/theme';
 type Props = NativeStackScreenProps<RootStackParamList, 'About'>;
 
 const appPackage = require('../../package.json') as { version?: string };
+const PRIVACY_URL = 'https://tylerkagit-tktktk.github.io/Mahjong_fan/privacy/';
+const SUPPORT_EMAIL = 'mahjongfan.app@outlook.com';
 
 function AboutScreen(_: Props) {
   const { t } = useAppLanguage();
   const version = appPackage.version ?? '—';
+  const openPrivacyPolicy = () => {
+    Linking.openURL(PRIVACY_URL).catch(() => null);
+  };
+  const openSupportEmail = () => {
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}`).catch(() => null);
+  };
 
   return (
     <ScreenContainer style={styles.container} includeTopInset={false}>
@@ -36,6 +44,12 @@ function AboutScreen(_: Props) {
           {t('about.section.meta.version')}: {version}
         </Text>
         <Text style={styles.sectionBody}>{t('about.section.meta.support')}</Text>
+        <Pressable onPress={openSupportEmail}>
+          <Text style={styles.linkText}>{SUPPORT_EMAIL}</Text>
+        </Pressable>
+        <Pressable onPress={openPrivacyPolicy}>
+          <Text style={styles.linkText}>{PRIVACY_URL}</Text>
+        </Pressable>
       </Card>
     </ScreenContainer>
   );
@@ -71,6 +85,12 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: theme.colors.textSecondary,
     lineHeight: 22,
+  },
+  linkText: {
+    ...typography.body,
+    color: theme.colors.brandPrimary,
+    lineHeight: 22,
+    marginTop: theme.spacing.xs,
   },
 });
 

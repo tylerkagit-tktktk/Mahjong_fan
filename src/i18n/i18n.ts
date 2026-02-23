@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as RNLocalize from 'react-native-localize';
 import en from './locales/en.json';
 import zhHans from './locales/zh-Hans.json';
 import zhHant from './locales/zh-Hant.json';
@@ -13,32 +12,9 @@ const dictionaries: Record<LanguageCode, Record<TranslationKey, string>> = {
   'zh-Hant': zhHant,
 };
 
-let currentLanguage: LanguageCode = 'en';
+let currentLanguage: LanguageCode = 'zh-Hant';
 const listeners = new Set<(language: LanguageCode) => void>();
 let initialized = false;
-
-function resolveSystemLanguage(): LanguageCode {
-  const locales = RNLocalize.getLocales();
-  const primary = locales[0];
-  if (!primary) {
-    return 'en';
-  }
-
-  if (primary.languageCode === 'zh') {
-    if (primary.scriptCode === 'Hant') {
-      return 'zh-Hant';
-    }
-    if (primary.scriptCode === 'Hans') {
-      return 'zh-Hans';
-    }
-    if (primary.countryCode && ['HK', 'TW', 'MO'].includes(primary.countryCode)) {
-      return 'zh-Hant';
-    }
-    return 'zh-Hans';
-  }
-
-  return 'en';
-}
 
 function notify(language: LanguageCode) {
   listeners.forEach((listener) => listener(language));
@@ -70,11 +46,11 @@ export async function initializeI18n(): Promise<void> {
     if (stored === 'zh-Hant' || stored === 'zh-Hans' || stored === 'en') {
       currentLanguage = stored;
     } else {
-      currentLanguage = resolveSystemLanguage();
+      currentLanguage = 'zh-Hant';
     }
   } catch (error) {
-    console.warn('[i18n] failed to load language, fallback to system', error);
-    currentLanguage = resolveSystemLanguage();
+    console.warn('[i18n] failed to load language, fallback to zh-Hant', error);
+    currentLanguage = 'zh-Hant';
   }
 
   notify(currentLanguage);

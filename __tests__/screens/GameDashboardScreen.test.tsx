@@ -254,11 +254,15 @@ describe('GameDashboardScreen', () => {
     const textContent = (tree! as renderer.ReactTestRenderer).root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
     expect(textContent).toContain('Ended Match');
     expect(textContent).toContain('已打 2 鋪');
-    expect(textContent).toMatch(/1,?\./);
+    expect(textContent).toContain('🥇');
     expect(textContent).toContain('Bob');
     expect(textContent).toContain('+HK$20');
     expect(textContent).toContain('傳統番數');
     expect(textContent).toContain('半銃');
+    expect(textContent).toContain('最多出銃');
+    expect(textContent).toContain('Alice (1)');
+    expect(textContent).toContain('最多自摸');
+    expect(textContent).toContain('—');
     expect(textContent).not.toContain('traditionalFan');
     expect(textContent).not.toContain('halfGun');
 
@@ -288,13 +292,20 @@ describe('GameDashboardScreen', () => {
 
     const root = (tree! as renderer.ReactTestRenderer).root;
     const allText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
-    expect(allText).toContain('點炮');
     expect(allText).toContain('流局');
     expect(root.findByProps({ testID: 'hands-filter-all' })).toBeTruthy();
     expect(root.findByProps({ testID: 'hands-filter-wins' })).toBeTruthy();
     expect(root.findByProps({ testID: 'hands-filter-draws' })).toBeTruthy();
     expect(root.findByProps({ testID: 'jump-東風' })).toBeTruthy();
     expect(root.findByProps({ testID: 'jump-南風' })).toBeTruthy();
+    expect(allText).toContain('＋');
+
+    expect(() => root.findByProps({ testID: 'hand-row-h1' })).toThrow();
+
+    const windSection = root.findByProps({ testID: 'wind-section-東風' });
+    await act(async () => {
+      windSection.props.onPress();
+    });
 
     const firstHandPressable = root.findByProps({ testID: 'hand-row-h1' });
     await act(async () => {
@@ -308,7 +319,6 @@ describe('GameDashboardScreen', () => {
     expect(expandedText).not.toContain('{"dealerAction":"stick"}');
     expect(expandedText).not.toContain('[-80,80,0,0]');
 
-    const windSection = root.findByProps({ testID: 'wind-section-東風' });
     await act(async () => {
       windSection.props.onPress();
     });
@@ -317,6 +327,10 @@ describe('GameDashboardScreen', () => {
     const winsFilter = root.findByProps({ testID: 'hands-filter-wins' });
     await act(async () => {
       winsFilter.props.onPress();
+    });
+    expect(() => root.findByProps({ testID: 'hand-row-h1' })).toThrow();
+    await act(async () => {
+      windSection.props.onPress();
     });
     expect(root.findByProps({ testID: 'hand-row-h1' })).toBeTruthy();
     expect(() => root.findByProps({ testID: 'hand-row-h2' })).toThrow();
@@ -408,7 +422,7 @@ describe('GameDashboardScreen', () => {
     expect(payload.message).toContain('Ended Match');
     expect(payload.message).toContain('Ended Match — 01/01/2025');
     expect(payload.message).toContain('玩家排名');
-    expect(payload.message).toContain('最多放銃');
+    expect(payload.message).toContain('最多出銃');
     expect(payload.message).not.toMatch(/game\.detail\./);
     expect(payload.message).not.toMatch(/share\./);
     expect(payload.message).not.toContain('undefined');

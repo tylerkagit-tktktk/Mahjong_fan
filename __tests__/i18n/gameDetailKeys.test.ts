@@ -11,8 +11,11 @@ const touchedKeys = [
   'game.detail.stats.title',
   'game.detail.stats.wins',
   'game.detail.stats.zimo',
+  'game.detail.stats.discards',
   'game.detail.stats.mostDiscard',
   'game.detail.stats.mostZimo',
+  'game.detail.share.settlementTitle',
+  'game.detail.share.settlementArrow',
 ] as const;
 
 type Dict = Record<string, string>;

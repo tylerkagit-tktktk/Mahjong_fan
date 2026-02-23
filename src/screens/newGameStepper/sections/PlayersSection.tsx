@@ -1,5 +1,5 @@
 import { RefObject } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import AppButton from '../../../components/AppButton';
 import Card from '../../../components/Card';
 import SegmentedControl from '../../../components/SegmentedControl';
@@ -7,7 +7,10 @@ import theme from '../../../theme/theme';
 import { GRID, PLAYER_COUNT } from '../constants';
 import { SeatMode, StartingDealerMode } from '../types';
 
+const MAX_PLAYER_NAME_LENGTH = 10;
+
 type Props = {
+  allowNameEdit?: boolean;
   seatMode: SeatMode;
   seatLabels: string[];
   players: string[];
@@ -46,12 +49,15 @@ type Props = {
   onSeatModeChange: (nextMode: SeatMode) => void;
   onSetPlayer: (index: number, value: string) => void;
   onSetAutoName: (index: number, value: string) => void;
+  lockedSeatByRow?: number[];
+  onSelectLockedSeat?: (rowIndex: number, seatIndex: number) => void;
   onConfirmAutoSeat: () => void;
   onStartingDealerModeChange: (mode: StartingDealerMode) => void;
   onSelectStartingDealer: (index: number) => void;
 };
 
 function PlayersSection({
+  allowNameEdit = true,
   seatMode,
   seatLabels,
   players,
@@ -67,10 +73,13 @@ function PlayersSection({
   onSeatModeChange,
   onSetPlayer,
   onSetAutoName,
+  lockedSeatByRow,
+  onSelectLockedSeat,
   onConfirmAutoSeat,
   onStartingDealerModeChange,
   onSelectStartingDealer,
 }: Props) {
+  const effectiveSeatMode: SeatMode = allowNameEdit ? seatMode : 'manual';
   const dealerResultIndex = startingDealerSourceIndex;
   const hasDealerResult = dealerResultIndex !== null && dealerResultIndex >= 0 && dealerResultIndex < PLAYER_COUNT;
   const dealerSeatLabel = hasDealerResult ? seatLabels[dealerResultIndex] : '';
@@ -84,39 +93,77 @@ function PlayersSection({
       <Text style={styles.sectionTitle}>{labels.sectionTitle}</Text>
       {seatMode === 'manual' ? <Text style={styles.captionText}>{labels.manualSeatCaption}</Text> : null}
 
-      <Text style={styles.inputLabel}>{labels.seatModeTitle}</Text>
-      <SegmentedControl<SeatMode>
-        options={[
-          { value: 'manual', label: labels.seatModeManual },
-          { value: 'auto', label: labels.seatModeAuto },
-        ]}
-        value={seatMode}
-        onChange={onSeatModeChange}
-        disabled={disabled}
-      />
+      {allowNameEdit ? (
+        <>
+          <Text style={styles.inputLabel}>{labels.seatModeTitle}</Text>
+          <SegmentedControl<SeatMode>
+            options={[
+              { value: 'manual', label: labels.seatModeManual },
+              { value: 'auto', label: labels.seatModeAuto },
+            ]}
+            value={seatMode}
+            onChange={onSeatModeChange}
+            disabled={disabled}
+          />
+        </>
+      ) : null}
 
-      {seatMode === 'manual' ? (
+      {effectiveSeatMode === 'manual' ? (
         <View style={styles.playersList}>
           <Text style={styles.helperText}>
-            {`${labels.playerManualHintPrefix}${PLAYER_COUNT}${labels.playerManualHintSuffix}`}
+            {allowNameEdit
+              ? `${labels.playerManualHintPrefix}${PLAYER_COUNT}${labels.playerManualHintSuffix}`
+              : labels.playerManualHintPrefix}
           </Text>
           {seatLabels.map((label, index) => (
             <View key={label} style={styles.playerRowCard}>
-              <View style={styles.seatChip}>
-                <Text style={styles.seatChipText}>{label}</Text>
-              </View>
-              <TextInput
-                ref={(ref) => {
-                  manualPlayerRefs.current[index] = ref;
-                }}
-                style={styles.playerInput}
-                value={players[index]}
-                onChangeText={(value) => onSetPlayer(index, value)}
-                placeholder={`${label}${labels.playerNameBySeatSuffix}`}
-                placeholderTextColor={theme.colors.textSecondary}
-                editable={!disabled}
-                returnKeyType={index === 3 ? 'done' : 'next'}
-              />
+              {!allowNameEdit && onSelectLockedSeat ? (
+                <Pressable
+                  testID={`reseat-seat-picker-${index}`}
+                  onPress={() => {
+                    if (disabled) {
+                      return;
+                    }
+                    Alert.alert(
+                      labels.seatModeTitle,
+                      undefined,
+                      seatLabels.map((seatLabel, seatIndex) => ({
+                        text: seatLabel,
+                        onPress: () => onSelectLockedSeat(index, seatIndex),
+                      })),
+                      { cancelable: true },
+                    );
+                  }}
+                  style={styles.seatChip}
+                >
+                  <Text style={styles.seatChipText}>
+                    {seatLabels[lockedSeatByRow?.[index] ?? index]}
+                  </Text>
+                </Pressable>
+              ) : (
+                <View style={styles.seatChip}>
+                  <Text style={styles.seatChipText}>{label}</Text>
+                </View>
+              )}
+              {allowNameEdit ? (
+                <TextInput
+                  ref={(ref) => {
+                    manualPlayerRefs.current[index] = ref;
+                  }}
+                  style={styles.playerInput}
+                  value={players[index]}
+                  onChangeText={(value) => onSetPlayer(index, value.slice(0, MAX_PLAYER_NAME_LENGTH))}
+                  placeholder={`${label}${labels.playerNameBySeatSuffix}`}
+                  placeholderTextColor={theme.colors.textSecondary}
+                  editable={!disabled}
+                  maxLength={MAX_PLAYER_NAME_LENGTH}
+                  returnKeyType={index === 3 ? 'done' : 'next'}
+                />
+              ) : (
+                <Text style={styles.playerReadonlyText}>
+                  {players[index]}
+                </Text>
+              )}
               {index === 0 ? <Text style={styles.dealerBadge}>{labels.dealerBadge}</Text> : null}
             </View>
           ))}
@@ -135,10 +182,11 @@ function PlayersSection({
                 }}
                 style={styles.playerInput}
                 value={value}
-                onChangeText={(next) => onSetAutoName(index, next)}
+                onChangeText={(next) => onSetAutoName(index, next.slice(0, MAX_PLAYER_NAME_LENGTH))}
                 placeholder={`${labels.playerOrderPrefix}${index + 1}${labels.playerOrderSuffix}`}
                 placeholderTextColor={theme.colors.textSecondary}
                 editable={!disabled}
+                maxLength={MAX_PLAYER_NAME_LENGTH}
                 returnKeyType={index === 3 ? 'done' : 'next'}
               />
             </View>
@@ -322,6 +370,14 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
     lineHeight: 20,
+  },
+  playerReadonlyText: {
+    flex: 1,
+    minHeight: 44,
+    textAlignVertical: 'center',
+    fontSize: theme.fontSize.md,
+    color: theme.colors.textPrimary,
+    fontWeight: '500',
   },
 });
 

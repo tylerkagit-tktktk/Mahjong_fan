@@ -137,7 +137,7 @@ export function computeSettlementHkV1(input: ComputeSettlementHkV1Input): HkSett
 
   const minFanToWin = Number.isInteger(rules.minFanToWin) ? Number(rules.minFanToWin) : 0;
   if (fan < minFanToWin) {
-    throw new Error(`fan must be >= minFanToWin (${minFanToWin})`);
+    throw new Error(`HK_MIN_FAN_NOT_MET:${minFanToWin}`);
   }
 
   const capFan = rules.hk.capFan;

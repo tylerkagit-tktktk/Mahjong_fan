@@ -25,11 +25,8 @@ type Props = {
   currencySymbol: string;
   sampleBaseAmount: number | null;
   sampleEffectiveFan: number;
-  sampleHalfZimoEach: number | null;
-  sampleHalfDiscarder: number | null;
-  sampleHalfOthersEach: number | null;
-  sampleFullZimoEach: number | null;
-  sampleFullDiscarder: number | null;
+  sampleZimoEach: number | null;
+  sampleDiscarder: number | null;
   disabled: boolean;
   minFanInputRef: Ref<TextInput>;
   unitPerFanInputRef: Ref<TextInput>;
@@ -63,8 +60,8 @@ type Props = {
     customCapValueHelp: string;
     sampleFanLabel: string;
     realtimeEffectiveFan: string;
-    realtimeHalfGun: string;
-    realtimeFullGun: string;
+    realtimeZimoSplitLabel: string;
+    realtimeDiscarderLabel: string;
     twThresholdHelp: string;
     pmaDescription: string;
   };
@@ -108,11 +105,8 @@ function ScoringSection({
   currencySymbol,
   sampleBaseAmount,
   sampleEffectiveFan,
-  sampleHalfZimoEach,
-  sampleHalfDiscarder,
-  sampleHalfOthersEach,
-  sampleFullZimoEach,
-  sampleFullDiscarder,
+  sampleZimoEach,
+  sampleDiscarder,
   disabled,
   minFanInputRef,
   unitPerFanInputRef,
@@ -156,7 +150,7 @@ function ScoringSection({
             disabled={disabled}
           />
 
-          {hkScoringPreset === 'traditionalFan' ? (
+              {hkScoringPreset === 'traditionalFan' ? (
             <View style={styles.blockSpacing}>
               <Text style={styles.inputLabel}>{labels.hkGunModeLabel}</Text>
               <SegmentedControl<HkGunMode>
@@ -208,16 +202,22 @@ function ScoringSection({
             </View>
           ) : (
             <View style={styles.blockSpacing}>
-              <Text style={styles.inputLabel}>{labels.hkGunModeLabel}</Text>
-              <SegmentedControl<HkGunMode>
-                options={[
-                  { value: 'halfGun', label: labels.hkGunModeHalf },
-                  { value: 'fullGun', label: labels.hkGunModeFull },
-                ]}
-                value={hkGunMode}
-                onChange={onHkGunModeChange}
-                disabled={disabled}
-              />
+              <View>
+                <Text style={styles.inputLabel}>{labels.minFanThresholdLabel}</Text>
+                <StepperNumberInput
+                  inputRef={minFanInputRef}
+                  valueText={minFanInput}
+                  onChangeText={onMinFanInputChange}
+                  onBlur={onMinFanBlur}
+                  onIncrement={onMinFanIncrement}
+                  onDecrement={onMinFanDecrement}
+                  placeholder={`${MIN_FAN_MIN}-${MIN_FAN_MAX}`}
+                  editable={!disabled}
+                  hasError={Boolean(minFanError)}
+                />
+                <Text style={styles.helperText}>{labels.hkThresholdHelp}</Text>
+                {minFanError ? <Text style={styles.inlineErrorText}>{minFanError}</Text> : null}
+              </View>
 
               <View style={styles.blockSpacing}>
                 <Text style={styles.inputLabel}>{labels.unitPerFanLabel}</Text>
@@ -305,15 +305,12 @@ function ScoringSection({
                 <>
                   <Text style={styles.helperText}>{`${labels.realtimeEffectiveFan} = ${sampleEffectiveFan}`}</Text>
                   <Text style={styles.helperTextSubLine}>
-                    {labels.realtimeHalfGun
-                      .replaceAll('{zimoEach}', `${currencySymbol}${String(sampleHalfZimoEach ?? 0)}`)
-                      .replaceAll('{discarder}', `${currencySymbol}${String(sampleHalfDiscarder ?? 0)}`)
-                      .replaceAll('{othersEach}', `${currencySymbol}${String(sampleHalfOthersEach ?? 0)}`)}
+                    {labels.realtimeZimoSplitLabel
+                      .replaceAll('{amount}', `${currencySymbol}${String(sampleZimoEach ?? 0)}`)}
                   </Text>
                   <Text style={styles.helperTextSubLine}>
-                    {labels.realtimeFullGun
-                      .replaceAll('{zimoEach}', `${currencySymbol}${String(sampleFullZimoEach ?? 0)}`)
-                      .replaceAll('{discarder}', `${currencySymbol}${String(sampleFullDiscarder ?? 0)}`)}
+                    {labels.realtimeDiscarderLabel
+                      .replaceAll('{amount}', `${currencySymbol}${String(sampleDiscarder ?? 0)}`)}
                   </Text>
                 </>
               ) : null}

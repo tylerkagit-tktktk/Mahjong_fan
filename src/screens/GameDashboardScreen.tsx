@@ -437,7 +437,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
       return translateWithFallback(t, 'game.detail.rules.hkPreset.traditionalFan', '傳統番數');
     }
     if (preset === 'customTable') {
-      return translateWithFallback(t, 'game.detail.rules.hkPreset.customTable', '自訂表');
+      return translateWithFallback(t, 'game.detail.rules.mode.custom', '自訂番數（價錢表）');
     }
     return '—';
   }, [rules?.hk?.scoringPreset, t]);
@@ -472,6 +472,25 @@ function GameDashboardScreen({ navigation, route }: Props) {
     }
     return '—';
   }, [rules?.hk?.stakePreset, t]);
+
+  const customUnitPerFanLine = useMemo(() => {
+    if (rules?.variant !== 'HK' || rules?.hk?.scoringPreset !== 'customTable') {
+      return null;
+    }
+    const amountLabel = translateWithFallback(t, 'game.detail.rules.custom.unitPerFanLabel', '每番金額');
+    return `${amountLabel}：HK$${String(rules.hk.unitPerFan ?? 1)}`;
+  }, [rules, t]);
+
+  const customMultiplierSummary = useMemo(() => {
+    if (rules?.variant !== 'HK' || rules?.hk?.scoringPreset !== 'customTable') {
+      return null;
+    }
+    return translateWithFallback(
+      t,
+      'game.detail.rules.custom.multiplierSummary',
+      '自摸：3 份；出銃：2 份',
+    );
+  }, [rules, t]);
 
   const localizedVariant = useMemo(() => {
     if (bundle?.game.variant === 'HK') {
@@ -820,12 +839,22 @@ function GameDashboardScreen({ navigation, route }: Props) {
                   <Text style={styles.metaText}>
                     {translateWithFallback(t, 'game.detail.rules.hkPreset', '計分模式')}：{localizedScoringPreset}
                   </Text>
-                  <Text style={styles.metaText}>
-                    {translateWithFallback(t, 'game.detail.rules.hkGunMode', '銃制')}：{localizedGunMode}
-                  </Text>
-                  <Text style={styles.metaText}>
-                    {translateWithFallback(t, 'game.detail.rules.hkStake', '注碼')}：{localizedStakePreset}
-                  </Text>
+                  {rules.hk?.scoringPreset === 'traditionalFan' ? (
+                    <>
+                      <Text style={styles.metaText}>
+                        {translateWithFallback(t, 'game.detail.rules.hkGunMode', '銃制')}：{localizedGunMode}
+                      </Text>
+                      <Text style={styles.metaText}>
+                        {translateWithFallback(t, 'game.detail.rules.hkStake', '注碼')}：{localizedStakePreset}
+                      </Text>
+                    </>
+                  ) : null}
+                  {customUnitPerFanLine ? (
+                    <Text style={styles.metaText}>{customUnitPerFanLine}</Text>
+                  ) : null}
+                  {customMultiplierSummary ? (
+                    <Text style={styles.metaText}>{customMultiplierSummary}</Text>
+                  ) : null}
                   <Text style={styles.metaText}>
                     {translateWithFallback(t, 'game.detail.rules.hkCapFan', '爆棚')}：
                     {rules.hk?.capFan == null ? '∞' : rules.hk.capFan}

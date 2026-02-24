@@ -25,7 +25,17 @@ import {
   UNIT_PER_FAN_MAX,
   UNIT_PER_FAN_MIN,
 } from './newGameStepper/constants';
-import { clamp, getMinFanError, getStakePresetHintLines, makeId, parseMinFan, rotatePlayersToEast, shuffle } from './newGameStepper/helpers';
+import {
+  clamp,
+  getDecimalRangeError,
+  getMinFanError,
+  getStakePresetHintLines,
+  makeId,
+  parseDecimalWithinRange,
+  parseMinFan,
+  rotatePlayersToEast,
+  shuffle,
+} from './newGameStepper/helpers';
 import CreateConfirmModal from './newGameStepper/sections/CreateConfirmModal';
 import CurrencySection from './newGameStepper/sections/CurrencySection';
 import GameTitleSection from './newGameStepper/sections/GameTitleSection';
@@ -90,8 +100,9 @@ function NewGameStepperScreen({ navigation }: Props) {
   const sectionY = useRef<{ title: number; scoring: number; players: number }>({ title: 0, scoring: 0, players: 0 });
 
   const seatLabels = useMemo(() => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')], [t]);
-  const showMinFan = mode === 'TW' || (mode === 'HK' && hkScoringPreset === 'traditionalFan');
-  const parsedMinFanInput = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
+  const minFanLowerBound = mode === 'HK' && hkScoringPreset === 'customTable' ? 1 : MIN_FAN_MIN;
+  const showMinFan = mode === 'TW' || mode === 'HK';
+  const parsedMinFanInput = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
   const parsedCustomCapFan = parseMinFan(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
   const customCapFanForCalc = customCapMode === 'fanCap' ? parsedCustomCapFan ?? customCapFan : null;
   const minFanCapRelationInvalid =
@@ -101,29 +112,27 @@ function NewGameStepperScreen({ navigation }: Props) {
 
   const minFanError =
     showMinFan && (minFanTouched || submitAttempted)
-      ? getMinFanError(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX, t('newGame.minFanValidation')) ??
+      ? getMinFanError(minFanInput, minFanLowerBound, MIN_FAN_MAX, t('newGame.minFanValidation')) ??
         (minFanCapRelationInvalid ? t('newGame.minFanMustNotExceedCap') : null)
       : null;
   const unitPerFanError =
     mode === 'HK' && hkScoringPreset === 'customTable' && (unitPerFanTouched || submitAttempted)
-      ? getMinFanError(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX, t('newGame.unitPerFanValidation'))
+      ? getDecimalRangeError(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX, t('newGame.unitPerFanValidation'))
       : null;
   const customCapFanError =
     mode === 'HK' && hkScoringPreset === 'customTable' && customCapMode === 'fanCap' && (customCapFanTouched || submitAttempted)
       ? getMinFanError(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX, t('newGame.customCapFanValidation'))
       : null;
 
-  const minFanForHint = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX) ?? minFanToWin;
+  const minFanForHint = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX) ?? minFanToWin;
   const contentTopPadding = Math.max(Math.round(insets.top * 0.35), GRID.x2);
-  const parsedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+  const parsedUnitPerFan = parseDecimalWithinRange(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
   const sampleCapFan = hkScoringPreset === 'traditionalFan' ? capFan : customCapFanForCalc;
-  const sampleEffectiveFan = sampleCapFan !== null ? Math.min(sampleFan, sampleCapFan) : sampleFan;
+  const sampleEffectiveFanRaw = Math.max(sampleFan, minFanForHint);
+  const sampleEffectiveFan = sampleCapFan !== null ? Math.min(sampleEffectiveFanRaw, sampleCapFan) : sampleEffectiveFanRaw;
   const sampleBaseAmount = parsedUnitPerFan !== null ? sampleEffectiveFan * parsedUnitPerFan : null;
-  const sampleHalfZimoEach = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
-  const sampleHalfDiscarder = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
-  const sampleHalfOthersEach = sampleBaseAmount !== null ? sampleBaseAmount : null;
-  const sampleFullZimoEach = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
-  const sampleFullDiscarder = sampleBaseAmount !== null ? sampleBaseAmount * 4 : null;
+  const sampleZimoEach = sampleBaseAmount !== null ? sampleBaseAmount : null;
+  const sampleDiscarder = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
   const currencySymbol = getCurrencyMeta(currencyCode).symbol;
 
   const handleSetPlayer = (index: number, value: string) => {
@@ -255,19 +264,19 @@ function NewGameStepperScreen({ navigation }: Props) {
 
     let resolvedMinFan = minFanToWin;
     if (showMinFan) {
-      const parsedMinFan = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
-      if (parsedMinFan === null) {
+      const parsedMinFanWithBound = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
+      if (parsedMinFanWithBound === null) {
         focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
         return null;
       }
-      resolvedMinFan = parsedMinFan;
-      setMinFanToWin(parsedMinFan);
+      resolvedMinFan = parsedMinFanWithBound;
+      setMinFanToWin(parsedMinFanWithBound);
     }
 
     let resolvedUnitPerFan = unitPerFan;
     let resolvedCustomCapFan = customCapFanForCalc;
     if (mode === 'HK' && hkScoringPreset === 'customTable') {
-      const validatedUnitPerFan = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+      const validatedUnitPerFan = parseDecimalWithinRange(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
       if (validatedUnitPerFan === null) {
         focusInvalidTarget(invalidTarget ?? { kind: 'unitPerFan' });
         return null;
@@ -402,7 +411,7 @@ function NewGameStepperScreen({ navigation }: Props) {
         unitPerFan: resolvedUnitPerFan,
         capFan: hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan,
       };
-      rules.minFanToWin = hkScoringPreset === 'traditionalFan' ? resolvedMinFan : rules.minFanToWin ?? 3;
+      rules.minFanToWin = resolvedMinFan;
     }
 
     return {
@@ -458,28 +467,29 @@ function NewGameStepperScreen({ navigation }: Props) {
         label: t('newGame.confirmModal.field.scoringMethod'),
         value: context.rules.hk.scoringPreset === 'customTable' ? t('newGame.hkPreset.custom') : t('newGame.hkPreset.traditional'),
       });
-      scoringFields.push({
-        label: t('newGame.confirmModal.field.gunMode'),
-        value: context.rules.hk.gunMode === 'halfGun' ? t('newGame.hkGunMode.half') : t('newGame.hkGunMode.full'),
-      });
-      scoringFields.push({
-        label: t('newGame.confirmModal.field.stakePreset'),
-        value:
-          context.rules.hk.stakePreset === 'TWO_FIVE_CHICKEN'
-            ? t('newGame.hkStakePreset.twoFiveChicken')
-            : context.rules.hk.stakePreset === 'FIVE_ONE'
-            ? t('newGame.hkStakePreset.fiveOne')
-            : t('newGame.hkStakePreset.oneTwo'),
-      });
+      if (context.rules.hk.scoringPreset === 'traditionalFan') {
+        scoringFields.push({
+          label: t('newGame.confirmModal.field.gunMode'),
+          value: context.rules.hk.gunMode === 'halfGun' ? t('newGame.hkGunMode.half') : t('newGame.hkGunMode.full'),
+        });
+        scoringFields.push({
+          label: t('newGame.confirmModal.field.stakePreset'),
+          value:
+            context.rules.hk.stakePreset === 'TWO_FIVE_CHICKEN'
+              ? t('newGame.hkStakePreset.twoFiveChicken')
+              : context.rules.hk.stakePreset === 'FIVE_ONE'
+              ? t('newGame.hkStakePreset.fiveOne')
+              : t('newGame.hkStakePreset.oneTwo'),
+        });
+      }
       scoringFields.push({
         label: t('newGame.confirmModal.field.capFan'),
         value: context.rules.hk.capFan === null ? t('newGame.capMode.none') : `${t('newGame.capMode.fanCap')} ${context.rules.hk.capFan}`,
       });
       if (context.rules.hk.scoringPreset === 'customTable') {
         scoringFields.push({ label: t('newGame.confirmModal.field.unitPerFan'), value: String(context.rules.hk.unitPerFan ?? 1) });
-      } else {
-        scoringFields.push({ label: t('newGame.confirmModal.field.minFan'), value: String(context.rules.minFanToWin ?? minFanToWin) });
       }
+      scoringFields.push({ label: t('newGame.confirmModal.field.minFan'), value: String(context.rules.minFanToWin ?? minFanToWin) });
     }
 
     if (context.rules.mode === 'TW') {
@@ -530,14 +540,14 @@ function NewGameStepperScreen({ navigation }: Props) {
   };
 
   const adjustMinFan = (delta: number) => {
-    const next = clamp(minFanToWin + delta, MIN_FAN_MIN, MIN_FAN_MAX);
+    const next = clamp(minFanToWin + delta, minFanLowerBound, MIN_FAN_MAX);
     setMinFanToWin(next);
     setMinFanInput(String(next));
     setMinFanTouched(true);
   };
 
   const adjustUnitPerFan = (delta: number) => {
-    const next = clamp(unitPerFan + delta, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+    const next = clamp(Number((unitPerFan + delta).toFixed(2)), UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
     setUnitPerFan(next);
     setUnitPerFanInput(String(next));
     setUnitPerFanTouched(true);
@@ -621,11 +631,8 @@ function NewGameStepperScreen({ navigation }: Props) {
             currencySymbol={currencySymbol}
             sampleBaseAmount={sampleBaseAmount}
             sampleEffectiveFan={sampleEffectiveFan}
-            sampleHalfZimoEach={sampleHalfZimoEach}
-            sampleHalfDiscarder={sampleHalfDiscarder}
-            sampleHalfOthersEach={sampleHalfOthersEach}
-            sampleFullZimoEach={sampleFullZimoEach}
-            sampleFullDiscarder={sampleFullDiscarder}
+            sampleZimoEach={sampleZimoEach}
+            sampleDiscarder={sampleDiscarder}
             disabled={loading}
             minFanInputRef={minFanInputRef}
             unitPerFanInputRef={unitPerFanInputRef}
@@ -659,13 +666,18 @@ function NewGameStepperScreen({ navigation }: Props) {
               customCapValueHelp: t('newGame.customCapValueHelp'),
               sampleFanLabel: t('newGame.sampleFanLabel'),
               realtimeEffectiveFan: t('newGame.realtime.effectiveFan'),
-              realtimeHalfGun: t('newGame.realtime.halfGun'),
-              realtimeFullGun: t('newGame.realtime.fullGun'),
+              realtimeZimoSplitLabel: t('newGame.realtime.custom.zimo'),
+              realtimeDiscarderLabel: t('newGame.realtime.custom.discard'),
               twThresholdHelp: t('newGame.twThresholdHelp'),
               pmaDescription: t('newGame.pmaDescription'),
             }}
             stakePresetHintLines={scoringHintLines}
-            onHkScoringPresetChange={setHkScoringPreset}
+            onHkScoringPresetChange={(value) => {
+              setHkScoringPreset(value);
+              if (value === 'customTable') {
+                setHkGunMode('fullGun');
+              }
+            }}
             onHkGunModeChange={setHkGunMode}
             onHkStakePresetChange={setHkStakePreset}
             onCapFanChange={setCapFan}
@@ -697,25 +709,25 @@ function NewGameStepperScreen({ navigation }: Props) {
             onMinFanInputChange={(value) => setMinFanInput(value.replace(/[^0-9]/g, ''))}
             onMinFanBlur={() => {
               setMinFanTouched(true);
-              const parsed = parseMinFan(minFanInput, MIN_FAN_MIN, MIN_FAN_MAX);
-              if (parsed !== null) {
-                setMinFanToWin(parsed);
-                setMinFanInput(String(parsed));
+              const parsedWithBound = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
+              if (parsedWithBound !== null) {
+                setMinFanToWin(parsedWithBound);
+                setMinFanInput(String(parsedWithBound));
               }
             }}
             onMinFanIncrement={() => adjustMinFan(1)}
             onMinFanDecrement={() => adjustMinFan(-1)}
-            onUnitPerFanInputChange={(value) => setUnitPerFanInput(value.replace(/[^0-9]/g, ''))}
+            onUnitPerFanInputChange={(value) => setUnitPerFanInput(value.replace(/[^0-9.]/g, ''))}
             onUnitPerFanBlur={() => {
               setUnitPerFanTouched(true);
-              const parsed = parseMinFan(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+              const parsed = parseDecimalWithinRange(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
               if (parsed !== null) {
                 setUnitPerFan(parsed);
                 setUnitPerFanInput(String(parsed));
               }
             }}
-            onUnitPerFanIncrement={() => adjustUnitPerFan(1)}
-            onUnitPerFanDecrement={() => adjustUnitPerFan(-1)}
+            onUnitPerFanIncrement={() => adjustUnitPerFan(0.1)}
+            onUnitPerFanDecrement={() => adjustUnitPerFan(-0.1)}
             onSampleFanInputChange={(value) => {
               const parsed = parseMinFan(value.replace(/[^0-9]/g, ''), SAMPLE_FAN_MIN, SAMPLE_FAN_MAX);
               if (parsed !== null) {

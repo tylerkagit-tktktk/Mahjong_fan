@@ -1,6 +1,7 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, StatusBar, useColorScheme } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './src/navigation/RootNavigator';
 import { initializeI18n, t } from './src/i18n/i18n';
@@ -188,18 +189,20 @@ function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <AppErrorBoundary
-        onBackHome={() => {
-          setNavigationKey((prev) => prev + 1);
-        }}
-      >
-        <NavigationContainer key={navigationKey}>
-          <RootNavigator />
-        </NavigationContainer>
-      </AppErrorBoundary>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+        <AppErrorBoundary
+          onBackHome={() => {
+            setNavigationKey((prev) => prev + 1);
+          }}
+        >
+          <NavigationContainer key={navigationKey}>
+            <RootNavigator />
+          </NavigationContainer>
+        </AppErrorBoundary>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

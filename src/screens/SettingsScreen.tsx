@@ -1,95 +1,17 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text } from 'react-native';
 import AppButton from '../components/AppButton';
 import Card from '../components/Card';
 import ScreenContainer from '../components/ScreenContainer';
 import theme from '../theme/theme';
 import { RootStackParamList } from '../navigation/types';
 import { useAppLanguage } from '../i18n/useAppLanguage';
-import { deleteAllGames, restoreLastBackup, seedDemoGames } from '../db/repo';
 import { typography } from '../styles/typography';
-import { IS_DEV_TOOLS_ENABLED } from '../config/appEnv';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
 function SettingsScreen({ navigation }: Props) {
   const { t, setLanguage } = useAppLanguage();
-
-  const handleDeleteAllGames = () => {
-    Alert.alert(t('settings.dev.delete.confirmTitle'), t('settings.dev.delete.confirmMessage'), [
-      { text: t('settings.dev.common.cancel'), style: 'cancel' },
-      {
-        text: t('settings.dev.common.delete'),
-        style: 'destructive',
-        onPress: () => {
-          deleteAllGames().catch((error) => {
-            console.error('[DB] deleteAllGames failed', error);
-          });
-        },
-      },
-    ]);
-  };
-
-  const handleSeedDemoGames = () => {
-    Alert.alert(t('settings.dev.seed.confirmTitle'), t('settings.dev.seed.confirmMessage'), [
-      { text: t('settings.dev.common.cancel'), style: 'cancel' },
-      {
-        text: t('settings.dev.seed.action'),
-        onPress: () => {
-          seedDemoGames()
-            .then(() => {
-              Alert.alert(t('settings.dev.seed.successTitle'), t('settings.dev.seed.successMessage'));
-            })
-            .catch((error) => {
-              console.error('[DB] seedDemoGames failed', error);
-              Alert.alert(t('settings.dev.seed.errorTitle'), t('settings.dev.seed.errorMessage'));
-            });
-        },
-      },
-    ]);
-  };
-
-  const handleRestoreBackup = () => {
-    Alert.alert(
-      t('settings.dev.restore.confirmTitle'),
-      t('settings.dev.restore.confirmMessage'),
-      [
-        { text: t('settings.dev.common.cancel'), style: 'cancel' },
-        {
-          text: t('settings.dev.restore.action'),
-          onPress: () => {
-            restoreLastBackup()
-              .then((result) => {
-                if (result.restored) {
-                  Alert.alert(t('settings.dev.restore.successTitle'), t('settings.dev.restore.successMessage'));
-                  return;
-                }
-                if (result.reason === 'missing') {
-                  Alert.alert(t('settings.dev.restore.emptyTitle'), t('settings.dev.restore.emptyMessage'));
-                  return;
-                }
-                const validationMessageKey =
-                  result.reason === 'schema'
-                    ? 'settings.dev.restore.validation.schema'
-                    : result.reason === 'handsCount'
-                      ? 'settings.dev.restore.validation.handsCount'
-                      : result.reason === 'deltas'
-                        ? 'settings.dev.restore.validation.deltas'
-                        : 'settings.dev.restore.validation.state';
-                Alert.alert(
-                  t('settings.dev.restore.validationTitle'),
-                  t(validationMessageKey),
-                );
-              })
-              .catch((error) => {
-                console.error('[DB] restoreLastBackup failed', error);
-                Alert.alert(t('settings.dev.restore.errorTitle'), t('settings.dev.restore.errorMessage'));
-              });
-          },
-        },
-      ],
-    );
-  };
 
   return (
     <ScreenContainer style={styles.container} horizontalPadding={0} includeTopInset={false}>
@@ -141,19 +63,6 @@ function SettingsScreen({ navigation }: Props) {
           style={styles.aboutButton}
         />
 
-        {IS_DEV_TOOLS_ENABLED && (
-          <View style={styles.devSection}>
-            <Pressable onPress={handleDeleteAllGames} style={styles.devDangerButton} hitSlop={10}>
-              <Text style={styles.devDangerText}>{t('settings.dev.delete.button')}</Text>
-            </Pressable>
-            <Pressable onPress={handleSeedDemoGames} style={styles.devSeedButton} hitSlop={10}>
-              <Text style={styles.devSeedText}>{t('settings.dev.seed.button')}</Text>
-            </Pressable>
-            <Pressable onPress={handleRestoreBackup} style={styles.devSeedButton} hitSlop={10}>
-              <Text style={styles.devSeedText}>{t('settings.dev.restore.button')}</Text>
-            </Pressable>
-          </View>
-        )}
       </ScrollView>
     </ScreenContainer>
   );
@@ -194,41 +103,6 @@ const styles = StyleSheet.create({
   },
   aboutButton: {
     marginTop: theme.spacing.sm,
-  },
-  devSection: {
-    marginTop: theme.spacing.lg,
-    paddingTop: theme.spacing.md,
-    borderTopWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
-  },
-  devDangerButton: {
-    minHeight: 44,
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(178,58,52,0.45)',
-    backgroundColor: 'rgba(178,58,52,0.08)',
-    paddingHorizontal: theme.spacing.md,
-    justifyContent: 'center',
-  },
-  devDangerText: {
-    ...typography.body,
-    color: '#B23A34',
-    fontWeight: '600',
-  },
-  devSeedButton: {
-    minHeight: 44,
-    marginTop: theme.spacing.sm,
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(70,63,56,0.18)',
-    backgroundColor: theme.colors.surface,
-    paddingHorizontal: theme.spacing.md,
-    justifyContent: 'center',
-  },
-  devSeedText: {
-    ...typography.body,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
   },
 });
 

@@ -1,10 +1,11 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 import ScreenContainer from '../components/ScreenContainer';
-import { listGames } from '../db/repo';
+import { deleteGameCascade, listGames } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { Game } from '../models/db';
@@ -64,10 +65,12 @@ function translateWithFallback(
   if (!replacements) {
     return base;
   }
-  return Object.entries(replacements).reduce(
-    (result, [token, value]) => result.replace(new RegExp(`\\{${token}\\}`, 'g'), String(value)),
-    base,
-  );
+  return Object.entries(replacements).reduce((result, [token, value]) => {
+    const valueText = String(value);
+    const doublePattern = new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`, 'g');
+    const singlePattern = new RegExp(`\\{${token}\\}`, 'g');
+    return result.replace(doublePattern, valueText).replace(singlePattern, valueText);
+  }, base);
 }
 
 function formatDateTime(timestamp: number): string {
@@ -367,40 +370,85 @@ function HistoryScreen({ navigation }: Props) {
             ? defaultRoundLabel
             : translateWithFallback(t, 'history.result.calculating', '結果計算中…');
 
+    const showDeleteConfirm = (gameId: string) => {
+      Alert.alert(
+        translateWithFallback(t, 'games.deleteGameAlert.title', '刪除對局紀錄'),
+        translateWithFallback(t, 'games.deleteGameAlert.message', '確定要刪除呢場對局紀錄？此動作不能復原。'),
+        [
+          {
+            text: translateWithFallback(t, 'game.detail.action.cancel', '取消'),
+            style: 'cancel',
+          },
+          {
+            text: translateWithFallback(t, 'games.deleteGameAlert.confirm', '刪除'),
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteGameCascade(gameId);
+                setGames((prev) => prev.filter((entry) => entry.id !== gameId));
+                setSummaries((prev) => {
+                  const next = { ...prev };
+                  delete next[gameId];
+                  return next;
+                });
+              } catch (error) {
+                console.error('[DB] Failed to delete game', error);
+              }
+            },
+          },
+        ],
+      );
+    };
+
     return (
-      <Pressable
-        onPress={() => {
-          if (!canOpenDetail) return;
-          navigation.navigate('GameDashboard', { gameId: game.id });
-        }}
-        style={({ pressed }) => [
-          styles.itemCard,
-          !canOpenDetail && styles.itemDisabled,
-          canOpenDetail && pressed && styles.itemPressed,
-        ]}
+      <Swipeable
+        overshootRight={false}
+        renderRightActions={() => (
+          <Pressable
+            testID={`history-delete-${game.id}`}
+            onPress={() => showDeleteConfirm(game.id)}
+            style={({ pressed }) => [styles.deleteAction, pressed && styles.deleteActionPressed]}
+          >
+            <Text style={styles.deleteActionText}>
+              {translateWithFallback(t, 'games.deleteGameAlert.confirm', '刪除')}
+            </Text>
+          </Pressable>
+        )}
       >
-        <View style={styles.itemHeaderRow}>
-          <Text style={styles.itemTitle} numberOfLines={1} ellipsizeMode="tail">
-            {game.title}
-          </Text>
-          <Text style={styles.itemDateText}>{formatDateTime(game.createdAt)}</Text>
-        </View>
-        <View style={styles.itemMetaRow}>
-          <Text style={styles.itemMeta}>{metaLine}</Text>
-          <View style={styles.rightMetaWrap}>
-            <View
-              style={[
-                styles.itemStatusPill,
-                isInProgress ? styles.itemStatusActive : isAbandoned ? styles.itemStatusAbandoned : styles.itemStatusEnded,
-              ]}
-            >
-              <Text style={styles.itemStatusText}>{statusLabel}</Text>
-            </View>
-            {canOpenDetail ? <Text style={styles.chevron}>›</Text> : null}
+        <Pressable
+          onPress={() => {
+            if (!canOpenDetail) return;
+            navigation.navigate('GameDashboard', { gameId: game.id });
+          }}
+          style={({ pressed }) => [
+            styles.itemCard,
+            !canOpenDetail && styles.itemDisabled,
+            canOpenDetail && pressed && styles.itemPressed,
+          ]}
+        >
+          <View style={styles.itemHeaderRow}>
+            <Text style={styles.itemTitle} numberOfLines={1} ellipsizeMode="tail">
+              {game.title}
+            </Text>
+            <Text style={styles.itemDateText}>{formatDateTime(game.createdAt)}</Text>
           </View>
-        </View>
-        <Text style={hasResult ? styles.itemSummary : styles.itemSummaryMuted}>{settlementLine}</Text>
-      </Pressable>
+          <View style={styles.itemMetaRow}>
+            <Text style={styles.itemMeta}>{metaLine}</Text>
+            <View style={styles.rightMetaWrap}>
+              <View
+                style={[
+                  styles.itemStatusPill,
+                  isInProgress ? styles.itemStatusActive : isAbandoned ? styles.itemStatusAbandoned : styles.itemStatusEnded,
+                ]}
+              >
+                <Text style={styles.itemStatusText}>{statusLabel}</Text>
+              </View>
+              {canOpenDetail ? <Text style={styles.chevron}>›</Text> : null}
+            </View>
+          </View>
+          <Text style={hasResult ? styles.itemSummary : styles.itemSummaryMuted}>{settlementLine}</Text>
+        </Pressable>
+      </Swipeable>
     );
   };
 
@@ -679,6 +727,22 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: theme.colors.textSecondary,
     fontWeight: '500',
+  },
+  deleteAction: {
+    width: 92,
+    borderRadius: theme.radius.lg,
+    backgroundColor: '#B3261E',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing.sm,
+  },
+  deleteActionPressed: {
+    opacity: 0.9,
+  },
+  deleteActionText: {
+    ...typography.body,
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   loadingList: {
     paddingHorizontal: theme.spacing.lg,

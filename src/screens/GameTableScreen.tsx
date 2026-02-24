@@ -74,6 +74,7 @@ type RuleSummaryMeta = {
   scoringLabel: string;
   gunLabel: string;
   stakeLabel: string;
+  unitPerFanLabel: string;
   isHkTraditional: boolean;
 };
 
@@ -385,18 +386,22 @@ function GameTableScreen({ route, navigation }: Props) {
       ONE_TWO: t('newGame.hkStakePreset.oneTwo'),
     } as const;
     const stakeLabel = stakeLabelMap[rules.hk.stakePreset] ?? rules.hk.stakePreset;
-    return { scoringLabel, gunLabel, stakeLabel, isHkTraditional };
+    const unitPerFanLabel = t('game.detail.rules.custom.unitPerFan').replace('{amount}', String(rules.hk.unitPerFan));
+    return { scoringLabel, gunLabel, stakeLabel, unitPerFanLabel, isHkTraditional };
   }, [rules, t]);
 
   const rulesSummaryTags = useMemo(() => {
     if (!rulesSummaryMeta) {
       return null;
     }
-    return [t('newGame.mode.hk'), rulesSummaryMeta.scoringLabel, rulesSummaryMeta.gunLabel, rulesSummaryMeta.stakeLabel];
+    if (rulesSummaryMeta.isHkTraditional) {
+      return [t('newGame.mode.hk'), rulesSummaryMeta.scoringLabel, rulesSummaryMeta.gunLabel, rulesSummaryMeta.stakeLabel];
+    }
+    return [t('newGame.mode.hk'), rulesSummaryMeta.scoringLabel, rulesSummaryMeta.unitPerFanLabel];
   }, [rulesSummaryMeta, t]);
 
   const rulesSummaryStats = useMemo(() => {
-    if (!rules || rules.mode !== 'HK' || !rules.hk) {
+    if (!rules || rules.mode !== 'HK' || !rules.hk || rules.hk.scoringPreset !== 'traditionalFan') {
       return null;
     }
 
@@ -413,6 +418,22 @@ function GameTableScreen({ route, navigation }: Props) {
       capText,
       minFanText,
     };
+  }, [rules, t]);
+
+  const customRulesSummaryStats = useMemo(() => {
+    if (!rules || rules.mode !== 'HK' || !rules.hk || rules.hk.scoringPreset !== 'customTable') {
+      return null;
+    }
+
+    const tags: string[] = [];
+    if (rules.hk.capFan !== null) {
+      tags.push(t('game.detail.rules.custom.capFan').replace('{fan}', String(rules.hk.capFan)));
+    }
+    if (rules.minFanToWin > 0) {
+      tags.push(t('game.detail.rules.custom.minFan').replace('{fan}', String(rules.minFanToWin)));
+    }
+    tags.push(t('game.detail.rules.custom.multiplier'));
+    return tags;
   }, [rules, t]);
 
   const elapsedLabel = useMemo(() => {
@@ -875,7 +896,7 @@ function GameTableScreen({ route, navigation }: Props) {
             <View style={styles.rulesSummaryCard}>
               <View style={styles.ruleTagsRow}>
                 {rulesSummaryTags.map((tag, index) => {
-                  const isStakeTag = index === rulesSummaryTags.length - 1;
+                  const isStakeTag = Boolean(rulesSummaryMeta?.isHkTraditional) && index === rulesSummaryTags.length - 1;
                   if (isStakeTag) {
                     return (
                       <Pressable
@@ -904,6 +925,15 @@ function GameTableScreen({ route, navigation }: Props) {
                   <View style={styles.rulesStatBadge}>
                     <Text style={styles.rulesStatValue}>{rulesSummaryStats.minFanText}</Text>
                   </View>
+                </View>
+              ) : null}
+              {customRulesSummaryStats?.length ? (
+                <View style={styles.ruleTagsRow}>
+                  {customRulesSummaryStats.map((tag) => (
+                    <View key={tag} style={styles.ruleTag}>
+                      <Text style={styles.ruleTagText}>{tag}</Text>
+                    </View>
+                  ))}
                 </View>
               ) : null}
             </View>

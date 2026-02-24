@@ -281,6 +281,37 @@ function createFanSummaryFromComputedBundle() {
   };
 }
 
+function createCustomTableBundle() {
+  const ended = createEndedBundle();
+  return {
+    ...ended,
+    game: {
+      ...ended.game,
+      id: 'g-custom',
+      title: 'Custom Table Match',
+      rulesJson: JSON.stringify({
+        version: 1,
+        variant: 'HK',
+        mode: 'HK',
+        currencyCode: 'HKD',
+        currencySymbol: 'HK$',
+        seats: { order: ['E', 'S', 'W', 'N'] },
+        minFanToWin: 3,
+        hk: {
+          scoring: 'fan',
+          scoringPreset: 'customTable',
+          gunMode: 'halfGun',
+          stakePreset: 'TWO_FIVE_CHICKEN',
+          unitPerFan: 0.5,
+          capFan: 10,
+          applyDealerMultiplier: true,
+        },
+        settlement: { mode: 'immediate' },
+      }),
+    },
+  };
+}
+
 describe('GameDashboardScreen', () => {
   const navigation = {
     navigate: jest.fn(),
@@ -463,6 +494,29 @@ describe('GameDashboardScreen', () => {
     expect(textContent).not.toContain('mysteryPreset');
     expect(textContent).not.toContain('mysteryGun');
     expect(textContent).not.toContain('mysteryStake');
+
+    await act(async () => {
+      (tree! as renderer.ReactTestRenderer).unmount();
+    });
+  });
+
+  it('renders customTable rules summary without gun/stake lines', async () => {
+    mockedGetGameBundle.mockResolvedValueOnce(createCustomTableBundle() as any);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'k10', name: 'GameDashboard', params: { gameId: 'g-custom' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const textContent = (tree! as renderer.ReactTestRenderer).root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(textContent).toContain('自訂番數（價錢表）');
+    expect(textContent).toContain('每番金額：HK$0.5');
+    expect(textContent).toContain('自摸：3 份；出銃：2 份');
+    expect(textContent).not.toContain('銃制：');
+    expect(textContent).not.toContain('注碼：');
 
     await act(async () => {
       (tree! as renderer.ReactTestRenderer).unmount();

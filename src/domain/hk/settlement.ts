@@ -115,6 +115,7 @@ export function computeHkSettlement(
   const legacy = computeCustomPayout({
     fan,
     unitPerFan: rules.hk.unitPerFan ?? 1,
+    minFanToWin: rules.minFanToWin ?? 0,
     capFan: rules.hk.capFan ?? null,
     gunMode: rules.hk.gunMode,
     settlementType,
@@ -123,7 +124,10 @@ export function computeHkSettlement(
   const zimoPerPlayerQ = Math.round(legacy.zimoPerPlayer * 4);
   const discarderPaysQ = Math.round(legacy.discarderPays * 4);
   const othersPayQ = legacy.otherPlayersPay === null ? null : Math.round(legacy.otherPlayersPay * 4);
-  const totalWinAmountQ = Math.round(legacy.totalWinAmount * 4);
+  const totalWinAmountQ =
+    settlementType === 'zimo'
+      ? zimoPerPlayerQ * 3
+      : discarderPaysQ + (othersPayQ ?? 0) * 2;
 
   return {
     source: 'legacy',

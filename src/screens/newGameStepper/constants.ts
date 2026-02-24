@@ -9,7 +9,7 @@ export const GRID = {
 
 export const MIN_FAN_MIN = 0;
 export const MIN_FAN_MAX = 13;
-export const UNIT_PER_FAN_MIN = 1;
+export const UNIT_PER_FAN_MIN = 0.1;
 export const UNIT_PER_FAN_MAX = 9999;
 export const CAP_FAN_MIN = 1;
 export const CAP_FAN_MAX = 99;

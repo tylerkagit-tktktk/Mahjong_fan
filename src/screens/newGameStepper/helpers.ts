@@ -30,6 +30,25 @@ export function getMinFanError(input: string, min: number, max: number, message:
   return parseMinFan(input, min, max) === null ? `${message} (${min}-${max})` : null;
 }
 
+export function parseDecimalWithinRange(input: string, min: number, max: number): number | null {
+  const normalized = input.trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  if (parsed < min || parsed > max) {
+    return null;
+  }
+  return parsed;
+}
+
+export function getDecimalRangeError(input: string, min: number, max: number, message: string): string | null {
+  return parseDecimalWithinRange(input, min, max) === null ? `${message} (${min}-${max})` : null;
+}
+
 export function getStakePresetHintLines(
   preset: HkStakePreset,
   gunMode: HkGunMode,

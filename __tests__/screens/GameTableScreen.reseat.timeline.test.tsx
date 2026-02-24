@@ -6,7 +6,7 @@ import GameTableScreen from '../../src/screens/GameTableScreen';
 import {
   getGameBundle,
   insertHand,
-  updateGameSeatRotationOffset,
+  updateGamePlayerSeats,
 } from '../../src/db/repo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -14,7 +14,7 @@ jest.mock('../../src/db/repo', () => ({
   getGameBundle: jest.fn(),
   insertHand: jest.fn(),
   endGame: jest.fn(),
-  updateGameSeatRotationOffset: jest.fn(),
+  updateGamePlayerSeats: jest.fn(),
 }));
 
 const I18N_MAP: Record<string, string> = {
@@ -73,17 +73,31 @@ jest.mock('../../src/screens/newGameStepper/sections/PlayersSection', () => {
     return (
       <View>
         <NativeText>mock-players-section</NativeText>
-        <NativePressable
-          testID="rotate-seat-order"
-          onPress={() => {
-            props.onSetPlayer(0, 'B');
-            props.onSetPlayer(1, 'C');
-            props.onSetPlayer(2, 'D');
-            props.onSetPlayer(3, 'A');
-          }}
-        >
-          <NativeText>rotate</NativeText>
-        </NativePressable>
+        <NativeText testID="allow-name-edit-flag">{String(props.allowNameEdit)}</NativeText>
+        {props.allowNameEdit ? (
+          <NativePressable
+            testID="reseat-rename-order"
+            onPress={() => {
+              props.onSetPlayer(0, 'B');
+              props.onSetPlayer(1, 'C');
+              props.onSetPlayer(2, 'D');
+              props.onSetPlayer(3, 'A');
+            }}
+          >
+            <NativeText>rename</NativeText>
+          </NativePressable>
+        ) : (
+          <NativePressable
+            testID="reseat-reassign-seats"
+            onPress={() => {
+              props.onSelectLockedSeat(3, 0);
+              props.onSelectLockedSeat(3, 1);
+              props.onSelectLockedSeat(3, 2);
+            }}
+          >
+            <NativeText>reassign</NativeText>
+          </NativePressable>
+        )}
       </View>
     );
   };
@@ -105,8 +119,8 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 
 const mockedGetGameBundle = getGameBundle as jest.MockedFunction<typeof getGameBundle>;
 const mockedInsertHand = insertHand as jest.MockedFunction<typeof insertHand>;
-const mockedUpdateSeatOffset = updateGameSeatRotationOffset as jest.MockedFunction<
-  typeof updateGameSeatRotationOffset
+const mockedUpdatePlayerSeats = updateGamePlayerSeats as jest.MockedFunction<
+  typeof updateGamePlayerSeats
 >;
 const mockedAsyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 
@@ -223,7 +237,7 @@ describe('GameTableScreen reseat timeline integration', () => {
     jest.clearAllMocks();
     mockStorage.clear();
     mockedGetGameBundle.mockResolvedValue(createBundle() as any);
-    mockedUpdateSeatOffset.mockResolvedValue();
+    mockedUpdatePlayerSeats.mockResolvedValue();
     let handCount = 2;
     mockedInsertHand.mockImplementation(async (input: any) => {
       const isDraw = Boolean(input.isDraw);
@@ -292,7 +306,7 @@ describe('GameTableScreen reseat timeline integration', () => {
       reseatButtons.find((button) => button.text === '唔需要')?.onPress?.();
       await Promise.resolve();
     });
-    expect(mockedUpdateSeatOffset).not.toHaveBeenCalled();
+    expect(mockedUpdatePlayerSeats).not.toHaveBeenCalled();
     expect(getAmountStrings(tree!)).toEqual(baselineAmounts);
 
     await act(async () => {
@@ -327,9 +341,12 @@ describe('GameTableScreen reseat timeline integration', () => {
       await Promise.resolve();
     });
 
-    const rotateButton = tree!.root.findByProps({ testID: 'rotate-seat-order' });
+    const allowEditFlag = tree!.root.findByProps({ testID: 'allow-name-edit-flag' });
+    expect(allowEditFlag.props.children).toBe('false');
+
+    const reassignButton = tree!.root.findByProps({ testID: 'reseat-reassign-seats' });
     await act(async () => {
-      rotateButton.props.onPress();
+      reassignButton.props.onPress();
     });
     const confirmReseatButton = tree!.root
       .findAllByType(AppButton)
@@ -340,8 +357,13 @@ describe('GameTableScreen reseat timeline integration', () => {
       await Promise.resolve();
     });
 
-    expect(mockedUpdateSeatOffset).toHaveBeenCalledTimes(1);
-    expect(mockedUpdateSeatOffset).toHaveBeenCalledWith('game-1', 3);
+    expect(mockedUpdatePlayerSeats).toHaveBeenCalledTimes(1);
+    expect(mockedUpdatePlayerSeats).toHaveBeenCalledWith('game-1', {
+      p3: 0,
+      p0: 1,
+      p1: 2,
+      p2: 3,
+    });
     expect(getAmountStrings(tree!)).toEqual(baselineAmounts);
 
     await act(async () => {

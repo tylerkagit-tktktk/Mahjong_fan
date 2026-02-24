@@ -20,9 +20,22 @@ function notify(language: LanguageCode) {
   listeners.forEach((listener) => listener(language));
 }
 
-export function t(key: TranslationKey): string {
+function interpolate(template: string, vars?: Record<string, string | number>): string {
+  if (!vars) {
+    return template;
+  }
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, token: string) => {
+    if (!(token in vars)) {
+      return match;
+    }
+    return String(vars[token]);
+  });
+}
+
+export function t(key: TranslationKey, vars?: Record<string, string | number>): string {
   const dict = dictionaries[currentLanguage] ?? dictionaries.en;
-  return dict[key] ?? dictionaries.en[key] ?? key;
+  const template = dict[key] ?? dictionaries.en[key] ?? key;
+  return interpolate(template, vars);
 }
 
 export function getLanguage(): LanguageCode {

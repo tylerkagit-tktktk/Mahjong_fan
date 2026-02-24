@@ -24,7 +24,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     window = UIWindow(frame: UIScreen.main.bounds)
 
     factory.startReactNative(
-      withModuleName: "mahjong_be_fd",
+      withModuleName: "MahjongFan",
       in: window,
       launchOptions: launchOptions
     )

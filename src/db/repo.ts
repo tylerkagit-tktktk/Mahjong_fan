@@ -92,6 +92,7 @@ const INTERNAL_BACKUPS_KEY = 'db_internal_backups_v1';
 const INTERNAL_BACKUPS_LIMIT = 5;
 const INTERNAL_BACKUP_SCHEMA_VERSION = 1;
 const INTERNAL_BACKUP_SCHEMA_COMPATIBILITY = new Set([INTERNAL_BACKUP_SCHEMA_VERSION]);
+const MAX_PLAYER_NAME_LENGTH = 10;
 
 type InternalBackup = {
   id: string;
@@ -144,6 +145,10 @@ function assertGameMutable(gameState: string | null | undefined, endedAt: number
   if (endedAt != null || !MUTABLE_GAME_STATES.has(gameState ?? '')) {
     throw new Error(MUTATION_BLOCKED_ERROR);
   }
+}
+
+function truncatePlayerName(name: string | null | undefined): string {
+  return String(name ?? '').slice(0, MAX_PLAYER_NAME_LENGTH);
 }
 
 export const __testOnly_mutationBlockedErrorMessage = MUTATION_BLOCKED_ERROR;
@@ -333,7 +338,7 @@ export async function __testOnly_createGameWithPlayersWithTx(
     await executeTx('INSERT INTO players (id, gameId, name, seatIndex) VALUES (?, ?, ?, ?);', [
       player.id,
       player.gameId,
-      player.name,
+      truncatePlayerName(player.name),
       player.seatIndex,
     ]);
   }
@@ -408,6 +413,63 @@ export async function updateGameSeatRotationOffset(gameId: string, seatRotationO
     });
   } catch (error) {
     const wrapped = normalizeError(error, 'updateGameSeatRotationOffset failed');
+    console.error('[DB]', wrapped);
+    throw wrapped;
+  }
+}
+
+export async function updateGamePlayerSeats(
+  gameId: string,
+  seatByPlayerId: Record<string, number>,
+): Promise<void> {
+  try {
+    if (isDev) {
+      setBreadcrumb('Repo: updateGamePlayerSeats', { gameId, seatByPlayerId });
+    }
+    await runExplicitWriteTransaction('updateGamePlayerSeats', async (executeTx) => {
+      const gameResult = await executeTx('SELECT endedAt, gameState FROM games WHERE id = ? LIMIT 1;', [gameId]);
+      if (gameResult.rows.length === 0) {
+        throw new Error(`Game not found: ${gameId}`);
+      }
+      const gameRow = gameResult.rows.item(0) as {
+        endedAt?: number | null;
+        gameState?: string | null;
+      };
+      assertGameMutable(gameRow.gameState ?? null, gameRow.endedAt ?? null);
+
+      const playersResult = await executeTx('SELECT id FROM players WHERE gameId = ? ORDER BY seatIndex ASC;', [gameId]);
+      const playerRows = rowsToArray<{ id: string }>(playersResult);
+      if (playerRows.length !== 4) {
+        throw new Error('Invalid player count for reseat');
+      }
+
+      const playerIds = playerRows.map((row) => row.id);
+      const providedIds = Object.keys(seatByPlayerId);
+      if (providedIds.length !== playerIds.length || playerIds.some((id) => !Object.prototype.hasOwnProperty.call(seatByPlayerId, id))) {
+        throw new Error('Invalid reseat payload');
+      }
+
+      const usedSeats = new Set<number>();
+      for (const playerId of playerIds) {
+        const seatIndex = Number(seatByPlayerId[playerId]);
+        if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex > 3 || usedSeats.has(seatIndex)) {
+          throw new Error('Invalid reseat payload');
+        }
+        usedSeats.add(seatIndex);
+      }
+
+      for (const playerId of playerIds) {
+        await executeTx('UPDATE players SET seatIndex = ? WHERE id = ? AND gameId = ?;', [
+          seatByPlayerId[playerId],
+          playerId,
+          gameId,
+        ]);
+      }
+
+      await executeTx('UPDATE games SET seatRotationOffset = 0 WHERE id = ?;', [gameId]);
+    });
+  } catch (error) {
+    const wrapped = normalizeError(error, 'updateGamePlayerSeats failed');
     console.error('[DB]', wrapped);
     throw wrapped;
   }
@@ -764,7 +826,7 @@ export async function restoreLastBackup(): Promise<{
         await executeTx('INSERT INTO players (id, gameId, name, seatIndex) VALUES (?, ?, ?, ?);', [
           player.id,
           player.gameId,
-          player.name,
+          truncatePlayerName(player.name),
           player.seatIndex,
         ]);
       }

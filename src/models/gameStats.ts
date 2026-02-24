@@ -20,6 +20,7 @@ export type GameStats = {
   ranking: RankedPlayer[];
   winsByPlayerId: Record<string, number>;
   zimoByPlayerId: Record<string, number>;
+  discardByPlayerId: Record<string, number>;
   draws: number;
   mostDiscarder: TopPlayerStat | null;
   mostZimo: TopPlayerStat | null;
@@ -147,6 +148,10 @@ export function computeGameStats(bundle: GameBundle): GameStats {
     acc[player.id] = zimoByPlayerIdMap.get(player.id) ?? 0;
     return acc;
   }, {});
+  const discardByPlayerId = bundle.players.reduce<Record<string, number>>((acc, player) => {
+    acc[player.id] = discarderByPlayerIdMap.get(player.id) ?? 0;
+    return acc;
+  }, {});
 
   const totalQ = Array.from(totalsQByPlayer.values()).reduce((sum, value) => sum + value, 0);
 
@@ -155,6 +160,7 @@ export function computeGameStats(bundle: GameBundle): GameStats {
     ranking,
     winsByPlayerId,
     zimoByPlayerId,
+    discardByPlayerId,
     draws,
     mostDiscarder: pickTop(discarderByPlayerIdMap, playersById),
     mostZimo: pickTop(zimoByPlayerIdMap, playersById),

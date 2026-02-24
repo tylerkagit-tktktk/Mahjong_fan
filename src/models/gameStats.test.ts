@@ -138,6 +138,12 @@ describe('computeGameStats', () => {
       name: 'D',
       count: 2,
     });
+    expect(stats.discardByPlayerId).toMatchObject({
+      p0: 0,
+      p1: 2,
+      p2: 0,
+      p3: 0,
+    });
   });
 
   it('returns null for mostDiscarder when no discard hands exist', () => {

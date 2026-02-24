@@ -20,6 +20,9 @@ jest.mock('../../src/screens/newGameStepper/sections/PlayersSection', () => {
     return (
       <View>
         <NativeText>mock-players-section</NativeText>
+        <NativeText testID="allow-name-edit-flag">{String(props.allowNameEdit)}</NativeText>
+        <NativeText testID="players-prop">{(props.players ?? []).join(',')}</NativeText>
+        <NativeText testID="locked-seats-prop">{(props.lockedSeatByRow ?? []).join(',')}</NativeText>
         <NativePressable
           testID="rotate-seat-order"
           onPress={() => {
@@ -30,6 +33,16 @@ jest.mock('../../src/screens/newGameStepper/sections/PlayersSection', () => {
           }}
         >
           <NativeText>rotate</NativeText>
+        </NativePressable>
+        <NativePressable
+          testID="switch-seat-order"
+          onPress={() => {
+            if (props.onSelectLockedSeat) {
+              props.onSelectLockedSeat(0, 2);
+            }
+          }}
+        >
+          <NativeText>switch</NativeText>
         </NativePressable>
       </View>
     );
@@ -117,7 +130,7 @@ describe('ReseatFlow', () => {
     });
   });
 
-  it('choosing open then confirm applies reseat delta', async () => {
+  it('choosing open then confirm applies arbitrary reseat mapping', async () => {
     const onDismiss = jest.fn();
     const onApplyReseat = jest.fn().mockResolvedValue(undefined);
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -127,6 +140,7 @@ describe('ReseatFlow', () => {
       tree = renderer.create(<ReseatFlow {...baseProps} onDismiss={onDismiss} onApplyReseat={onApplyReseat} />);
       await Promise.resolve();
     });
+    expect(tree!.root.findAllByProps({ testID: 'allow-name-edit-flag' })).toHaveLength(0);
 
     const [, , buttons] = alertSpy.mock.calls[0];
     const open = (buttons as Array<{ text: string; onPress?: () => void }>).find(
@@ -136,6 +150,10 @@ describe('ReseatFlow', () => {
       open?.onPress?.();
       await Promise.resolve();
     });
+
+    const allowEditFlags = tree!.root.findAllByProps({ testID: 'allow-name-edit-flag' });
+    expect(allowEditFlags.length).toBeGreaterThan(0);
+    expect(allowEditFlags.some((node) => node.props.children === 'true')).toBe(true);
 
     const rotateButton = tree!.root.findByProps({ testID: 'rotate-seat-order' });
     await act(async () => {
@@ -151,8 +169,54 @@ describe('ReseatFlow', () => {
     });
 
     expect(onApplyReseat).toHaveBeenCalledTimes(1);
-    expect(onApplyReseat).toHaveBeenCalledWith({ rotationDelta: 3 });
+    expect(onApplyReseat).toHaveBeenCalledWith({
+      seatByPlayerId: {
+        p1: 0,
+        p2: 1,
+        p3: 2,
+        p0: 3,
+      },
+    });
     expect(onDismiss).toHaveBeenCalledTimes(1);
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('keeps rows sorted by E/S/W/N after locked reseat seat switch', async () => {
+    const onDismiss = jest.fn();
+    const onApplyReseat = jest.fn().mockResolvedValue(undefined);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <ReseatFlow {...baseProps} allowNameEdit={false} onDismiss={onDismiss} onApplyReseat={onApplyReseat} />,
+      );
+      await Promise.resolve();
+    });
+
+    const [, , buttons] = alertSpy.mock.calls[0];
+    const open = (buttons as Array<{ text: string; onPress?: () => void }>).find(
+      (item) => item.text === 'gameTable.reseat.action.open',
+    );
+    await act(async () => {
+      open?.onPress?.();
+      await Promise.resolve();
+    });
+
+    expect(tree!.root.findByProps({ testID: 'locked-seats-prop' }).props.children).toBe('0,1,2,3');
+    expect(tree!.root.findByProps({ testID: 'players-prop' }).props.children).toBe('A,B,C,D');
+
+    const switchButton = tree!.root.findByProps({ testID: 'switch-seat-order' });
+    await act(async () => {
+      switchButton.props.onPress();
+    });
+
+    expect(tree!.root.findByProps({ testID: 'locked-seats-prop' }).props.children).toBe('0,1,2,3');
+    expect(tree!.root.findByProps({ testID: 'players-prop' }).props.children).toBe('C,B,A,D');
 
     alertSpy.mockRestore();
     await act(async () => {

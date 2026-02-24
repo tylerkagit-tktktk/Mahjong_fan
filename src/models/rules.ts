@@ -156,7 +156,9 @@ export function parseRules(
                   ? 'TWO_FIVE_CHICKEN'
                   : fallback.hk!.stakePreset,
               unitPerFan:
-                Number.isInteger(parsed.hk?.unitPerFan) && Number(parsed.hk?.unitPerFan) > 0
+                typeof parsed.hk?.unitPerFan === 'number' &&
+                Number.isFinite(parsed.hk.unitPerFan) &&
+                Number(parsed.hk.unitPerFan) >= 0.1
                   ? Number(parsed.hk?.unitPerFan)
                   : fallback.hk!.unitPerFan,
               capFan: parsed.hk?.capFan ?? fallback.hk!.capFan,

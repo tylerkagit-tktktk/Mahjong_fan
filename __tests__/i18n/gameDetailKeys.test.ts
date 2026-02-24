@@ -16,6 +16,9 @@ const touchedKeys = [
   'game.detail.stats.mostZimo',
   'game.detail.share.settlementTitle',
   'game.detail.share.settlementArrow',
+  'game.detail.rules.mode.custom',
+  'game.detail.rules.custom.unitPerFanLabel',
+  'game.detail.rules.custom.multiplierSummary',
 ] as const;
 
 type Dict = Record<string, string>;

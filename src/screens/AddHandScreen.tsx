@@ -56,6 +56,7 @@ function AddHandScreen({ navigation, route }: Props) {
     'traditionalFan',
   );
   const [hkGunMode, setHkGunMode] = useState<'halfGun' | 'fullGun'>('halfGun');
+  const [minFanToWin, setMinFanToWin] = useState(0);
   const [unitPerFan, setUnitPerFan] = useState(1);
   const [capFan, setCapFan] = useState<number | null>(null);
   const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(DEFAULT_CURRENCY_CODE);
@@ -101,15 +102,12 @@ function AddHandScreen({ navigation, route }: Props) {
   const liveFanValid = Number.isInteger(liveFanValue) && liveFanValue >= 1;
   const liveEffectiveFan = liveFanValid
     ? capFan === null
-      ? liveFanValue
-      : Math.min(liveFanValue, capFan)
+      ? Math.max(liveFanValue, minFanToWin)
+      : Math.min(Math.max(liveFanValue, minFanToWin), capFan)
     : null;
   const liveBaseAmount = liveEffectiveFan !== null ? liveEffectiveFan * unitPerFan : null;
-  const liveZimoPerLoser = liveBaseAmount !== null ? liveBaseAmount * 2 : null;
-  const liveDiscarderPays =
-    liveBaseAmount !== null ? (hkGunMode === 'fullGun' ? liveBaseAmount * 4 : liveBaseAmount * 2) : null;
-  const liveOthersPay =
-    liveBaseAmount !== null && hkGunMode === 'halfGun' ? liveBaseAmount : null;
+  const liveZimoPerLoser = liveBaseAmount !== null ? liveBaseAmount : null;
+  const liveDiscarderPays = liveBaseAmount !== null ? liveBaseAmount * 2 : null;
   const handTypeOptions = useMemo(
     () =>
       (['normal', 'draw', 'bonus'] as const).map((type) => ({
@@ -163,6 +161,7 @@ function AddHandScreen({ navigation, route }: Props) {
       setCurrencyCode(resolvedCurrencyCode);
       setHkScoringPreset(parsedRules.hk?.scoringPreset ?? 'traditionalFan');
       setHkGunMode(parsedRules.hk?.gunMode ?? 'halfGun');
+      setMinFanToWin(parsedRules.minFanToWin ?? 0);
       setUnitPerFan(parsedRules.hk?.unitPerFan ?? 1);
       setCapFan(parsedRules.hk?.capFan ?? null);
       setBundle(data);
@@ -259,6 +258,7 @@ function AddHandScreen({ navigation, route }: Props) {
           ? computeCustomPayout({
               fan: Number(numericValue),
               unitPerFan,
+              minFanToWin,
               capFan,
               gunMode: hkGunMode,
               settlementType: settlementForCalc,
@@ -422,7 +422,7 @@ function AddHandScreen({ navigation, route }: Props) {
             <>
               <Text style={styles.helperText}>
                 {`${t('addHand.realtime.effectiveFan')} = ${
-                  capFan === null ? `${liveFanValue}` : `min(${liveFanValue}, ${capFan})`
+                  capFan === null ? `max(${liveFanValue}, ${minFanToWin})` : `min(max(${liveFanValue}, ${minFanToWin}), ${capFan})`
                 } = ${liveEffectiveFan}`}
               </Text>
               <Text style={styles.helperTextSubLine}>
@@ -433,23 +433,15 @@ function AddHandScreen({ navigation, route }: Props) {
               </Text>
               {settlementType === 'zimo' && liveZimoPerLoser !== null ? (
                 <Text style={styles.helperTextSubLine}>
-                  {`${t('addHand.realtime.split.zimo')} ${formatCurrencyAmount(liveZimoPerLoser, currencyCode)} x 3`}
+                  {t('addHand.realtime.custom.zimo')
+                    .replace('{amount}', formatCurrencyAmount(liveZimoPerLoser, currencyCode))}
                 </Text>
               ) : null}
               {settlementType === 'discard' && liveDiscarderPays !== null ? (
-                <>
-                  <Text style={styles.helperTextSubLine}>
-                    {`${t('addHand.realtime.split.discarder')} ${formatCurrencyAmount(
-                      liveDiscarderPays,
-                      currencyCode,
-                    )}`}
-                  </Text>
-                  {liveOthersPay !== null ? (
-                    <Text style={styles.helperTextSubLine}>
-                      {`${t('addHand.realtime.split.others')} ${formatCurrencyAmount(liveOthersPay, currencyCode)} x 2`}
-                    </Text>
-                  ) : null}
-                </>
+                <Text style={styles.helperTextSubLine}>
+                  {t('addHand.realtime.custom.discard')
+                    .replace('{amount}', formatCurrencyAmount(liveDiscarderPays, currencyCode))}
+                </Text>
               ) : null}
               <Text style={styles.helperTextSubLine}>{t('addHand.realtime.reminder')}</Text>
             </>

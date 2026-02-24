@@ -352,7 +352,7 @@ function HomeScreen({ navigation }: Props) {
             styles.tile,
             styles.tileGreen,
             {
-              bottom: tileGreenBottom,
+              bottom: tileGreenBottom - 10,
             },
           ]}
         >
@@ -366,7 +366,7 @@ function HomeScreen({ navigation }: Props) {
             styles.tile,
             styles.tileBambooOne,
             {
-              bottom: tileBambooBottom,
+              bottom: tileBambooBottom - 8,
             },
           ]}
         >
@@ -415,7 +415,7 @@ function HomeScreen({ navigation }: Props) {
           ]}
         >
           <View style={styles.heroGroup}>
-            <Text style={styles.brandTitle}>{t('home.brandTitle')}</Text>
+            <Text style={styles.appTitle}>{t('home.brandTitle')}</Text>
             <Text style={styles.tagline}>{copy.tagline}</Text>
 
             <Pressable
@@ -604,14 +604,15 @@ const styles = StyleSheet.create({
     width: '100%',
     zIndex: DEPTH_ELEMENT,
   },
-  brandTitle: {
+  appTitle: {
     ...typography.title,
-    fontSize: 32,
+    fontSize: 34,
     lineHeight: 40,
+    fontWeight: '800',
     color: theme.colors.textPrimary,
     textAlign: 'center',
-    marginBottom: 9,
-    letterSpacing: 0.3,
+    marginBottom: 12,
+    letterSpacing: 0.5,
   },
   tagline: {
     ...typography.body,
@@ -623,7 +624,7 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   primaryPressable: {
-    marginTop: 18,
+    marginTop: 26,
     maxWidth: 320,
   },
   primaryPressed: {
@@ -750,24 +751,24 @@ const styles = StyleSheet.create({
     transform: [{ perspective: 1000 }, { rotateX: '1deg' }, { rotateZ: '-8deg' }],
   },
   tileGreen: {
-    right: -44,
-    width: 136,
-    height: 180,
+    right: -46,
+    width: 132,
+    height: 176,
     opacity: OPACITY_SECONDARY_ELEMENT,
     zIndex: DEPTH_BACKGROUND + 1,
     transform: [{ perspective: 1000 }, { rotateX: '1deg' }, { rotateZ: '8deg' }],
   },
   tileBambooOne: {
-    left: 6,
-    width: 112,
-    height: 154,
+    left: -8,
+    width: 108,
+    height: 150,
     opacity: OPACITY_FOCUS_ELEMENT,
     zIndex: DEPTH_FLOATING,
     transform: [{ perspective: 1000 }, { rotateX: '1deg' }, { rotateZ: '-6deg' }],
   },
   bambooImage: {
-    width: 58,
-    height: 84,
+    width: 68,
+    height: 98,
   },
   tileGlyph: {
     ...typography.title,

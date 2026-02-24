@@ -67,7 +67,9 @@ function Pill({ label, selected, onPress, disabled }: PillProps) {
       accessibilityState={{ disabled, selected }}
       hitSlop={HIT_SLOP}
     >
-      <Text style={[styles.pillText, selected ? styles.pillTextActive : null]}>{label}</Text>
+      <Text style={[styles.pillText, selected ? styles.pillTextActive : null]}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -76,18 +78,21 @@ const styles = StyleSheet.create({
   wrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'space-between',
     marginBottom: -8,
   },
   pill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
     minWidth: 64,
-    height: 40,
-    borderRadius: 20,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    flexGrow: 1,
+    flexBasis: 'auto',
     marginRight: 8,
     marginBottom: 8,
   },
@@ -96,6 +101,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#E6F5F5',
   },
   pillText: {
+    flexShrink: 1,
+    flexWrap: 'nowrap',
     color: theme.colors.textPrimary,
     fontSize: theme.fontSize.md,
     fontWeight: '500',

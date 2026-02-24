@@ -97,7 +97,7 @@ function createEndedBundle() {
         inputValue: 0,
         deltasJson: JSON.stringify([-80, 80, 0, 0]),
         nextRoundLabelZh: '東風南局',
-        computedJson: JSON.stringify({}),
+        computedJson: JSON.stringify({ settlementType: 'discard', fan: 4, effectiveFan: 4 }),
         createdAt: 1735690000000,
       },
       {
@@ -230,6 +230,57 @@ function createReseatMidGameBundle() {
   };
 }
 
+function createZimoBundle() {
+  const ended = createEndedBundle();
+  return {
+    ...ended,
+    game: {
+      ...ended.game,
+      id: 'g-zimo',
+      title: 'Zimo Match',
+      handsCount: 1,
+    },
+    hands: [
+      {
+        ...ended.hands[0],
+        id: 'z1',
+        handIndex: 0,
+        type: 'zimo',
+        winnerPlayerId: 'p1',
+        discarderPlayerId: null,
+        inputValue: 36,
+        computedJson: JSON.stringify({ settlementType: 'zimo', fan: 12, effectiveFan: 10 }),
+        deltasJson: JSON.stringify([-12, 36, -12, -12]),
+      },
+    ],
+  };
+}
+
+function createFanSummaryFromComputedBundle() {
+  const ended = createEndedBundle();
+  return {
+    ...ended,
+    game: {
+      ...ended.game,
+      id: 'g-fan-computed',
+      title: 'Fan Computed Match',
+      handsCount: 1,
+    },
+    hands: [
+      {
+        ...ended.hands[0],
+        id: 'fc1',
+        handIndex: 0,
+        type: 'discard',
+        winnerPlayerId: 'p1',
+        discarderPlayerId: 'p0',
+        inputValue: 32,
+        computedJson: JSON.stringify({ settlementType: 'discard', fan: 12, effectiveFan: 10 }),
+      },
+    ],
+  };
+}
+
 describe('GameDashboardScreen', () => {
   const navigation = {
     navigate: jest.fn(),
@@ -263,6 +314,7 @@ describe('GameDashboardScreen', () => {
     expect(textContent).toContain('Alice (1)');
     expect(textContent).toContain('最多自摸');
     expect(textContent).toContain('—');
+    expect(textContent).toContain('出銃');
     expect(textContent).not.toContain('traditionalFan');
     expect(textContent).not.toContain('halfGun');
 
@@ -293,6 +345,7 @@ describe('GameDashboardScreen', () => {
     const root = (tree! as renderer.ReactTestRenderer).root;
     const allText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
     expect(allText).toContain('流局');
+    expect(allText).not.toContain('載入更多');
     expect(root.findByProps({ testID: 'hands-filter-all' })).toBeTruthy();
     expect(root.findByProps({ testID: 'hands-filter-wins' })).toBeTruthy();
     expect(root.findByProps({ testID: 'hands-filter-draws' })).toBeTruthy();
@@ -306,11 +359,13 @@ describe('GameDashboardScreen', () => {
     await act(async () => {
       windSection.props.onPress();
     });
+    expect(root.findAllByType(Text).map((node) => String(node.props.children)).join('\n')).toContain('Alice 出銃比 Bob 4 番');
 
     const firstHandPressable = root.findByProps({ testID: 'hand-row-h1' });
     await act(async () => {
       firstHandPressable.props.onPress();
     });
+    expect(root.findByProps({ testID: 'hand-row-h2' })).toBeTruthy();
 
     const expandedText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
     expect(expandedText).toContain('贏家');
@@ -334,9 +389,62 @@ describe('GameDashboardScreen', () => {
     });
     expect(root.findByProps({ testID: 'hand-row-h1' })).toBeTruthy();
     expect(() => root.findByProps({ testID: 'hand-row-h2' })).toThrow();
+    expect(root.findAllByType(Text).map((node) => String(node.props.children)).join('\n')).toContain('流局');
 
     await act(async () => {
       (tree! as renderer.ReactTestRenderer).unmount();
+    });
+  });
+
+  it('renders zimo hand summary with winner and effective fan', async () => {
+    mockedGetGameBundle.mockResolvedValueOnce(createZimoBundle() as any);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'k8', name: 'GameDashboard', params: { gameId: 'g-zimo' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const root = tree!.root;
+    const windSection = root.findByProps({ testID: 'wind-section-東風' });
+    await act(async () => {
+      windSection.props.onPress();
+    });
+
+    const allText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(allText).toContain('Bob 自摸 10 番');
+    expect(allText).not.toContain('Bob 自摸 36 番');
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('renders discard summary fan from computedJson instead of amount', async () => {
+    mockedGetGameBundle.mockResolvedValueOnce(createFanSummaryFromComputedBundle() as any);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'k9', name: 'GameDashboard', params: { gameId: 'g-fan-computed' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const root = tree!.root;
+    const windSection = root.findByProps({ testID: 'wind-section-東風' });
+    await act(async () => {
+      windSection.props.onPress();
+    });
+
+    const allText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(allText).toContain('Alice 出銃比 Bob 10 番');
+    expect(allText).not.toContain('Alice 出銃比 Bob 32 番');
+
+    await act(async () => {
+      tree!.unmount();
     });
   });
 
@@ -422,6 +530,8 @@ describe('GameDashboardScreen', () => {
     expect(payload.message).toContain('Ended Match');
     expect(payload.message).toContain('Ended Match — 01/01/2025');
     expect(payload.message).toContain('玩家排名');
+    expect(payload.message).toContain('結算方向');
+    expect(payload.message).toContain('Alice → Bob HK$20');
     expect(payload.message).toContain('最多出銃');
     expect(payload.message).not.toMatch(/game\.detail\./);
     expect(payload.message).not.toMatch(/share\./);
@@ -433,7 +543,7 @@ describe('GameDashboardScreen', () => {
     });
   });
 
-  it('uses tie suffix in share ranking when totals tie', async () => {
+  it('does not append tie suffix in share ranking when totals tie', async () => {
     mockedGetGameBundle.mockResolvedValueOnce(createTieBundle() as any);
     const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' as never });
 
@@ -453,7 +563,8 @@ describe('GameDashboardScreen', () => {
     });
 
     const payload = shareSpy.mock.calls[0][0] as { message: string };
-    expect(payload.message).toContain('(+1 more)');
+    expect(payload.message).not.toContain('(+1 more)');
+    expect(payload.message).not.toContain('（另 +');
 
     shareSpy.mockRestore();
     await act(async () => {

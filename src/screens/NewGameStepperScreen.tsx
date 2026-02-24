@@ -35,6 +35,7 @@ import ScoringSection from './newGameStepper/sections/ScoringSection';
 import { CapMode, ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateContext, SeatMode, StartingDealerMode } from './newGameStepper/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewGameStepper'>;
+const MAX_PLAYER_NAME_LENGTH = 10;
 
 function NewGameStepperScreen({ navigation }: Props) {
   const { t, language } = useAppLanguage();
@@ -126,9 +127,10 @@ function NewGameStepperScreen({ navigation }: Props) {
   const currencySymbol = getCurrencyMeta(currencyCode).symbol;
 
   const handleSetPlayer = (index: number, value: string) => {
+    const safeName = value.slice(0, MAX_PLAYER_NAME_LENGTH);
     setPlayers((prev) => {
       const next = [...prev];
-      next[index] = value;
+      next[index] = safeName;
       return next;
     });
     setPlayersError(null);
@@ -136,9 +138,10 @@ function NewGameStepperScreen({ navigation }: Props) {
   };
 
   const handleSetAutoName = (index: number, value: string) => {
+    const safeName = value.slice(0, MAX_PLAYER_NAME_LENGTH);
     setAutoNames((prev) => {
       const next = [...prev];
-      next[index] = value;
+      next[index] = safeName;
       return next;
     });
     setAutoAssigned(null);
@@ -298,7 +301,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     let resolvedPlayers = [...players];
     let basePlayers = [...players];
     if (seatMode === 'manual') {
-      resolvedPlayers = resolvedPlayers.map((name) => name.trim());
+      resolvedPlayers = resolvedPlayers.map((name) => name.trim().slice(0, MAX_PLAYER_NAME_LENGTH));
       basePlayers = [...resolvedPlayers];
       const missingIndexes = resolvedPlayers.map((name, index) => (name.length === 0 ? index : -1)).filter((index) => index >= 0);
       if (missingIndexes.length > 0) {
@@ -313,7 +316,7 @@ function NewGameStepperScreen({ navigation }: Props) {
         }
       }
     } else {
-      const trimmed = autoNames.map((name) => name.trim());
+      const trimmed = autoNames.map((name) => name.trim().slice(0, MAX_PLAYER_NAME_LENGTH));
       const missingIndexes = trimmed.map((name, index) => (name.length === 0 ? index : -1)).filter((index) => index >= 0);
       if (missingIndexes.length > 0) {
         if (missingIndexes.length === PLAYER_COUNT) {

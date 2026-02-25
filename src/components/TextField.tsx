@@ -1,5 +1,13 @@
 import { Ref } from 'react';
-import { StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
+import {
+  NativeSyntheticEvent,
+  StyleSheet,
+  Text,
+  TextInput,
+  TextInputFocusEventData,
+  View,
+  ViewStyle,
+} from 'react-native';
 import theme from '../theme/theme';
 
 type TextFieldProps = {
@@ -9,9 +17,18 @@ type TextFieldProps = {
   placeholder?: string;
   style?: ViewStyle;
   inputRef?: Ref<TextInput>;
+  onFocus?: (event: NativeSyntheticEvent<TextInputFocusEventData>) => void;
 };
 
-function TextField({ label, value, onChangeText, placeholder, style, inputRef }: TextFieldProps) {
+function TextField({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  style,
+  inputRef,
+  onFocus,
+}: TextFieldProps) {
   return (
     <View style={[styles.container, style]}>
       <Text style={styles.label}>{label}</Text>
@@ -20,6 +37,7 @@ function TextField({ label, value, onChangeText, placeholder, style, inputRef }:
         style={styles.input}
         value={value}
         onChangeText={onChangeText}
+        onFocus={onFocus}
         placeholder={placeholder}
         placeholderTextColor={theme.colors.textSecondary}
       />

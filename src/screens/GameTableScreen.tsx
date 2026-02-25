@@ -18,7 +18,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
 import Card from '../components/Card';
 import PillGroup from '../components/PillGroup';
-import TextField from '../components/TextField';
 import ScreenContainer from '../components/ScreenContainer';
 import { endGame, getGameBundle, insertHand, updateGamePlayerSeats } from '../db/repo';
 import { computeHkSettlement, toAmountFromQ } from '../domain/hk/settlement';
@@ -176,6 +175,22 @@ function GameTableScreen({ route, navigation }: Props) {
         })),
     [dealerSeatIndex, sortedPlayers, t, winnerSeatIndex],
   );
+  const minFanInput = useMemo(() => {
+    const configuredMin = Number.isInteger(rules?.minFanToWin) ? Number(rules.minFanToWin) : 0;
+    return Math.max(1, configuredMin);
+  }, [rules?.minFanToWin]);
+  const maxFanInput = useMemo(() => {
+    const configuredCap = rules?.hk?.capFan;
+    const cap = typeof configuredCap === 'number' ? configuredCap : 13;
+    return Math.max(minFanInput, cap);
+  }, [minFanInput, rules?.hk?.capFan]);
+  const currentFanInput = useMemo(() => {
+    const parsed = Number(fanInput.trim());
+    if (!Number.isInteger(parsed)) {
+      return minFanInput;
+    }
+    return Math.min(maxFanInput, Math.max(minFanInput, parsed));
+  }, [fanInput, maxFanInput, minFanInput]);
 
   const ensureWrapTokenLoaded = useCallback(async () => {
     if (wrapTokenLoadedRef.current) {
@@ -621,7 +636,7 @@ function GameTableScreen({ route, navigation }: Props) {
     setError(null);
     setWinnerSeatIndex(seatIndex);
     setDiscarderSeatIndex(null);
-    setFanInput('');
+    setFanInput(String(minFanInput));
     setSettlementType('discard');
     setModalVisible(true);
   };
@@ -1017,8 +1032,6 @@ function GameTableScreen({ route, navigation }: Props) {
       <Modal transparent animationType="fade" visible={modalVisible} onRequestClose={closeRecordModal}>
         <Pressable style={styles.modalOverlay} onPress={closeRecordModal}>
           <Pressable style={styles.modalCard} onPress={(event) => event.stopPropagation()}>
-            <Text style={styles.modalTitle}>{t('addHand.title')}</Text>
-
             <Card style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>{t('addHand.winner')}</Text>
               <Text style={styles.readonlyWinnerText}>
@@ -1073,12 +1086,28 @@ function GameTableScreen({ route, navigation }: Props) {
             ) : null}
 
             <Card style={styles.sectionCard}>
-              <TextField
-                label={t('addHand.inputFan')}
-                value={fanInput}
-                onChangeText={(value) => setFanInput(value.replace(/[^0-9]/g, ''))}
-                placeholder="1"
-              />
+              <Text style={styles.sectionTitle}>{t('addHand.inputFan')}</Text>
+              <View style={styles.stepperContainer}>
+                <Pressable
+                  style={styles.stepperButton}
+                  onPress={() => {
+                    setFanInput(String(Math.max(minFanInput, currentFanInput - 1)));
+                  }}
+                  disabled={saving}
+                >
+                  <Text style={styles.stepperButtonText}>-</Text>
+                </Pressable>
+                <Text style={styles.stepperValue}>{currentFanInput}</Text>
+                <Pressable
+                  style={styles.stepperButton}
+                  onPress={() => {
+                    setFanInput(String(Math.min(maxFanInput, currentFanInput + 1)));
+                  }}
+                  disabled={saving}
+                >
+                  <Text style={styles.stepperButtonText}>+</Text>
+                </Pressable>
+              </View>
             </Card>
 
             {error ? <Text style={styles.modalErrorText}>{error}</Text> : null}
@@ -1585,13 +1614,6 @@ const styles = StyleSheet.create({
     padding: GRID.x2,
     maxHeight: '82%',
   },
-  modalTitle: {
-    ...typography.title,
-    fontSize: theme.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-    marginBottom: GRID.x1_5,
-  },
   sectionCard: {
     marginBottom: GRID.x1_5,
   },
@@ -1634,6 +1656,30 @@ const styles = StyleSheet.create({
   modeButtonTextActive: {
     color: theme.colors.primary,
     fontWeight: '700',
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: GRID.x1_5,
+  },
+  stepperButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.primaryLight,
+  },
+  stepperButtonText: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+  stepperValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
   },
   modalErrorText: {
     ...typography.body,

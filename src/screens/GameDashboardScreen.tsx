@@ -539,7 +539,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
     const settlementLines = buildSettlementDirectionLines(rankedPlayers, bundle.game.currencySymbol ?? '', t);
     const playerStatsLines = rankedPlayers.map(
       (player) =>
-        `${player.name}：${translateWithFallback(t, 'game.detail.stats.wins', '胡牌')} ${
+        `${player.name}：${translateWithFallback(t, 'game.detail.stats.wins', '食糊')} ${
           gameStats?.winsByPlayerId[player.playerId] ?? 0
         }｜${translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} ${
           gameStats?.zimoByPlayerId[player.playerId] ?? 0
@@ -611,7 +611,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
           ? translateWithFallback(t, 'game.detail.hand.zimo', '自摸')
           : hand.type === 'discard'
             ? translateWithFallback(t, 'game.detail.hand.discard', '點炮')
-            : translateWithFallback(t, 'game.detail.hand.win', '胡');
+            : translateWithFallback(t, 'game.detail.hand.win', '食糊');
 
       return (
         <Pressable
@@ -721,7 +721,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
   const filterOptions: Array<{ key: HandFilter; label: string }> = useMemo(
     () => [
       { key: 'all', label: translateWithFallback(t, 'game.detail.hands.filter.all', '全部') },
-      { key: 'wins', label: translateWithFallback(t, 'game.detail.hands.filter.wins', '胡牌') },
+      { key: 'wins', label: translateWithFallback(t, 'game.detail.hands.filter.wins', '食糊') },
       { key: 'draws', label: translateWithFallback(t, 'game.detail.hands.filter.draws', '流局') },
     ],
     [t],
@@ -873,7 +873,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
               {rankedPlayers.map((player) => (
                 <Text key={`wins-${player.playerId}`} style={styles.statsPlayerLine}>
                   {player.name}：
-                  {translateWithFallback(t, 'game.detail.stats.wins', '胡牌')} {gameStats?.winsByPlayerId[player.playerId] ?? 0}
+                  {translateWithFallback(t, 'game.detail.stats.wins', '食糊')} {gameStats?.winsByPlayerId[player.playerId] ?? 0}
                   {' ｜ '}
                   {translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} {gameStats?.zimoByPlayerId[player.playerId] ?? 0}
                   {' ｜ '}

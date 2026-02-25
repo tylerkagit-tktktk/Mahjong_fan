@@ -16,7 +16,7 @@
   "addHand.realtime.split.discarder": "Discarder pays:",
   "addHand.realtime.split.others": "Other two players each pay:",
   "addHand.realtime.split.zimo": "Self-draw each loser pays:",
-  "addHand.save": "Save hand",
+  "addHand.save": "Save",
   "addHand.settlementType": "Win type",
   "addHand.settlementType.discard": "Discard win",
   "addHand.settlementType.zimo": "Self draw",

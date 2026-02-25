@@ -63,7 +63,7 @@ export function getDefaultRules(variant: Variant): RulesV1 {
       hk: {
         scoring: 'fan',
         scoringPreset: 'traditionalFan',
-        gunMode: 'halfGun',
+        gunMode: 'fullGun',
         stakePreset: 'TWO_FIVE_CHICKEN',
         unitPerFan: 1,
         capFan: null,

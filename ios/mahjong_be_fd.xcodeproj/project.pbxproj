@@ -265,6 +265,8 @@
 				DEVELOPMENT_TEAM = 2W65PAZ9N5;
 				ENABLE_BITCODE = NO;
 				INFOPLIST_FILE = mahjong_be_fd/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "麻雀番埋嚟";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -296,6 +298,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2W65PAZ9N5;
 				INFOPLIST_FILE = mahjong_be_fd/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "麻雀番埋嚟";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

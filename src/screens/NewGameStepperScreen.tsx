@@ -56,7 +56,7 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [mode, setMode] = useState<Variant>('HK');
   const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(DEFAULT_CURRENCY_CODE);
   const [hkScoringPreset, setHkScoringPreset] = useState<HkScoringPreset>('traditionalFan');
-  const [hkGunMode, setHkGunMode] = useState<HkGunMode>('halfGun');
+  const [hkGunMode, setHkGunMode] = useState<HkGunMode>('fullGun');
   const [hkStakePreset, setHkStakePreset] = useState<HkStakePreset>('TWO_FIVE_CHICKEN');
   const [unitPerFan, setUnitPerFan] = useState(1);
   const [unitPerFanInput, setUnitPerFanInput] = useState('1');

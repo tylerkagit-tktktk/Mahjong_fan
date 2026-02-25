@@ -1,17 +1,9 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useMemo, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomActionBar from '../components/BottomActionBar';
-import TextField from '../components/TextField';
 import Card from '../components/Card';
 import SegmentedControl from '../components/SegmentedControl';
 import PillGroup from '../components/PillGroup';
@@ -46,6 +38,8 @@ const GRID = {
   x3: 24,
 } as const;
 
+const BOTTOM_BAR_HEIGHT = 96; // roughly height of BottomActionBar
+
 function AddHandScreen({ navigation, route }: Props) {
   const { gameId } = route.params;
   const { t } = useAppLanguage();
@@ -62,12 +56,13 @@ function AddHandScreen({ navigation, route }: Props) {
   const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(DEFAULT_CURRENCY_CODE);
   const [mode, setMode] = useState<Variant>('HK');
   const [handType, setHandType] = useState<'normal' | 'draw' | 'bonus'>('normal');
-  const [inputValue, setInputValue] = useState('');
+  const [fanValue, setFanValue] = useState<number>(1);
   const [settlementType, setSettlementType] = useState<HkSettlementType>('zimo');
   const [winnerId, setWinnerId] = useState<string | null>(null);
   const [discarderId, setDiscarderId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const maxFan = capFan !== null ? capFan : 13;
 
   const isPma = mode === 'PMA';
   const isHkCustom = mode === 'HK' && hkScoringPreset === 'customTable';
@@ -91,14 +86,13 @@ function AddHandScreen({ navigation, route }: Props) {
     ? `${t('addHand.inputFanHint')} ${formatCurrencyUnit(currencyCode)}`
     : t('addHand.inputHint');
 
-  const inputRegex = useMemo(() => (isPma ? /[^0-9.-]/g : /[^0-9.-]/g), [isPma]);
   const currentDealerSeatIndex = useMemo(() => {
     if (!bundle) {
       return 0;
     }
     return getDealerSeatIndexForNextHand(bundle.game.startingDealerSeatIndex ?? 0, bundle.hands);
   }, [bundle]);
-  const liveFanValue = Number(inputValue.trim());
+  const liveFanValue = fanValue;
   const liveFanValid = Number.isInteger(liveFanValue) && liveFanValue >= 1;
   const liveEffectiveFan = liveFanValid
     ? capFan === null
@@ -205,7 +199,7 @@ function AddHandScreen({ navigation, route }: Props) {
         setError(t('errors.loadGame'));
         return;
       }
-      const numericValue = inputValue.trim().length === 0 ? null : Number(inputValue);
+      const numericValue = fanValue;
 
       if (isPma && (numericValue === null || Number.isNaN(numericValue))) {
         setError(t('errors.invalidAmount'));
@@ -256,7 +250,7 @@ function AddHandScreen({ navigation, route }: Props) {
           : 'discard';
         const customPayout = isHkCustom
           ? computeCustomPayout({
-              fan: Number(numericValue),
+              fan: numericValue,
               unitPerFan,
               minFanToWin,
               capFan,
@@ -275,7 +269,7 @@ function AddHandScreen({ navigation, route }: Props) {
         const hkSettlement = shouldUseHkEngine
           ? computeHkSettlement({
               rules: hkRules,
-              fan: Number(numericValue),
+              fan: numericValue,
               settlementType: settlementForCalc,
               winnerSeatIndex,
               discarderSeatIndex,
@@ -313,7 +307,7 @@ function AddHandScreen({ navigation, route }: Props) {
             hkSettlement
               ? {
                   source: hkSettlement.source,
-                  fan: Number(numericValue),
+                  fan: numericValue,
                   effectiveFan: hkSettlement.effectiveFan,
                   settlementType: settlementForCalc,
                   dealerSeatIndex: currentDealerSeatIndex,
@@ -373,23 +367,17 @@ function AddHandScreen({ navigation, route }: Props) {
 
   return (
     <ScreenContainer style={styles.container} horizontalPadding={0} includeTopInset={false} includeBottomInset={false}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingTop: contentTopPadding,
+            paddingBottom: GRID.x3 + BOTTOM_BAR_HEIGHT + insets.bottom,
+          },
+        ]}
       >
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={[
-            styles.scrollContent,
-            {
-              paddingTop: contentTopPadding,
-              paddingBottom: 168 + insets.bottom,
-            },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          automaticallyAdjustKeyboardInsets
-        >
         <Text style={styles.pageTitle}>{t('addHand.title')}</Text>
         <Text style={styles.currencyText}>
           {`${t('addHand.currency')}${formatCurrencyUnit(currencyCode)}`}
@@ -411,12 +399,26 @@ function AddHandScreen({ navigation, route }: Props) {
         ) : null}
 
         <Card style={styles.card}>
-          <TextField
-            label={inputLabel}
-            value={inputValue}
-            onChangeText={(value) => setInputValue(value.replace(inputRegex, ''))}
-            placeholder="0"
-          />
+          <Text style={styles.sectionTitle}>{inputLabel}</Text>
+          <View style={styles.stepperContainer}>
+            <Pressable
+              style={styles.stepperButton}
+              onPress={() => {
+                setFanValue((prev) => Math.max(1, prev - 1));
+              }}
+            >
+              <Text style={styles.stepperButtonText}>-</Text>
+            </Pressable>
+            <Text style={styles.stepperValue}>{fanValue}</Text>
+            <Pressable
+              style={styles.stepperButton}
+              onPress={() => {
+                setFanValue((prev) => Math.min(maxFan, prev + 1));
+              }}
+            >
+              <Text style={styles.stepperButtonText}>+</Text>
+            </Pressable>
+          </View>
           <Text style={styles.helperText}>{inputHint}</Text>
           {isHkCustom && liveFanValue >= 1 && liveFanValid && liveEffectiveFan !== null && liveBaseAmount !== null ? (
             <>
@@ -494,20 +496,19 @@ function AddHandScreen({ navigation, route }: Props) {
         ) : null}
 
         {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
-        </ScrollView>
+      </ScrollView>
 
-        <BottomActionBar
-          primaryLabel={t('addHand.save')}
-          onPrimaryPress={() => {
-            handleSave().catch((err) => {
-              console.error('[AddHand] save press failed', err);
-            });
-          }}
-          secondaryLabel={t('common.back')}
-          onSecondaryPress={() => navigation.goBack()}
-          disabled={saving}
-        />
-      </KeyboardAvoidingView>
+      <BottomActionBar
+        primaryLabel={t('addHand.save')}
+        onPrimaryPress={() => {
+          handleSave().catch((err) => {
+            console.error('[AddHand] save press failed', err);
+          });
+        }}
+        secondaryLabel={t('common.back')}
+        onSecondaryPress={() => navigation.goBack()}
+        disabled={saving}
+      />
     </ScreenContainer>
   );
 }
@@ -576,6 +577,30 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+  },
+  stepperButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.primaryLight,
+  },
+  stepperButtonText: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+  stepperValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
   },
   debugSpacer: {
     height: 800,

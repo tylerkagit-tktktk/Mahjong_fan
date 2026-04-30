@@ -56,10 +56,9 @@ yarn-error.log
 *serviceAccount*.json
 firebase-adminsdk*.json
 
-# Firebase config duplicates / local copies
-# The committed app config files live at:
-# - android/app/google-services.json
-# - ios/GoogleService-Info.plist
+# Firebase app config files are local-only for public repos.
+android/app/google-services.json
+ios/GoogleService-Info.plist
 ios/mahjong_be_fd/GoogleService-Info.plist
 
 # fastlane

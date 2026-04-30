@@ -45,6 +45,23 @@ node_modules/
 npm-debug.log
 yarn-error.log
 
+# Environment / local secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.p12
+*.mobileprovision
+*serviceAccount*.json
+firebase-adminsdk*.json
+
+# Firebase config duplicates / local copies
+# The committed app config files live at:
+# - android/app/google-services.json
+# - ios/GoogleService-Info.plist
+ios/mahjong_be_fd/GoogleService-Info.plist
+
 # fastlane
 #
 # It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the

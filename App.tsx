@@ -9,6 +9,26 @@ import { dumpBreadcrumbs, getLastBreadcrumb, getLastSqlBreadcrumb } from './src/
 import AppErrorBoundary from './src/components/AppErrorBoundary';
 import { isDev } from './src/debug/isDev';
 
+type GlobalScope = typeof globalThis & {
+  addEventListener?: (type: string, handler: (event: unknown) => void) => void;
+  removeEventListener?: (type: string, handler: (event: unknown) => void) => void;
+  onunhandledrejection?: (event: unknown) => void;
+  onerror?: (event: unknown) => void;
+  HermesInternal?: {
+    enablePromiseRejectionTracker?: (options: {
+      allRejections?: boolean;
+      onUnhandled?: (id: number, rejection: unknown) => void;
+      onHandled?: (id: number) => void;
+    }) => void;
+    defaultPromiseRejectionTrackingOptions?: {
+      onUnhandled?: (id: number, rejection: unknown) => void;
+      onHandled?: (id: number) => void;
+    };
+  };
+};
+
+const globalScope = globalThis as GlobalScope;
+
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
   const [navigationKey, setNavigationKey] = useState(0);
@@ -62,33 +82,20 @@ function App() {
       handleAsyncError('onerror', message);
     };
 
-    (globalThis as {
-      addEventListener?: (type: string, handler: (event: unknown) => void) => void;
-      removeEventListener?: (type: string, handler: (event: unknown) => void) => void;
-      onunhandledrejection?: (event: unknown) => void;
-      onerror?: (event: unknown) => void;
-    }).onunhandledrejection = onUnhandledRejection;
+    globalScope.onunhandledrejection = onUnhandledRejection;
 
-    if (typeof (globalThis as { addEventListener?: (type: string, handler: (event: unknown) => void) => void }).addEventListener === 'function') {
-      (globalThis as { addEventListener: (type: string, handler: (event: unknown) => void) => void }).addEventListener(
-        'unhandledrejection',
-        onUnhandledRejection,
-      );
+    if (typeof globalScope.addEventListener === 'function') {
+      globalScope.addEventListener('unhandledrejection', onUnhandledRejection);
     }
 
-    (globalThis as {
-      onerror?: (event: unknown) => void;
-    }).onerror = onError;
+    globalScope.onerror = onError;
 
     return () => {
-      if (typeof (globalThis as { removeEventListener?: (type: string, handler: (event: unknown) => void) => void }).removeEventListener === 'function') {
-        (globalThis as { removeEventListener: (type: string, handler: (event: unknown) => void) => void }).removeEventListener(
-          'unhandledrejection',
-          onUnhandledRejection,
-        );
+      if (typeof globalScope.removeEventListener === 'function') {
+        globalScope.removeEventListener('unhandledrejection', onUnhandledRejection);
       }
-      (globalThis as { onunhandledrejection?: (event: unknown) => void }).onunhandledrejection = undefined;
-      (globalThis as { onerror?: (event: unknown) => void }).onerror = undefined;
+      globalScope.onunhandledrejection = undefined;
+      globalScope.onerror = undefined;
     };
   }, []);
 
@@ -101,14 +108,13 @@ function App() {
     const UNHANDLED_FLUSH_MS = 300;
 
     try {
-      const HermesInternal = (global as any).HermesInternal;
+      const HermesInternal = globalScope.HermesInternal;
       if (HermesInternal?.enablePromiseRejectionTracker) {
         HermesInternal.enablePromiseRejectionTracker({
           allRejections: true,
           onUnhandled(id: number, rejection: unknown) {
             try {
-              const defaultHandler =
-                (global as any).HermesInternal?.defaultPromiseRejectionTrackingOptions?.onUnhandled;
+              const defaultHandler = globalScope.HermesInternal?.defaultPromiseRejectionTrackingOptions?.onUnhandled;
               if (typeof defaultHandler === 'function') {
                 defaultHandler(id, rejection);
               }
@@ -146,8 +152,7 @@ function App() {
           },
           onHandled(id: number) {
             try {
-              const defaultHandled =
-                (global as any).HermesInternal?.defaultPromiseRejectionTrackingOptions?.onHandled;
+              const defaultHandled = globalScope.HermesInternal?.defaultPromiseRejectionTrackingOptions?.onHandled;
               if (typeof defaultHandled === 'function') {
                 defaultHandled(id);
               }
@@ -178,14 +183,14 @@ function App() {
     };
 
     try {
-      if (typeof (globalThis as any)?.addEventListener === 'function') {
-        (globalThis as any).addEventListener('unhandledrejection', handler);
+      if (typeof globalScope.addEventListener === 'function') {
+        globalScope.addEventListener('unhandledrejection', handler);
       }
     } catch (err) {
       console.warn('[UnhandledPromiseRejection] addEventListener failed', err);
     }
 
-    (globalThis as any).onunhandledrejection = handler;
+    globalScope.onunhandledrejection = handler;
   }, []);
 
   return (

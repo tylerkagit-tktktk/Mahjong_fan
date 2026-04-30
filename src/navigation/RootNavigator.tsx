@@ -1,5 +1,4 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Pressable, Text } from 'react-native';
 import AddHandScreen from '../screens/AddHandScreen';
 import AboutScreen from '../screens/AboutScreen';
@@ -11,6 +10,10 @@ import theme from '../theme/theme';
 import NewGameStepperScreen from '../screens/NewGameStepperScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import SummaryScreen from '../screens/SummaryScreen';
+import ProfileScreen from '../screens/cloud/ProfileScreen';
+import RoomLobbyScreen from '../screens/cloud/RoomLobbyScreen';
+import MultiplayerGameTableScreen from '../screens/cloud/MultiplayerGameTableScreen';
+import CloudArchiveDetailScreen from '../screens/cloud/CloudArchiveDetailScreen';
 import { RootStackParamList } from './types';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 
@@ -22,10 +25,10 @@ const settingsHeaderTextStyle = {
   fontWeight: '500',
 } as const;
 
-function renderSettingsHeaderRight(navigation: NativeStackNavigationProp<RootStackParamList>) {
+function renderSettingsHeaderRight(onPress: () => void) {
   return function SettingsHeaderRight() {
     return (
-      <Pressable onPress={() => navigation.navigate('Settings')} hitSlop={10}>
+      <Pressable onPress={onPress} hitSlop={10}>
         <Text style={settingsHeaderTextStyle}>⚙︎</Text>
       </Pressable>
     );
@@ -54,10 +57,9 @@ function RootNavigator() {
         component={HistoryScreen}
         options={({ navigation }) => ({
           title: t('home.historyAll'),
-          headerRight: renderSettingsHeaderRight(navigation),
+          headerRight: renderSettingsHeaderRight(() => navigation.navigate('Settings')),
         })}
       />
-      <Stack.Screen name="Tabs" component={HomeScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="NewGameStepper"
         component={NewGameStepperScreen}
@@ -77,6 +79,18 @@ function RootNavigator() {
       <Stack.Screen name="Summary" component={SummaryScreen} options={{ title: t('nav.summary') }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: t('nav.settings') }} />
       <Stack.Screen name="About" component={AboutScreen} options={{ title: t('about.title') }} />
+      <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('nav.profile') }} />
+      <Stack.Screen name="RoomLobby" component={RoomLobbyScreen} options={{ title: t('nav.onlineGame') }} />
+      <Stack.Screen
+        name="MultiplayerGameTable"
+        component={MultiplayerGameTableScreen}
+        options={{ title: t('nav.dashboard') }}
+      />
+      <Stack.Screen
+        name="CloudArchiveDetail"
+        component={CloudArchiveDetailScreen}
+        options={{ title: t('nav.dashboard') }}
+      />
     </Stack.Navigator>
   );
 }

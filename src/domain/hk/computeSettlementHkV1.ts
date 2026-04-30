@@ -140,8 +140,9 @@ export function computeSettlementHkV1(input: ComputeSettlementHkV1Input): HkSett
     throw new Error(`HK_MIN_FAN_NOT_MET:${minFanToWin}`);
   }
 
-  const capFan = rules.hk.capFan;
-  const cappedFan = Number.isInteger(capFan) && capFan > 0 ? Math.min(fan, capFan) : fan;
+  const rawCapFan = rules.hk.capFan;
+  const capFan = typeof rawCapFan === 'number' && Number.isInteger(rawCapFan) && rawCapFan > 0 ? rawCapFan : null;
+  const cappedFan = capFan !== null ? Math.min(fan, capFan) : fan;
   const effectiveFan = normalizeTraditionalFan(cappedFan);
   const base = getTraditionalHalfGunPaytable(rules.hk.stakePreset, effectiveFan);
 

@@ -514,8 +514,14 @@ function AddHandScreen({ navigation, route }: Props) {
 }
 
 function makeId(prefix: string) {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `${prefix}_${crypto.randomUUID()}`;
+  const cryptoLike = (globalThis as typeof globalThis & {
+    crypto?: {
+      randomUUID?: () => string;
+    };
+  }).crypto;
+  const randomUUID = cryptoLike?.randomUUID;
+  if (typeof randomUUID === 'function') {
+    return `${prefix}_${randomUUID.call(cryptoLike)}`;
   }
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }

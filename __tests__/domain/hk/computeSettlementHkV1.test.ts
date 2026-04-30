@@ -48,6 +48,7 @@ describe('HK half-gun half-spicy payout table', () => {
     const fan10 = computeSettlementHkV1({
       rules,
       fan: 10,
+      settlementType: 'discard',
       winnerSeatIndex: 0,
       discarderSeatIndex: 1,
     });
@@ -55,6 +56,7 @@ describe('HK half-gun half-spicy payout table', () => {
     const fan13 = computeSettlementHkV1({
       rules,
       fan: 13,
+      settlementType: 'discard',
       winnerSeatIndex: 0,
       discarderSeatIndex: 1,
     });
@@ -106,6 +108,7 @@ describe('HK half-gun half-spicy payout table', () => {
     const fan10 = computeSettlementHkV1({
       rules,
       fan: 10,
+      settlementType: 'discard',
       winnerSeatIndex: 0,
       discarderSeatIndex: 1,
     });
@@ -113,6 +116,7 @@ describe('HK half-gun half-spicy payout table', () => {
     const fan13 = computeSettlementHkV1({
       rules,
       fan: 13,
+      settlementType: 'discard',
       winnerSeatIndex: 0,
       discarderSeatIndex: 1,
     });
@@ -133,6 +137,7 @@ describe('HK half-gun half-spicy payout table', () => {
     const result = computeSettlementHkV1({
       rules,
       fan: 6,
+      settlementType: 'discard',
       winnerSeatIndex: 2,
       discarderSeatIndex: 0,
     });
@@ -151,6 +156,7 @@ describe('HK half-gun half-spicy payout table', () => {
     const result = computeSettlementHkV1({
       rules,
       fan: 5,
+      settlementType: 'discard',
       winnerSeatIndex: 1,
       discarderSeatIndex: 3,
     });

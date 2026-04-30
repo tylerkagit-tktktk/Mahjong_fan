@@ -1,4 +1,4 @@
-import SQLite from 'react-native-sqlite-storage';
+import SQLite, { ResultSet, SQLiteDatabase } from 'react-native-sqlite-storage';
 import { initializeSchema } from './schema';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
 import { isDev } from '../debug/isDev';
@@ -7,7 +7,7 @@ const DB_NAME = 'mahjong_be_fd.db';
 
 SQLite.enablePromise(true);
 
-let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let dbPromise: Promise<SQLiteDatabase> | null = null;
 let schemaReady = false;
 let writeQueue: Promise<void> = Promise.resolve();
 
@@ -42,7 +42,7 @@ export async function safeDbCall<T>(context: string, run: () => Promise<T>): Pro
   }
 }
 
-async function openDb(): Promise<SQLite.SQLiteDatabase> {
+async function openDb(): Promise<SQLiteDatabase> {
   return safeDbCall('openDb', async () => {
     if (!dbPromise) {
       dbPromise = SQLite.openDatabase({
@@ -61,14 +61,14 @@ async function openDb(): Promise<SQLite.SQLiteDatabase> {
   });
 }
 
-export async function withDb<T>(runner: (db: SQLite.SQLiteDatabase) => Promise<T>): Promise<T> {
+export async function withDb<T>(runner: (db: SQLiteDatabase) => Promise<T>): Promise<T> {
   const db = await openDb();
   return runner(db);
 }
 
 export async function runWithWriteLock<T>(runner: () => Promise<T>): Promise<T> {
   const prev = writeQueue;
-  let release: (() => void) | null = null;
+  let release = () => {};
   writeQueue = new Promise<void>((resolve) => {
     release = resolve;
   });
@@ -77,11 +77,11 @@ export async function runWithWriteLock<T>(runner: () => Promise<T>): Promise<T> 
   try {
     return await runner();
   } finally {
-    release?.();
+    release();
   }
 }
 
-export async function executeSql<T = SQLite.ResultSet>(
+export async function executeSql<T = ResultSet>(
   sql: string,
   params: (string | number | null)[] = [],
 ): Promise<T> {
@@ -98,6 +98,6 @@ export async function executeSql<T = SQLite.ResultSet>(
   });
 }
 
-export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
+export async function getDatabase(): Promise<SQLiteDatabase> {
   return openDb();
 }

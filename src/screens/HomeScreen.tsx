@@ -433,6 +433,7 @@ function HomeScreen({ navigation }: Props) {
             >
               <Text style={styles.secondaryButtonText}>{copy.historyAll}</Text>
             </Pressable>
+
           </View>
         </View>
       </View>
@@ -904,6 +905,12 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
     ...typography.body,
     color: theme.colors.textSecondary,
+  },
+  promptOptionHint: {
+    marginTop: theme.spacing.xs,
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+    lineHeight: 18,
   },
   promptPrimaryButton: {
     marginTop: theme.spacing.md,

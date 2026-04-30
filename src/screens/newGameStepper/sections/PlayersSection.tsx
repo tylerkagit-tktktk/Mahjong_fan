@@ -1,5 +1,5 @@
 import { RefObject } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, LayoutChangeEvent, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import AppButton from '../../../components/AppButton';
 import Card from '../../../components/Card';
 import SegmentedControl from '../../../components/SegmentedControl';
@@ -8,6 +8,14 @@ import { GRID, PLAYER_COUNT } from '../constants';
 import { SeatMode, StartingDealerMode } from '../types';
 
 const MAX_PLAYER_NAME_LENGTH = 10;
+
+type SyncPlayerChip = {
+  playerId: string;
+  displayName: string;
+  isHost: boolean;
+  isSelf: boolean;
+  assignedSeatLabel?: string | null;
+};
 
 type Props = {
   allowNameEdit?: boolean;
@@ -45,6 +53,17 @@ type Props = {
     startingDealerModeManual: string;
     autoFlowHint: string;
     dealerBadge: string;
+    syncEnable?: string;
+    syncEnableBusy?: string;
+    syncJoinedPlayersTitle?: string;
+    syncJoinedPlayersHint?: string;
+    syncSelectedPlayerHint?: string;
+    syncSelectedPlayerHintWithName?: string;
+    syncSeatAssigned?: string;
+    syncBenchTitle?: string;
+    syncKeepBench?: string;
+    syncYou?: string;
+    syncHost?: string;
   };
   onSeatModeChange: (nextMode: SeatMode) => void;
   onSetPlayer: (index: number, value: string) => void;
@@ -54,6 +73,18 @@ type Props = {
   onConfirmAutoSeat: () => void;
   onStartingDealerModeChange: (mode: StartingDealerMode) => void;
   onSelectStartingDealer: (index: number) => void;
+  syncEnabled?: boolean;
+  syncBusy?: boolean;
+  syncedSeatDisplayNames?: Array<string | null>;
+  joinedSyncPlayers?: SyncPlayerChip[];
+  selectedSyncPlayerId?: string;
+  selectedSyncPlayerName?: string | null;
+  benchPlayerNames?: string[];
+  onEnableSync?: () => void;
+  onSelectSyncPlayer?: (playerId: string) => void;
+  onAssignSyncPlayerToSeat?: (seatIndex: number) => void;
+  onKeepSyncPlayerOnBench?: () => void;
+  onPlayersErrorLayout?: (event: LayoutChangeEvent) => void;
 };
 
 function PlayersSection({
@@ -78,6 +109,18 @@ function PlayersSection({
   onConfirmAutoSeat,
   onStartingDealerModeChange,
   onSelectStartingDealer,
+  syncEnabled = false,
+  syncBusy = false,
+  syncedSeatDisplayNames = [],
+  joinedSyncPlayers = [],
+  selectedSyncPlayerId,
+  selectedSyncPlayerName,
+  benchPlayerNames = [],
+  onEnableSync,
+  onSelectSyncPlayer,
+  onAssignSyncPlayerToSeat,
+  onKeepSyncPlayerOnBench,
+  onPlayersErrorLayout,
 }: Props) {
   const effectiveSeatMode: SeatMode = allowNameEdit ? seatMode : 'manual';
   const dealerResultIndex = startingDealerSourceIndex;
@@ -87,6 +130,104 @@ function PlayersSection({
   const southSeatIndex = hasDealerResult ? (dealerResultIndex + 1) % PLAYER_COUNT : null;
   const southSeatLabel = southSeatIndex !== null ? seatLabels[southSeatIndex] : '';
   const southPlayerName = southSeatIndex !== null && autoAssigned ? autoAssigned[southSeatIndex] : '';
+
+  const renderSyncSeatBadge = (index: number) => {
+    if (!syncedSeatDisplayNames[index]) {
+      return null;
+    }
+    return (
+      <View style={styles.syncSeatBadge}>
+        <Text style={styles.syncSeatBadgeText}>{labels.syncSeatAssigned ?? '已同步'}</Text>
+      </View>
+    );
+  };
+
+  const syncAutoSeatSelectable = syncEnabled && Boolean(selectedSyncPlayerId) && Boolean(onAssignSyncPlayerToSeat);
+
+  const renderManualSeatRow = (label: string, index: number) => {
+    const syncedDisplayName = syncedSeatDisplayNames[index];
+    const syncSeatSelectable = syncEnabled && Boolean(selectedSyncPlayerId) && Boolean(onAssignSyncPlayerToSeat);
+    const handleAssignSeat = () => {
+      if (!syncSeatSelectable || !onAssignSyncPlayerToSeat) {
+        return;
+      }
+      onAssignSyncPlayerToSeat(index);
+    };
+
+    return (
+      <Pressable
+        key={label}
+        onPress={handleAssignSeat}
+        disabled={!syncSeatSelectable}
+        style={({ pressed }) => [
+          styles.playerRowCard,
+          syncSeatSelectable ? styles.syncSelectableRow : null,
+          pressed && syncSeatSelectable ? styles.syncSelectableRowPressed : null,
+        ]}
+      >
+        {!allowNameEdit && onSelectLockedSeat ? (
+          <Pressable
+            testID={`reseat-seat-picker-${index}`}
+            onPress={() => {
+              if (disabled) {
+                return;
+              }
+              Alert.alert(
+                labels.seatModeTitle,
+                undefined,
+                seatLabels.map((seatLabel, seatIndex) => ({
+                  text: seatLabel,
+                  onPress: () => onSelectLockedSeat(index, seatIndex),
+                })),
+                { cancelable: true },
+              );
+            }}
+            style={styles.seatChip}
+          >
+            <Text style={styles.seatChipText}>
+              {seatLabels[lockedSeatByRow?.[index] ?? index]}
+            </Text>
+          </Pressable>
+        ) : (
+          <View
+            style={[
+              styles.seatChip,
+              syncSeatSelectable ? styles.seatChipSelectable : null,
+            ]}
+          >
+            <Text style={styles.seatChipText}>{label}</Text>
+          </View>
+        )}
+        {syncedDisplayName ? (
+          <View style={styles.playerReadonlyWrap}>
+            <Text style={styles.playerReadonlyText}>{syncedDisplayName}</Text>
+          </View>
+        ) : allowNameEdit ? (
+          <TextInput
+            ref={(ref) => {
+              manualPlayerRefs.current[index] = ref;
+            }}
+            style={styles.playerInput}
+            value={players[index]}
+            onChangeText={(value) => onSetPlayer(index, value.slice(0, MAX_PLAYER_NAME_LENGTH))}
+            placeholder={`${label}${labels.playerNameBySeatSuffix}`}
+            placeholderTextColor={theme.colors.textSecondary}
+            editable={!disabled}
+            maxLength={MAX_PLAYER_NAME_LENGTH}
+            returnKeyType={index === 3 ? 'done' : 'next'}
+          />
+        ) : (
+          <View style={styles.playerReadonlyWrap}>
+            <Text style={styles.playerReadonlyText}>
+              {players[index]}
+            </Text>
+          </View>
+        )}
+        {renderSyncSeatBadge(index)}
+        {index === 0 ? <Text style={styles.dealerBadge}>{labels.dealerBadge}</Text> : null}
+      </Pressable>
+    );
+  };
 
   return (
     <Card style={styles.card}>
@@ -115,64 +256,41 @@ function PlayersSection({
               ? `${labels.playerManualHintPrefix}${PLAYER_COUNT}${labels.playerManualHintSuffix}`
               : labels.playerManualHintPrefix}
           </Text>
-          {seatLabels.map((label, index) => (
-            <View key={label} style={styles.playerRowCard}>
-              {!allowNameEdit && onSelectLockedSeat ? (
-                <Pressable
-                  testID={`reseat-seat-picker-${index}`}
-                  onPress={() => {
-                    if (disabled) {
-                      return;
-                    }
-                    Alert.alert(
-                      labels.seatModeTitle,
-                      undefined,
-                      seatLabels.map((seatLabel, seatIndex) => ({
-                        text: seatLabel,
-                        onPress: () => onSelectLockedSeat(index, seatIndex),
-                      })),
-                      { cancelable: true },
-                    );
-                  }}
-                  style={styles.seatChip}
-                >
-                  <Text style={styles.seatChipText}>
-                    {seatLabels[lockedSeatByRow?.[index] ?? index]}
-                  </Text>
-                </Pressable>
-              ) : (
-                <View style={styles.seatChip}>
-                  <Text style={styles.seatChipText}>{label}</Text>
-                </View>
-              )}
-              {allowNameEdit ? (
-                <TextInput
-                  ref={(ref) => {
-                    manualPlayerRefs.current[index] = ref;
-                  }}
-                  style={styles.playerInput}
-                  value={players[index]}
-                  onChangeText={(value) => onSetPlayer(index, value.slice(0, MAX_PLAYER_NAME_LENGTH))}
-                  placeholder={`${label}${labels.playerNameBySeatSuffix}`}
-                  placeholderTextColor={theme.colors.textSecondary}
-                  editable={!disabled}
-                  maxLength={MAX_PLAYER_NAME_LENGTH}
-                  returnKeyType={index === 3 ? 'done' : 'next'}
-                />
-              ) : (
-                <Text style={styles.playerReadonlyText}>
-                  {players[index]}
-                </Text>
-              )}
-              {index === 0 ? <Text style={styles.dealerBadge}>{labels.dealerBadge}</Text> : null}
-            </View>
-          ))}
+          {playersError ? (
+            <Text onLayout={onPlayersErrorLayout} style={styles.inlineErrorText}>
+              {playersError}
+            </Text>
+          ) : null}
+          {seatLabels.map(renderManualSeatRow)}
         </View>
       ) : (
         <View style={styles.playersList}>
-          <Text style={styles.helperText}>{labels.autoFlowHint}</Text>
+          <Text style={styles.helperText}>
+            {syncEnabled && selectedSyncPlayerId
+              ? '已選同步玩家。請先按「確認抽籤」，再點東南西北安排上枱。'
+              : labels.autoFlowHint}
+          </Text>
+          {playersError ? (
+            <Text onLayout={onPlayersErrorLayout} style={styles.inlineErrorText}>
+              {playersError}
+            </Text>
+          ) : null}
           {autoNames.map((value, index) => (
-            <View key={`auto-${index}`} style={styles.playerRowCard}>
+            <Pressable
+              key={`auto-${index}`}
+              onPress={() => {
+                if (!syncEnabled || !selectedSyncPlayerId || autoAssigned) {
+                  return;
+                }
+                Alert.alert('請先確認抽籤', '自動編位要先產生東南西北結果，之後先可以安排同步玩家上枱。');
+              }}
+              disabled={!syncEnabled || !selectedSyncPlayerId || Boolean(autoAssigned)}
+              style={({ pressed }) => [
+                styles.playerRowCard,
+                syncEnabled && selectedSyncPlayerId && !autoAssigned ? styles.syncSelectableRow : null,
+                pressed && syncEnabled && selectedSyncPlayerId && !autoAssigned ? styles.syncSelectableRowPressed : null,
+              ]}
+            >
               <View style={styles.seatChip}>
                 <Text style={styles.seatChipText}>{index + 1}</Text>
               </View>
@@ -189,7 +307,7 @@ function PlayersSection({
                 maxLength={MAX_PLAYER_NAME_LENGTH}
                 returnKeyType={index === 3 ? 'done' : 'next'}
               />
-            </View>
+            </Pressable>
           ))}
 
           <View style={styles.blockSpacing}>
@@ -222,6 +340,10 @@ function PlayersSection({
                 <Pressable
                   key={`result-${label}`}
                   onPress={() => {
+                    if (syncEnabled && onAssignSyncPlayerToSeat && selectedSyncPlayerId) {
+                      onAssignSyncPlayerToSeat(index);
+                      return;
+                    }
                     if (disabled || startingDealerMode !== 'manual') {
                       return;
                     }
@@ -229,13 +351,14 @@ function PlayersSection({
                   }}
                   style={({ pressed }) => [
                     styles.playerRowCard,
-                    startingDealerMode === 'manual' ? styles.selectableRow : null,
+                    startingDealerMode === 'manual' || syncAutoSeatSelectable ? styles.selectableRow : null,
                     startingDealerMode === 'manual' && startingDealerSourceIndex === index ? styles.selectedDealerRow : null,
-                    pressed && startingDealerMode === 'manual' ? styles.pressedDealerRow : null,
+                    syncAutoSeatSelectable ? styles.syncSelectableRow : null,
+                    pressed && (startingDealerMode === 'manual' || syncAutoSeatSelectable) ? styles.pressedDealerRow : null,
                   ]}
                   accessibilityRole="button"
                   accessibilityState={{
-                    disabled: disabled || startingDealerMode !== 'manual',
+                    disabled: disabled || (!syncAutoSeatSelectable && startingDealerMode !== 'manual'),
                     selected: startingDealerSourceIndex === index,
                   }}
                   hitSlop={6}
@@ -243,12 +366,19 @@ function PlayersSection({
                   <View style={styles.seatChip}>
                     <Text style={styles.seatChipText}>{label}</Text>
                   </View>
-                  <Text style={styles.resultText}>{autoAssigned[index]}</Text>
+                  <Text style={styles.resultText}>{syncedSeatDisplayNames[index] ?? autoAssigned[index]}</Text>
+                  {renderSyncSeatBadge(index)}
                   {startingDealerSourceIndex === index ? <Text style={styles.dealerBadge}>{labels.dealerBadge}</Text> : null}
                 </Pressable>
               ))}
-              <Text style={styles.resultHintText}>{labels.autoSeatResultHint}</Text>
-              {hasDealerResult ? (
+              <Text style={styles.resultHintText}>
+                {startingDealerMode === 'manual' && !hasDealerResult
+                  ? '請點選其中一位做莊，系統會即時排成最終東南西北座位。'
+                  : syncedSeatDisplayNames.some(Boolean)
+                  ? '抽籤結果已自動同步上枱；如要調整，可以再點玩家同座位覆蓋安排。'
+                  : '抽籤結果已按最終東南西北顯示。'}
+              </Text>
+              {hasDealerResult && !syncedSeatDisplayNames.some(Boolean) ? (
                 <Text style={styles.resultHintText}>
                   {labels.autoSeatDealerExample
                     .replace('{dealerSeatLabel}', dealerSeatLabel)
@@ -261,7 +391,70 @@ function PlayersSection({
           ) : null}
         </View>
       )}
-      {playersError ? <Text style={styles.inlineErrorText}>{playersError}</Text> : null}
+
+      {syncEnabled ? (
+        <View style={styles.syncBlock}>
+          <Text style={styles.inputLabel}>{labels.syncJoinedPlayersTitle ?? '已加入玩家'}</Text>
+          <Text style={styles.syncHintText}>
+            {selectedSyncPlayerName
+              ? (labels.syncSelectedPlayerHintWithName ?? '已選 {name}').replace('{name}', selectedSyncPlayerName)
+              : labels.syncSelectedPlayerHint ?? '點選一位已加入玩家，再點東南西北其中一格安排上枱。'}
+          </Text>
+          {joinedSyncPlayers.length > 0 ? (
+            <View style={styles.syncPlayerChipList}>
+              {joinedSyncPlayers.map((player) => {
+                const selected = selectedSyncPlayerId === player.playerId;
+                return (
+                  <Pressable
+                    key={player.playerId}
+                    onPress={() => onSelectSyncPlayer?.(player.playerId)}
+                    style={[styles.syncPlayerChip, selected && styles.syncPlayerChipSelected]}
+                  >
+                    <Text style={[styles.syncPlayerChipText, selected && styles.syncPlayerChipTextSelected]}>
+                      {player.displayName}
+                    </Text>
+                    {player.isHost ? <Text style={[styles.syncPlayerMeta, selected && styles.syncPlayerMetaSelected]}>{labels.syncHost ?? '房主'}</Text> : null}
+                    {player.isSelf ? <Text style={[styles.syncPlayerMeta, selected && styles.syncPlayerMetaSelected]}>{labels.syncYou ?? '你'}</Text> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : (
+            <Text style={styles.syncHintText}>{labels.syncJoinedPlayersHint ?? '其他玩家加入後，會出現在這裡供你安排到座位或留在後備。'}</Text>
+          )}
+
+          {benchPlayerNames.length > 0 ? (
+            <View style={styles.benchBlock}>
+              <Text style={styles.inputLabel}>{labels.syncBenchTitle ?? '後備區'}</Text>
+              <View style={styles.syncPlayerChipList}>
+                {benchPlayerNames.map((playerName) => (
+                  <View key={playerName} style={styles.benchChip}>
+                    <Text style={styles.benchChipText}>{playerName}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          <View style={styles.keepBenchButtonWrap}>
+            <AppButton
+              label={labels.syncKeepBench ?? '留在後備'}
+              onPress={() => onKeepSyncPlayerOnBench?.()}
+              disabled={!selectedSyncPlayerId || disabled}
+              variant="secondary"
+            />
+          </View>
+        </View>
+      ) : (
+        <View style={styles.syncBlock}>
+          <AppButton
+            label={syncBusy ? labels.syncEnableBusy ?? '建立同步房中...' : labels.syncEnable ?? '加入同步玩家'}
+            onPress={() => onEnableSync?.()}
+            disabled={disabled || syncBusy}
+            variant="secondary"
+          />
+        </View>
+      )}
     </Card>
   );
 }
@@ -325,6 +518,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: theme.colors.primary,
   },
+  seatChipSelectable: {
+    backgroundColor: theme.colors.primaryLight,
+  },
   playerInput: {
     flex: 1,
     minHeight: 44,
@@ -346,6 +542,13 @@ const styles = StyleSheet.create({
   },
   selectableRow: {
     borderColor: theme.colors.border,
+  },
+  syncSelectableRow: {
+    borderColor: theme.colors.primary,
+    backgroundColor: '#F7FCFC',
+  },
+  syncSelectableRowPressed: {
+    opacity: 0.92,
   },
   selectedDealerRow: {
     borderColor: theme.colors.primary,
@@ -372,12 +575,89 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   playerReadonlyText: {
-    flex: 1,
-    minHeight: 44,
-    textAlignVertical: 'center',
     fontSize: theme.fontSize.md,
     color: theme.colors.textPrimary,
     fontWeight: '500',
+  },
+  playerReadonlyWrap: {
+    flex: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  syncBlock: {
+    marginTop: GRID.x2,
+  },
+  syncHintText: {
+    marginTop: GRID.x1,
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
+  },
+  syncPlayerChipList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: GRID.x1,
+    marginTop: GRID.x1_5,
+  },
+  syncPlayerChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: GRID.x1_5,
+    paddingVertical: GRID.x1,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  syncPlayerChipSelected: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primaryLight,
+  },
+  syncPlayerChipText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+  },
+  syncPlayerChipTextSelected: {
+    color: theme.colors.primaryDark,
+  },
+  syncPlayerMeta: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.textSecondary,
+  },
+  syncPlayerMetaSelected: {
+    color: theme.colors.primaryDark,
+  },
+  syncSeatBadge: {
+    marginLeft: GRID.x1,
+    paddingHorizontal: GRID.x1,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: theme.colors.primaryLight,
+  },
+  syncSeatBadgeText: {
+    fontSize: theme.fontSize.xs,
+    color: theme.colors.primaryDark,
+    fontWeight: '700',
+  },
+  benchBlock: {
+    marginTop: GRID.x2,
+  },
+  benchChip: {
+    paddingHorizontal: GRID.x1_5,
+    paddingVertical: GRID.x1,
+    borderRadius: 999,
+    backgroundColor: theme.colors.background,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  benchChipText: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.textPrimary,
+  },
+  keepBenchButtonWrap: {
+    marginTop: GRID.x2,
   },
 });
 

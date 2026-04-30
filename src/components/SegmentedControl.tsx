@@ -1,12 +1,12 @@
 import { Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import theme from '../theme/theme';
 
-type SegmentedOption<T extends string> = {
+type SegmentedOption<T extends string | number> = {
   value: T;
   label: string;
 };
 
-type SegmentedControlProps<T extends string> = {
+type SegmentedControlProps<T extends string | number> = {
   options: SegmentedOption<T>[];
   value: T;
   onChange: (value: T) => void;
@@ -16,7 +16,7 @@ type SegmentedControlProps<T extends string> = {
 
 const HIT_SLOP = { top: 8, right: 8, bottom: 8, left: 8 } as const;
 
-function SegmentedControl<T extends string>({
+function SegmentedControl<T extends string | number>({
   options,
   value,
   onChange,
@@ -30,7 +30,7 @@ function SegmentedControl<T extends string>({
         const isLast = index === options.length - 1;
         return (
           <Pressable
-            key={option.value}
+            key={String(option.value)}
             style={[
               styles.button,
               !isLast ? styles.buttonSpacing : null,

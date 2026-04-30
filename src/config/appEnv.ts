@@ -7,7 +7,11 @@ export type AppEnv = 'dev' | 'uat' | 'prd';
  * - dev_1.0 branch 內：'dev'
  * - 之後如果你幫我做 UAT / PRD cut，可以再於相應分支改成 'uat' / 'prd'
  */
-export const APP_ENV: AppEnv = 'dev';
+const appEnvConfig: { current: AppEnv } = {
+  current: 'dev',
+};
+
+export const APP_ENV: AppEnv = appEnvConfig.current;
 
 export const IS_DEV_ENV = APP_ENV === 'dev';
 export const IS_UAT_ENV = APP_ENV === 'uat';

@@ -176,7 +176,7 @@ function GameTableScreen({ route, navigation }: Props) {
     [dealerSeatIndex, sortedPlayers, t, winnerSeatIndex],
   );
   const minFanInput = useMemo(() => {
-    const configuredMin = Number.isInteger(rules?.minFanToWin) ? Number(rules.minFanToWin) : 0;
+    const configuredMin = typeof rules?.minFanToWin === 'number' ? rules.minFanToWin : 0;
     return Math.max(1, configuredMin);
   }, [rules?.minFanToWin]);
   const maxFanInput = useMemo(() => {
@@ -441,10 +441,10 @@ function GameTableScreen({ route, navigation }: Props) {
     }
 
     const tags: string[] = [];
-    if (rules.hk.capFan !== null) {
+    if (typeof rules.hk.capFan === 'number') {
       tags.push(t('game.detail.rules.custom.capFan').replace('{fan}', String(rules.hk.capFan)));
     }
-    if (rules.minFanToWin > 0) {
+    if (typeof rules.minFanToWin === 'number' && rules.minFanToWin > 0) {
       tags.push(t('game.detail.rules.custom.minFan').replace('{fan}', String(rules.minFanToWin)));
     }
     tags.push(t('game.detail.rules.custom.multiplier'));
@@ -1303,8 +1303,14 @@ function normalizeVariant(value: string): Variant {
 }
 
 function makeId(prefix: string): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `${prefix}_${crypto.randomUUID()}`;
+  const cryptoLike = (globalThis as typeof globalThis & {
+    crypto?: {
+      randomUUID?: () => string;
+    };
+  }).crypto;
+  const randomUUID = cryptoLike?.randomUUID;
+  if (typeof randomUUID === 'function') {
+    return `${prefix}_${randomUUID.call(cryptoLike)}`;
   }
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }

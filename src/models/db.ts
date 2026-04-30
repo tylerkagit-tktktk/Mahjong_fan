@@ -71,7 +71,18 @@ export type GameBundle = {
 
 export type NewGameInput = Omit<
   Game,
-  'createdAt' | 'currentWindIndex' | 'currentRoundNumber' | 'maxWindIndex'
+  | 'createdAt'
+  | 'progressIndex'
+  | 'currentWindIndex'
+  | 'currentRoundNumber'
+  | 'maxWindIndex'
+  | 'gameState'
+  | 'currentRoundLabelZh'
+  | 'endedAt'
+  | 'handsCount'
+  | 'resultStatus'
+  | 'resultSummaryJson'
+  | 'resultUpdatedAt'
 > & {
   createdAt?: number;
   progressIndex?: number;
@@ -79,6 +90,13 @@ export type NewGameInput = Omit<
   currentRoundNumber?: number;
   maxWindIndex?: number;
   seatRotationOffset?: number;
+  gameState?: Game['gameState'];
+  currentRoundLabelZh?: string | null;
+  endedAt?: number | null;
+  handsCount?: number;
+  resultStatus?: Game['resultStatus'];
+  resultSummaryJson?: string | null;
+  resultUpdatedAt?: number | null;
 };
 export type NewPlayerInput = Player;
 export type NewHandInput = Omit<

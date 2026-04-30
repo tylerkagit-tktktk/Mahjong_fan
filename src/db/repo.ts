@@ -1,5 +1,4 @@
-// @ts-ignore
-import SQLite from 'react-native-sqlite-storage';
+import { ResultSet } from 'react-native-sqlite-storage';
 import {
   Game,
   GameBundle,
@@ -20,7 +19,7 @@ import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
 import { isDev } from '../debug/isDev';
 import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 
-function rowsToArray<T>(result: SQLite.ResultSet): T[] {
+function rowsToArray<T>(result: ResultSet): T[] {
   const items: T[] = [];
   for (let i = 0; i < result.rows.length; i += 1) {
     items.push(result.rows.item(i) as T);
@@ -28,7 +27,7 @@ function rowsToArray<T>(result: SQLite.ResultSet): T[] {
   return items;
 }
 
-function normalizeHands(result: SQLite.ResultSet): Hand[] {
+function normalizeHands(result: ResultSet): Hand[] {
   const items = rowsToArray<
     Omit<Hand, 'isDraw'> & {
       isDraw: number | boolean;
@@ -84,7 +83,7 @@ function formatSignedMoney(value: number, symbol: string): string {
 
 type SqlParam = string | number | null;
 
-type TxExecute = (statement: string, params?: SqlParam[]) => Promise<SQLite.ResultSet>;
+type TxExecute = (statement: string, params?: SqlParam[]) => Promise<ResultSet>;
 
 const MUTABLE_GAME_STATES: ReadonlySet<string> = new Set(['draft', 'active']);
 const MUTATION_BLOCKED_ERROR = 'Cannot mutate ended or abandoned game';
@@ -93,6 +92,7 @@ const INTERNAL_BACKUPS_LIMIT = 5;
 const INTERNAL_BACKUP_SCHEMA_VERSION = 1;
 const INTERNAL_BACKUP_SCHEMA_COMPATIBILITY = new Set([INTERNAL_BACKUP_SCHEMA_VERSION]);
 const MAX_PLAYER_NAME_LENGTH = 10;
+const REQUIRED_PLAYER_COUNT = 4;
 
 type InternalBackup = {
   id: string;
@@ -310,6 +310,7 @@ export async function __testOnly_createGameWithPlayersWithTx(
   players: NewPlayerInput[],
   executeTx: TxExecute,
 ): Promise<void> {
+  validateCreateGamePlayers(game.id, players);
   const persistedVariant = 'HK';
   await executeTx(
     `INSERT INTO games
@@ -341,6 +342,32 @@ export async function __testOnly_createGameWithPlayersWithTx(
       truncatePlayerName(player.name),
       player.seatIndex,
     ]);
+  }
+}
+
+function validateCreateGamePlayers(gameId: string, players: NewPlayerInput[]): void {
+  if (players.length !== REQUIRED_PLAYER_COUNT) {
+    throw new Error(`Expected ${REQUIRED_PLAYER_COUNT} players, received ${players.length}`);
+  }
+
+  const usedSeats = new Set<number>();
+  for (const player of players) {
+    if (player.gameId !== gameId) {
+      throw new Error('Player payload gameId mismatch');
+    }
+    if (!player.id) {
+      throw new Error('Player id is required');
+    }
+    if (!player.name.trim()) {
+      throw new Error('Player name is required');
+    }
+    if (!Number.isInteger(player.seatIndex) || player.seatIndex < 0 || player.seatIndex >= REQUIRED_PLAYER_COUNT) {
+      throw new Error(`Invalid seat index: ${player.seatIndex}`);
+    }
+    if (usedSeats.has(player.seatIndex)) {
+      throw new Error(`Duplicate seat index: ${player.seatIndex}`);
+    }
+    usedSeats.add(player.seatIndex);
   }
 }
 

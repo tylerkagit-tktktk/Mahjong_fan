@@ -12,9 +12,10 @@ type Props = {
   onChangeText: (value: string) => void;
   inputRef: Ref<TextInput>;
   error: string | null;
+  disabled?: boolean;
 };
 
-function GameTitleSection({ label, value, placeholder, onChangeText, inputRef, error }: Props) {
+function GameTitleSection({ label, value, placeholder, onChangeText, inputRef, error, disabled = false }: Props) {
   return (
     <Card style={styles.card}>
       <TextField
@@ -23,6 +24,7 @@ function GameTitleSection({ label, value, placeholder, onChangeText, inputRef, e
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
+        editable={!disabled}
       />
       {error ? <Text style={styles.inlineErrorText}>{error}</Text> : null}
     </Card>

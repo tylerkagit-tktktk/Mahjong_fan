@@ -5,10 +5,12 @@ import { Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from 're
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import ScreenContainer from '../components/ScreenContainer';
+import { deleteCloudArchive, listCloudArchives } from '../db/cloudArchiveRepo';
 import { deleteGameCascade, listGames } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { Game } from '../models/db';
+import { CloudArchiveSummary } from '../models/cloud';
 import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
@@ -36,6 +38,25 @@ type FlatRow =
       type: 'game';
       id: string;
       game: Game;
+    }
+  | {
+      type: 'archive';
+      id: string;
+      archive: CloudArchiveSummary;
+    };
+
+type HistoryEntry =
+  | {
+      type: 'game';
+      id: string;
+      createdAt: number;
+      game: Game;
+    }
+  | {
+      type: 'archive';
+      id: string;
+      createdAt: number;
+      archive: CloudArchiveSummary;
     };
 
 const ITEM_SHADOW = {
@@ -174,6 +195,7 @@ function HistoryScreen({ navigation }: Props) {
   const { t } = useAppLanguage();
   const insets = useSafeAreaInsets();
   const [games, setGames] = useState<Game[]>([]);
+  const [archives, setArchives] = useState<CloudArchiveSummary[]>([]);
   const [summaries, setSummaries] = useState<Record<string, GameSummary>>({});
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterKey>('all');
@@ -212,15 +234,6 @@ function HistoryScreen({ navigation }: Props) {
       headerShadowVisible: false,
       headerStyle: {
         backgroundColor: theme.colors.background,
-        borderBottomWidth: 0,
-        shadowOpacity: 0,
-        elevation: 0,
-      },
-      headerLeftContainerStyle: {
-        backgroundColor: 'transparent',
-      },
-      headerRightContainerStyle: {
-        backgroundColor: 'transparent',
       },
       headerLeft: renderHeaderLeft,
       headerRight: renderHeaderRight,
@@ -232,22 +245,32 @@ function HistoryScreen({ navigation }: Props) {
     if (shouldShowSkeleton) {
       setLoading(true);
     }
+    let gameList: Game[] = [];
     try {
-      const gameList = await listGames();
+      gameList = await listGames();
       setGames(gameList);
       const nextSummaries = Object.fromEntries(gameList.map((game) => [game.id, buildSummaryFromSnapshot(game, t)]));
       setSummaries(nextSummaries);
 
       hasLoadedOnceRef.current = true;
     } catch (error) {
-      console.error('[DB] Failed to load history data', error);
+      console.error('[DB] Failed to load local history data', error);
       setGames([]);
       setSummaries({});
       hasLoadedOnceRef.current = true;
+      return;
     } finally {
       if (shouldShowSkeleton) {
         setLoading(false);
       }
+    }
+
+    try {
+      const archiveList = await listCloudArchives();
+      setArchives(archiveList);
+    } catch (error) {
+      console.error('[DB] Failed to load cloud archive history data', error);
+      setArchives([]);
     }
   }, [t]);
 
@@ -272,20 +295,36 @@ function HistoryScreen({ navigation }: Props) {
     return games.filter((game) => inRange(game.createdAt, now, filter));
   }, [games, filter]);
 
+  const filteredArchives = useMemo(() => {
+    const now = Date.now();
+    return archives.filter((archive) => inRange(archive.createdAt, now, filter));
+  }, [archives, filter]);
+
   const rows = useMemo<FlatRow[]>(() => {
     const now = Date.now();
-    const grouped = new Map<string, Game[]>();
     const activeGames: Game[] = [];
+    const datedEntries: HistoryEntry[] = [];
 
     filteredGames.forEach((game) => {
       if (game.endedAt == null) {
         activeGames.push(game);
         return;
       }
-      const label = getDateGroupLabel(game.createdAt, now, t);
-      const list = grouped.get(label) ?? [];
-      list.push(game);
-      grouped.set(label, list);
+      datedEntries.push({
+        type: 'game',
+        id: `game:${game.id}`,
+        createdAt: game.createdAt,
+        game,
+      });
+    });
+
+    filteredArchives.forEach((archive) => {
+      datedEntries.push({
+        type: 'archive',
+        id: `archive:${archive.roomId}`,
+        createdAt: archive.createdAt,
+        archive,
+      });
     });
 
     const output: FlatRow[] = [];
@@ -295,19 +334,27 @@ function HistoryScreen({ navigation }: Props) {
         id: 'header:active',
         label: translateWithFallback(t, 'history.group.active', '進行中'),
       });
-      activeGames.forEach((game) => {
+      activeGames.sort((a, b) => b.createdAt - a.createdAt).forEach((game) => {
         output.push({ type: 'game', id: `game:${game.id}`, game });
       });
     }
-    grouped.forEach((groupGames, label) => {
-      output.push({ type: 'header', id: `header:${label}`, label });
-      groupGames.forEach((game) => {
-        output.push({ type: 'game', id: `game:${game.id}`, game });
-      });
+
+    let currentGroupLabel: string | null = null;
+    datedEntries.sort((a, b) => b.createdAt - a.createdAt).forEach((entry) => {
+      const label = getDateGroupLabel(entry.createdAt, now, t);
+      if (label !== currentGroupLabel) {
+        output.push({ type: 'header', id: `header:${label}`, label });
+        currentGroupLabel = label;
+      }
+      if (entry.type === 'game') {
+        output.push({ type: 'game', id: entry.id, game: entry.game });
+        return;
+      }
+      output.push({ type: 'archive', id: entry.id, archive: entry.archive });
     });
 
     return output;
-  }, [filteredGames, t]);
+  }, [filteredArchives, filteredGames, t]);
 
   const filterOptions: Array<{ key: FilterKey; label: string }> = [
     { key: 'all', label: translateWithFallback(t, 'history.filter.all', '全部') },
@@ -322,7 +369,7 @@ function HistoryScreen({ navigation }: Props) {
 
   const summaryStats = useMemo(() => {
     const totalMatches = filteredGames.length;
-    let endedMatches = 0;
+    let endedMatches = filteredArchives.length;
 
     filteredGames.forEach((game) => {
       if (game.endedAt != null) {
@@ -331,14 +378,82 @@ function HistoryScreen({ navigation }: Props) {
     });
 
     return {
-      totalMatches,
+      totalMatches: totalMatches + filteredArchives.length,
       endedMatches,
     };
-  }, [filteredGames]);
+  }, [filteredArchives.length, filteredGames]);
 
   const renderItem = ({ item }: { item: FlatRow }) => {
     if (item.type === 'header') {
       return <Text style={styles.groupHeader}>{item.label}</Text>;
+    }
+
+    if (item.type === 'archive') {
+      const archive = item.archive;
+      const metaLine = [`已玩 ${Math.max(1, Math.floor((archive.endedAt - archive.createdAt) / 60000))} 分鐘`, `${archive.memberCount} 人`].join(' · ');
+
+      const showDeleteConfirm = (roomId: string) => {
+        Alert.alert(
+          '刪除雲端封存牌局',
+          '確定要刪除手機內已封存的雲端牌局？此動作不能復原。',
+          [
+            { text: translateWithFallback(t, 'game.detail.action.cancel', '取消'), style: 'cancel' },
+            {
+              text: translateWithFallback(t, 'games.deleteGameAlert.confirm', '刪除'),
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  await deleteCloudArchive(roomId);
+                  setArchives((prev) => prev.filter((entry) => entry.roomId !== roomId));
+                } catch (error) {
+                  console.error('[DB] Failed to delete cloud archive', error);
+                }
+              },
+            },
+          ],
+        );
+      };
+
+      return (
+        <Swipeable
+          overshootRight={false}
+          renderRightActions={() => (
+            <Pressable
+              testID={`history-delete-archive-${archive.roomId}`}
+              onPress={() => showDeleteConfirm(archive.roomId)}
+              style={({ pressed }) => [styles.deleteAction, pressed && styles.deleteActionPressed]}
+            >
+              <Text style={styles.deleteActionText}>
+                {translateWithFallback(t, 'games.deleteGameAlert.confirm', '刪除')}
+              </Text>
+            </Pressable>
+          )}
+        >
+          <Pressable
+            onPress={() => navigation.navigate('CloudArchiveDetail', { roomId: archive.roomId })}
+            style={({ pressed }) => [styles.itemCard, pressed && styles.itemPressed]}
+          >
+            <View style={styles.itemHeaderRow}>
+              <Text style={styles.itemTitle} numberOfLines={1} ellipsizeMode="tail">
+                {archive.title}
+              </Text>
+              <Text style={styles.itemDateText}>{formatDateTime(archive.createdAt)}</Text>
+            </View>
+            <View style={styles.itemMetaRow}>
+              <Text style={styles.itemMeta}>{metaLine}</Text>
+              <View style={styles.rightMetaWrap}>
+                <View style={[styles.itemStatusPill, styles.itemStatusEnded]}>
+                  <Text style={styles.itemStatusText}>雲端封存</Text>
+                </View>
+                <Text style={styles.chevron}>›</Text>
+              </View>
+            </View>
+            <Text style={styles.itemSummary}>
+              {`已封存到本機 ｜ ${archive.handCount} 手 ｜ v${archive.archiveVersion}`}
+            </Text>
+          </Pressable>
+        </Swipeable>
+      );
     }
 
     const game = item.game;

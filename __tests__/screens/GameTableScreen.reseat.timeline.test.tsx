@@ -1,6 +1,6 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Alert } from 'react-native';
+import { Alert, Text } from 'react-native';
 import AppButton from '../../src/components/AppButton';
 import GameTableScreen from '../../src/screens/GameTableScreen';
 import {
@@ -220,7 +220,7 @@ function getAlertButtons(
 
 function getAmountStrings(tree: renderer.ReactTestRenderer): string[] {
   const textNodes = tree.root.findAll((node) => {
-    if (typeof node.type !== 'string' || node.type !== 'Text') {
+    if (node.type !== Text) {
       return false;
     }
     const value = node.props.children;
@@ -247,6 +247,8 @@ describe('GameTableScreen reseat timeline integration', () => {
         gameId: 'game-1',
         handIndex: handCount++,
         dealerSeatIndex: input.dealerSeatIndex,
+        windIndex: 0,
+        roundNumber: 1,
         isDraw,
         winnerSeatIndex: input.winnerSeatIndex ?? null,
         discarderSeatIndex: input.discarderSeatIndex ?? null,
@@ -378,7 +380,7 @@ describe('GameTableScreen reseat timeline integration', () => {
 
     const insertSums = mockedInsertHand.mock.calls
       .map((call) => {
-        const parsed = JSON.parse(call[0].deltasJson);
+        const parsed = JSON.parse(call[0].deltasJson ?? '{"values":[0,0,0,0]}');
         return (parsed.values as number[]).reduce((sum, value) => sum + Number(value), 0);
       })
       .every((sum) => sum === 0);

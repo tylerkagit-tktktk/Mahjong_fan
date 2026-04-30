@@ -24,12 +24,12 @@ function interpolate(template: string, vars?: Record<string, string | number>): 
   if (!vars) {
     return template;
   }
-  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, token: string) => {
-    if (!(token in vars)) {
-      return match;
-    }
-    return String(vars[token]);
-  });
+  return Object.entries(vars).reduce((result, [token, value]) => {
+    const valueText = String(value);
+    const doublePattern = new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`, 'g');
+    const singlePattern = new RegExp(`\\{${token}\\}`, 'g');
+    return result.replace(doublePattern, valueText).replace(singlePattern, valueText);
+  }, template);
 }
 
 export function t(key: TranslationKey, vars?: Record<string, string | number>): string {

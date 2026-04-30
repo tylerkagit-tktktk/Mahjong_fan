@@ -1,6 +1,6 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomActionBar from '../components/BottomActionBar';
 import ScreenContainer from '../components/ScreenContainer';
@@ -9,8 +9,21 @@ import { DEBUG_FLAGS } from '../debug/debugFlags';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { DEFAULT_CURRENCY_CODE, CurrencyCode, formatCurrencyUnit, getCurrencyMeta } from '../models/currency';
-import { getDefaultRules, HkGunMode, HkScoringPreset, HkStakePreset, RulesV1, serializeRules, Variant } from '../models/rules';
+import { getDefaultRules, HkGunMode, HkScoringPreset, HkStakePreset, parseRules, RulesV1, serializeRules, Variant } from '../models/rules';
+import { ResolvedRoomPlayer, Room, SeatKey } from '../models/cloud';
 import { RootStackParamList } from '../navigation/types';
+import { ensureSession } from '../services/cloud/authRepo';
+import {
+  addTemporaryPlayer,
+  createInvite,
+  createRoom,
+  deleteRoomAndFallbackToLocal,
+  getRoom,
+  joinWithInvite,
+  startRoom,
+  subscribeRoomPlayers,
+} from '../services/cloud/roomRepo';
+import { loadSnapshot, now, saveSnapshot } from '../services/cloud/storage';
 import theme from '../theme/theme';
 import { typography } from '../styles/typography';
 import {
@@ -34,7 +47,6 @@ import {
   parseDecimalWithinRange,
   parseMinFan,
   rotatePlayersToEast,
-  shuffle,
 } from './newGameStepper/helpers';
 import CreateConfirmModal from './newGameStepper/sections/CreateConfirmModal';
 import CurrencySection from './newGameStepper/sections/CurrencySection';
@@ -46,15 +58,65 @@ import { CapMode, ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateCo
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewGameStepper'>;
 const MAX_PLAYER_NAME_LENGTH = 10;
+const SEAT_KEYS: SeatKey[] = ['0', '1', '2', '3'];
+const EMPTY_SYNC_ASSIGNMENTS: Record<SeatKey, string | null> = { '0': null, '1': null, '2': null, '3': null };
+const DEBUG_SYNC_PLAYER_NAMES = ['測試玩家 A', '測試玩家 B', '測試玩家 C', '測試玩家 D'];
 
-function NewGameStepperScreen({ navigation }: Props) {
+function buildSeatAssignmentsFromPlayerIds(playerIds: Array<string | null> | null): Record<SeatKey, string | null> {
+  if (!playerIds) {
+    return EMPTY_SYNC_ASSIGNMENTS;
+  }
+  return {
+    '0': playerIds[0] ?? null,
+    '1': playerIds[1] ?? null,
+    '2': playerIds[2] ?? null,
+    '3': playerIds[3] ?? null,
+  };
+}
+
+function rotateArray<T>(values: T[], eastIndex: number): T[] {
+  if (values.length === 0) {
+    return values;
+  }
+  const offset = ((eastIndex % values.length) + values.length) % values.length;
+  return values.slice(offset).concat(values.slice(0, offset));
+}
+
+function shuffleArray<T>(values: T[]): T[] {
+  const next = [...values];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+}
+
+function translateWithFallback(
+  t: (key: TranslationKey) => string,
+  key: string,
+  fallback: string,
+  replacements?: Record<string, string | number>,
+): string {
+  const raw = t(key as TranslationKey);
+  const base = raw === key ? fallback : raw;
+  if (!replacements) {
+    return base;
+  }
+  return Object.entries(replacements).reduce(
+    (result, [token, value]) => result.replace(new RegExp(`\\{${token}\\}`, 'g'), String(value)),
+    base,
+  );
+}
+
+function NewGameStepperScreen({ navigation, route }: Props) {
   const { t, language } = useAppLanguage();
   const insets = useSafeAreaInsets();
+  const prefill = route.params?.prefill;
 
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(prefill?.title ?? '');
   const [seatMode, setSeatMode] = useState<SeatMode>('manual');
   const [mode, setMode] = useState<Variant>('HK');
-  const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(DEFAULT_CURRENCY_CODE);
+  const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(prefill?.currencyCode ?? DEFAULT_CURRENCY_CODE);
   const [hkScoringPreset, setHkScoringPreset] = useState<HkScoringPreset>('traditionalFan');
   const [hkGunMode, setHkGunMode] = useState<HkGunMode>('fullGun');
   const [hkStakePreset, setHkStakePreset] = useState<HkStakePreset>('TWO_FIVE_CHICKEN');
@@ -74,6 +136,7 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [players, setPlayers] = useState(['', '', '', '']);
   const [autoNames, setAutoNames] = useState(['', '', '', '']);
   const [autoAssigned, setAutoAssigned] = useState<string[] | null>(null);
+  const [autoAssignedPlayerIds, setAutoAssignedPlayerIds] = useState<Array<string | null> | null>(null);
   const [startingDealerMode, setStartingDealerMode] = useState<StartingDealerMode>('random');
   const [startingDealerSourceIndex, setStartingDealerSourceIndex] = useState<number | null>(null);
   const [titleError, setTitleError] = useState<string | null>(null);
@@ -83,12 +146,95 @@ function NewGameStepperScreen({ navigation }: Props) {
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [pendingPayload, setPendingPayload] = useState<PreparedCreateContext | null>(null);
+  const [sessionUid, setSessionUid] = useState('');
+  const [draftRoom, setDraftRoom] = useState<Room | null>(null);
+  const [inviteText, setInviteText] = useState('');
+  const [inviteToken, setInviteToken] = useState('');
+  const [syncPlayers, setSyncPlayers] = useState<ResolvedRoomPlayer[]>([]);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [selectedSyncPlayerId, setSelectedSyncPlayerId] = useState('');
+  const [syncSeatAssignments, setSyncSeatAssignments] = useState<Record<SeatKey, string | null>>(EMPTY_SYNC_ASSIGNMENTS);
+  const [debugSyncJoinCount, setDebugSyncJoinCount] = useState(0);
 
   useEffect(() => {
     if (mode !== 'HK') {
       setMode('HK');
     }
   }, [mode]);
+
+  useEffect(() => {
+    if (!prefill) {
+      return;
+    }
+
+    setTitle(prefill.title ?? '');
+    if (prefill.currencyCode) {
+      setCurrencyCode(prefill.currencyCode);
+    }
+
+    if (!prefill.serializedRules) {
+      return;
+    }
+
+    const parsedRules = parseRules(prefill.serializedRules, 'HK');
+    setCurrencyCode(parsedRules.currencyCode);
+    setHkScoringPreset(parsedRules.hk?.scoringPreset ?? 'traditionalFan');
+    setHkGunMode(parsedRules.hk?.gunMode ?? 'fullGun');
+    setHkStakePreset(parsedRules.hk?.stakePreset ?? 'TWO_FIVE_CHICKEN');
+    setUnitPerFan(parsedRules.hk?.unitPerFan ?? 1);
+    setUnitPerFanInput(String(parsedRules.hk?.unitPerFan ?? 1));
+    setMinFanToWin(parsedRules.minFanToWin ?? 3);
+    setMinFanInput(String(parsedRules.minFanToWin ?? 3));
+
+    if (parsedRules.hk?.capFan == null) {
+      setCustomCapMode('none');
+      setCustomCapFan(10);
+      setCustomCapFanInput('10');
+      setCapFan(10);
+      return;
+    }
+
+    if (parsedRules.hk?.scoringPreset === 'traditionalFan' && (parsedRules.hk.capFan === 8 || parsedRules.hk.capFan === 10 || parsedRules.hk.capFan === 13)) {
+      setCapFan(parsedRules.hk.capFan);
+      setCustomCapMode('fanCap');
+      setCustomCapFan(parsedRules.hk.capFan);
+      setCustomCapFanInput(String(parsedRules.hk.capFan));
+      return;
+    }
+
+    setCustomCapMode('fanCap');
+    setCustomCapFan(parsedRules.hk.capFan);
+    setCustomCapFanInput(String(parsedRules.hk.capFan));
+  }, [prefill]);
+
+  useEffect(() => {
+    if (!draftRoom?.roomId || !sessionUid) {
+      setSyncPlayers([]);
+      return;
+    }
+
+    return subscribeRoomPlayers(draftRoom.roomId, sessionUid, (nextPlayers) => {
+      setSyncPlayers(nextPlayers.filter((player) => player.kind === 'member'));
+    });
+  }, [draftRoom?.roomId, sessionUid]);
+
+  useEffect(() => {
+    if (!selectedSyncPlayerId) {
+      return;
+    }
+    if (syncPlayers.some((player) => player.playerId === selectedSyncPlayerId)) {
+      return;
+    }
+    setSelectedSyncPlayerId('');
+  }, [selectedSyncPlayerId, syncPlayers]);
+
+  useEffect(() => {
+    if (selectedSyncPlayerId || syncPlayers.length === 0) {
+      return;
+    }
+    const selfPlayer = syncPlayers.find((player) => player.isSelf);
+    setSelectedSyncPlayerId(selfPlayer?.playerId ?? syncPlayers[0]?.playerId ?? '');
+  }, [selectedSyncPlayerId, syncPlayers]);
 
   const scrollRef = useRef<ScrollView | null>(null);
   const titleInputRef = useRef<TextInput | null>(null);
@@ -97,9 +243,16 @@ function NewGameStepperScreen({ navigation }: Props) {
   const minFanInputRef = useRef<TextInput | null>(null);
   const unitPerFanInputRef = useRef<TextInput | null>(null);
   const customCapFanInputRef = useRef<TextInput | null>(null);
-  const sectionY = useRef<{ title: number; scoring: number; players: number }>({ title: 0, scoring: 0, players: 0 });
+  const sectionY = useRef<{ title: number; scoring: number; players: number; playersError: number }>({
+    title: 0,
+    scoring: 0,
+    players: 0,
+    playersError: 0,
+  });
 
   const seatLabels = useMemo(() => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')], [t]);
+  const hasDraftRoom = Boolean(draftRoom);
+  const setupLocked = hasDraftRoom;
   const minFanLowerBound = mode === 'HK' && hkScoringPreset === 'customTable' ? 1 : MIN_FAN_MIN;
   const showMinFan = mode === 'TW' || mode === 'HK';
   const parsedMinFanInput = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
@@ -134,6 +287,70 @@ function NewGameStepperScreen({ navigation }: Props) {
   const sampleZimoEach = sampleBaseAmount !== null ? sampleBaseAmount : null;
   const sampleDiscarder = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
   const currencySymbol = getCurrencyMeta(currencyCode).symbol;
+  const joinedSyncPlayers = useMemo(() => syncPlayers.filter((player) => player.kind === 'member'), [syncPlayers]);
+  const assignedSyncPlayerIds = useMemo(
+    () => new Set(Object.values(syncSeatAssignments).filter((value): value is string => Boolean(value))),
+    [syncSeatAssignments],
+  );
+  const benchSyncPlayers = useMemo(
+    () => joinedSyncPlayers.filter((player) => !assignedSyncPlayerIds.has(player.playerId)),
+    [assignedSyncPlayerIds, joinedSyncPlayers],
+  );
+  const selectedSyncPlayer = useMemo(
+    () => joinedSyncPlayers.find((player) => player.playerId === selectedSyncPlayerId) ?? null,
+    [joinedSyncPlayers, selectedSyncPlayerId],
+  );
+  const syncedSeatDisplayNames = useMemo(
+    () =>
+      SEAT_KEYS.map((seatKey) => {
+        const playerId = syncSeatAssignments[seatKey];
+        if (!playerId) {
+          return null;
+        }
+        return joinedSyncPlayers.find((player) => player.playerId === playerId)?.displayName ?? null;
+      }),
+    [joinedSyncPlayers, syncSeatAssignments],
+  );
+  const screenCopy = {
+    title: t('nav.newGame'),
+    subtitle: translateWithFallback(
+      t,
+      'newGame.headerSubtitle',
+      '先設定規則、玩家同起莊方式；需要同步時，再在玩家區下方加入同步玩家。',
+    ),
+    primaryAction: hasDraftRoom
+      ? translateWithFallback(t, 'newGame.sync.start', '開始牌局')
+      : t('newGame.create'),
+    primaryActionBusy: hasDraftRoom
+      ? translateWithFallback(t, 'newGame.sync.starting', '開局中...')
+      : t('newGame.creating'),
+    confirmTitle: hasDraftRoom
+      ? translateWithFallback(t, 'newGame.sync.confirmModal.title', '確認開始牌局')
+      : t('newGame.confirmModal.title'),
+    confirmSubtitle: hasDraftRoom
+      ? translateWithFallback(
+          t,
+          'newGame.sync.confirmModal.subtitle',
+          '請先核對目前座位與同步玩家安排，確認後即會開始同步牌局。',
+        )
+      : t('newGame.confirmModal.subtitle'),
+    confirmAction: hasDraftRoom
+      ? translateWithFallback(t, 'newGame.sync.confirmModal.action', '確認開始')
+      : t('newGame.confirmModal.action.confirmCreate'),
+    creationModeLabel: t('newGame.confirmModal.field.creationMode'),
+  };
+
+  useEffect(() => {
+    if (seatMode !== 'auto' || joinedSyncPlayers.length < PLAYER_COUNT) {
+      return;
+    }
+    if (autoNames.some((name) => name.trim().length > 0)) {
+      return;
+    }
+
+    setAutoNames(joinedSyncPlayers.slice(0, PLAYER_COUNT).map((player) => player.displayName.slice(0, MAX_PLAYER_NAME_LENGTH)));
+    setPlayersError(null);
+  }, [autoNames, joinedSyncPlayers, seatMode]);
 
   const handleSetPlayer = (index: number, value: string) => {
     const safeName = value.slice(0, MAX_PLAYER_NAME_LENGTH);
@@ -154,46 +371,103 @@ function NewGameStepperScreen({ navigation }: Props) {
       return next;
     });
     setAutoAssigned(null);
+    setAutoAssignedPlayerIds(null);
+    setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
     setPlayersError(null);
     setStartingDealerSourceIndex(null);
   };
 
   const handleSeatModeChange = (nextMode: SeatMode) => {
     setSeatMode(nextMode);
+    if (nextMode !== 'auto') {
+      setAutoAssignedPlayerIds(null);
+    }
     setPlayersError(null);
     setSubmitAttempted(false);
     setStartingDealerSourceIndex(null);
   };
 
   const handleConfirmAutoSeat = () => {
-    const trimmed = autoNames.map((name) => name.trim());
-    if (trimmed.some((name) => name.length === 0)) {
+    const fallbackNames = autoNames.map((name, index) => {
+      const trimmedName = name.trim();
+      if (trimmedName.length > 0) {
+        return trimmedName;
+      }
+      return joinedSyncPlayers[index]?.displayName.slice(0, MAX_PLAYER_NAME_LENGTH).trim() ?? '';
+    });
+
+    if (fallbackNames.some((name, index) => name !== autoNames[index])) {
+      setAutoNames(fallbackNames);
+    }
+
+    if (fallbackNames.some((name) => name.length === 0)) {
       setPlayersError(t('newGame.autoSeatRequired'));
       return;
     }
-    const shuffled = shuffle(trimmed);
-    setAutoAssigned(shuffled);
-    setPlayersError(null);
+    const realPlayers = joinedSyncPlayers.slice(0, PLAYER_COUNT);
+    const shuffledEntries = shuffleArray(
+      fallbackNames.map((name, index) => ({
+        name,
+        playerId: realPlayers[index]?.playerId ?? null,
+      })),
+    );
+
     if (startingDealerMode === 'random') {
-      setStartingDealerSourceIndex(Math.floor(Math.random() * PLAYER_COUNT));
+      const dealerIndex = Math.floor(Math.random() * PLAYER_COUNT);
+      const rotatedNames = rotateArray(
+        shuffledEntries.map((entry) => entry.name),
+        dealerIndex,
+      );
+      const rotatedPlayerIds = rotateArray(
+        shuffledEntries.map((entry) => entry.playerId),
+        dealerIndex,
+      );
+      setAutoAssigned(rotatedNames);
+      setAutoAssignedPlayerIds(rotatedPlayerIds);
+      setSyncSeatAssignments(buildSeatAssignmentsFromPlayerIds(rotatedPlayerIds));
+      setStartingDealerSourceIndex(0);
     } else {
+      setAutoAssigned(shuffledEntries.map((entry) => entry.name));
+      setAutoAssignedPlayerIds(shuffledEntries.map((entry) => entry.playerId));
+      setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
       setStartingDealerSourceIndex(null);
     }
+
+    setPlayersError(null);
   };
 
   const handleStartingDealerModeChange = (nextMode: StartingDealerMode) => {
     setStartingDealerMode(nextMode);
+    setAutoAssigned(null);
+    setAutoAssignedPlayerIds(null);
+    setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
     setStartingDealerSourceIndex(null);
     setPlayersError(null);
   };
 
   const handleSelectStartingDealer = (index: number) => {
+    if (seatMode === 'auto' && autoAssigned && autoAssignedPlayerIds) {
+      const rotatedNames = rotateArray(autoAssigned, index);
+      const rotatedPlayerIds = rotateArray(autoAssignedPlayerIds, index);
+      setAutoAssigned(rotatedNames);
+      setAutoAssignedPlayerIds(rotatedPlayerIds);
+      setSyncSeatAssignments(buildSeatAssignmentsFromPlayerIds(rotatedPlayerIds));
+      setStartingDealerSourceIndex(0);
+      setPlayersError(null);
+      return;
+    }
     setStartingDealerSourceIndex(index);
     setPlayersError(null);
   };
 
   const scrollToY = (y: number) => {
     scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
+  };
+
+  const scrollToPlayersError = () => {
+    setTimeout(() => {
+      scrollToY(sectionY.current.playersError || sectionY.current.players);
+    }, 80);
   };
 
   const focusInvalidTarget = (target: InvalidTarget) => {
@@ -307,10 +581,16 @@ function NewGameStepperScreen({ navigation }: Props) {
       }
     }
 
-    let resolvedPlayers = [...players];
-    let basePlayers = [...players];
+    let resolvedPlayers: string[] = [];
+    let basePlayers: string[] = [];
     if (seatMode === 'manual') {
-      resolvedPlayers = resolvedPlayers.map((name) => name.trim().slice(0, MAX_PLAYER_NAME_LENGTH));
+      resolvedPlayers = players.map((name, index) => {
+        const syncedName = syncedSeatDisplayNames[index]?.trim().slice(0, MAX_PLAYER_NAME_LENGTH);
+        if (syncedName) {
+          return syncedName;
+        }
+        return name.trim().slice(0, MAX_PLAYER_NAME_LENGTH);
+      });
       basePlayers = [...resolvedPlayers];
       const missingIndexes = resolvedPlayers.map((name, index) => (name.length === 0 ? index : -1)).filter((index) => index >= 0);
       if (missingIndexes.length > 0) {
@@ -376,6 +656,9 @@ function NewGameStepperScreen({ navigation }: Props) {
     setTitleError(nextTitleError);
     setPlayersError(nextPlayersError);
     if (nextTitleError || nextPlayersError) {
+      if (nextPlayersError && (!invalidTarget || invalidTarget.kind === 'players')) {
+        scrollToPlayersError();
+      }
       if (invalidTarget) {
         focusInvalidTarget(invalidTarget);
       }
@@ -415,6 +698,7 @@ function NewGameStepperScreen({ navigation }: Props) {
     }
 
     return {
+      creationMode: hasDraftRoom ? 'online' : 'local',
       gameId,
       trimmedTitle,
       resolvedPlayers,
@@ -424,7 +708,381 @@ function NewGameStepperScreen({ navigation }: Props) {
     };
   };
 
+  const validateDraftRoomPrerequisites = (): { trimmedTitle: string; rules: RulesV1 } | null => {
+    setFormError(null);
+
+    const trimmedTitle = title.trim();
+    let invalidTarget: InvalidTarget | null = null;
+    let nextTitleError: string | null = null;
+
+    if (!trimmedTitle) {
+      nextTitleError = t('newGame.requiredTitle');
+      invalidTarget = { kind: 'title' };
+    }
+
+    let resolvedMinFan = minFanToWin;
+    if (showMinFan) {
+      const parsedMinFanWithBound = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
+      if (parsedMinFanWithBound === null) {
+        focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
+        return null;
+      }
+      resolvedMinFan = parsedMinFanWithBound;
+      setMinFanToWin(parsedMinFanWithBound);
+    }
+
+    let resolvedUnitPerFan = unitPerFan;
+    let resolvedCustomCapFan = customCapFanForCalc;
+    if (mode === 'HK' && hkScoringPreset === 'customTable') {
+      const validatedUnitPerFan = parseDecimalWithinRange(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
+      if (validatedUnitPerFan === null) {
+        focusInvalidTarget(invalidTarget ?? { kind: 'unitPerFan' });
+        return null;
+      }
+      resolvedUnitPerFan = validatedUnitPerFan;
+      setUnitPerFan(validatedUnitPerFan);
+
+      if (customCapMode === 'fanCap') {
+        const validatedCustomCapFan = parseMinFan(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
+        if (validatedCustomCapFan === null) {
+          focusInvalidTarget(invalidTarget ?? { kind: 'capFan' });
+          return null;
+        }
+        resolvedCustomCapFan = validatedCustomCapFan;
+        setCustomCapFan(validatedCustomCapFan);
+        setCustomCapFanInput(String(validatedCustomCapFan));
+      } else {
+        resolvedCustomCapFan = null;
+      }
+    }
+
+    if (mode === 'HK') {
+      const capToValidate = hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan;
+      if (capToValidate !== null && resolvedMinFan > capToValidate) {
+        setFormError(t('newGame.minFanMustNotExceedCap'));
+        focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
+        return null;
+      }
+    }
+
+    setTitleError(nextTitleError);
+    if (nextTitleError) {
+      if (invalidTarget) {
+        focusInvalidTarget(invalidTarget);
+      }
+      return null;
+    }
+
+    const rules: RulesV1 = {
+      ...getDefaultRules('HK'),
+      variant: 'HK',
+      mode: 'HK',
+      languageDefault: language,
+      currencyCode,
+      currencySymbol: getCurrencyMeta(currencyCode).symbol,
+    };
+
+    rules.hk = {
+      ...(rules.hk ?? getDefaultRules('HK').hk!),
+      scoringPreset: hkScoringPreset,
+      gunMode: hkGunMode,
+      stakePreset: hkStakePreset,
+      unitPerFan: resolvedUnitPerFan,
+      capFan: hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan,
+    };
+    rules.minFanToWin = resolvedMinFan;
+
+    return { trimmedTitle, rules };
+  };
+
+  const clearDraftSyncState = () => {
+    setDraftRoom(null);
+    setInviteText('');
+    setInviteToken('');
+    setSyncPlayers([]);
+    setSelectedSyncPlayerId('');
+    setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
+    setDebugSyncJoinCount(0);
+  };
+
+  const handleKeepPlayerOnBench = (playerId: string) => {
+    setSyncSeatAssignments((prev) => {
+      const next = { ...prev };
+      for (const seatKey of SEAT_KEYS) {
+        if (next[seatKey] === playerId) {
+          next[seatKey] = null;
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleAssignSyncPlayerToSeat = (seatKey: SeatKey) => {
+    if (!selectedSyncPlayerId) {
+      return;
+    }
+    const assignSeat = () => {
+      setSyncSeatAssignments((prev) => {
+        const next = { ...prev };
+        for (const key of SEAT_KEYS) {
+          if (next[key] === selectedSyncPlayerId) {
+            next[key] = null;
+          }
+        }
+        next[seatKey] = selectedSyncPlayerId;
+        return next;
+      });
+    };
+
+    const seatIndex = SEAT_KEYS.indexOf(seatKey);
+    const localSeatName = seatIndex >= 0 ? players[seatIndex]?.trim() ?? '' : '';
+    const alreadyAssignedSyncPlayerId = syncSeatAssignments[seatKey];
+
+    if (!alreadyAssignedSyncPlayerId && localSeatName) {
+      Alert.alert(
+        translateWithFallback(t, 'newGame.sync.confirmTakeoverTitle', '接管座位？'),
+        translateWithFallback(
+          t,
+          'newGame.sync.confirmTakeoverMessage',
+          '{seatLabel}已填入「{playerName}」。確認後，已選同步玩家會接管這個座位。',
+          {
+            seatLabel: seatIndex >= 0 ? seatLabels[seatIndex] : seatKey,
+            playerName: localSeatName,
+          },
+        ),
+        [
+          { text: translateWithFallback(t, 'common.cancel', '取消'), style: 'cancel' },
+          {
+            text: translateWithFallback(t, 'newGame.sync.confirmTakeoverAction', '確認接管'),
+            onPress: assignSeat,
+          },
+        ],
+      );
+      return;
+    }
+
+    assignSeat();
+  };
+
+  const handleEnableSync = async () => {
+    const draftContext = validateDraftRoomPrerequisites();
+    if (!draftContext || syncBusy || loading || hasDraftRoom) {
+      return;
+    }
+
+    try {
+      setSyncBusy(true);
+      const session = await ensureSession('google');
+      setSessionUid(session.uid);
+      const createdRoom = await createRoom({
+        hostUid: session.uid,
+        title: draftContext.trimmedTitle,
+        memberCap: 8,
+        rulesSnapshot: {
+          title: draftContext.trimmedTitle,
+          currencyCode: draftContext.rules.currencyCode,
+          currencySymbol: draftContext.rules.currencySymbol,
+          mode: draftContext.rules.mode,
+          serializedRules: serializeRules(draftContext.rules),
+        },
+      });
+      const invite = await createInvite(createdRoom.roomId);
+      setDraftRoom(createdRoom);
+      setInviteToken(invite.token);
+      setInviteText(
+        [
+          createdRoom.title,
+          `${translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}: ${invite.roomId}`,
+          `${translateWithFallback(t, 'roomLobby.hostTools.inviteLink', '邀請連結')}: ${invite.deepLink}`,
+        ].join('\n'),
+      );
+      setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
+      setSelectedSyncPlayerId(session.uid);
+      setDebugSyncJoinCount(0);
+      setFormError(null);
+    } catch (error) {
+      console.error('[Cloud] enable sync failed', error);
+      setFormError(t('errors.createGame'));
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const handleShareInvite = async () => {
+    if (!inviteText || !draftRoom) {
+      return;
+    }
+    try {
+      await Share.share({
+        title: draftRoom.title,
+        message: inviteText,
+      });
+    } catch (error) {
+      Alert.alert(translateWithFallback(t, 'roomLobby.alert.shareInviteFailedTitle', '分享邀請失敗'), String(error));
+    }
+  };
+
+  const handleCancelSync = () => {
+    if (!draftRoom || !sessionUid) {
+      return;
+    }
+    Alert.alert(
+      translateWithFallback(t, 'newGame.sync.cancelConfirmTitle', '取消同步？'),
+      translateWithFallback(
+        t,
+        'newGame.sync.cancelConfirmMessage',
+        '取消後會刪除這個同步房，並回到純本地建局狀態。',
+      ),
+      [
+        { text: translateWithFallback(t, 'newGame.sync.cancelConfirmStay', '繼續保留'), style: 'cancel' },
+        {
+          text: translateWithFallback(t, 'newGame.sync.cancelConfirmAction', '刪除同步房'),
+          style: 'destructive',
+          onPress: () => {
+            deleteRoomAndFallbackToLocal(draftRoom.roomId, sessionUid)
+              .then(() => {
+                clearDraftSyncState();
+              })
+              .catch((error) => {
+                Alert.alert(translateWithFallback(t, 'roomLobby.alert.startFailedTitle', '操作失敗'), String(error));
+              });
+          },
+        },
+      ],
+    );
+  };
+
+  const handleAddDebugSyncPlayer = async () => {
+    if (!draftRoom || !inviteToken || syncBusy) {
+      return;
+    }
+
+    try {
+      setSyncBusy(true);
+      const debugUid = makeId('debug_member');
+      const playerNumber = debugSyncJoinCount + 1;
+      const displayName = DEBUG_SYNC_PLAYER_NAMES[debugSyncJoinCount] ?? `測試玩家 ${playerNumber}`;
+      const ts = now();
+      const snapshot = await loadSnapshot();
+      snapshot.profiles.push({
+        uid: debugUid,
+        provider: 'google',
+        displayName,
+        avatarUrl: null,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+      snapshot.stats.push({
+        uid: debugUid,
+        handsParticipated: 0,
+        wins: 0,
+        zimoCount: 0,
+        discardCount: 0,
+        drawCount: 0,
+        updatedAt: ts,
+      });
+      await saveSnapshot(snapshot);
+
+      const result = await joinWithInvite(draftRoom.roomId, inviteToken, debugUid);
+      if (!result.ok) {
+        throw new Error(result.message);
+      }
+      setDebugSyncJoinCount(playerNumber);
+    } catch (error) {
+      Alert.alert(
+        translateWithFallback(t, 'newGame.sync.debugAddFailedTitle', '加入虛擬真人玩家失敗'),
+        String(error),
+      );
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
   const executeCreateGame = async (context: PreparedCreateContext): Promise<boolean> => {
+    if (draftRoom) {
+      try {
+        setLoading(true);
+        const session = sessionUid ? { uid: sessionUid } : await ensureSession('google');
+        if (!sessionUid) {
+          setSessionUid(session.uid);
+        }
+
+        const realPlayerCount = syncPlayers.filter((player) => player.kind === 'member').length;
+        if (realPlayerCount <= 1) {
+          await deleteRoomAndFallbackToLocal(draftRoom.roomId, session.uid);
+          clearDraftSyncState();
+          await createGameWithPlayers(
+            {
+              id: context.gameId,
+              title: context.trimmedTitle,
+              createdAt: Date.now(),
+              currencySymbol: context.rules.currencySymbol,
+              variant: context.rules.variant,
+              rulesJson: serializeRules(context.rules),
+              startingDealerSeatIndex: 0,
+              languageOverride: null,
+            },
+            context.playerInputs,
+          );
+          navigation.replace('GameTable', { gameId: context.gameId });
+          return true;
+        }
+
+        const realSeatsCount = Object.values(syncSeatAssignments).filter(Boolean).length;
+        if (realSeatsCount < 2) {
+          setFormError(
+            translateWithFallback(
+              t,
+              'newGame.sync.needTwoRealSeats',
+              '同步牌局最少要安排兩位已加入玩家上枱，先可以開始。',
+            ),
+          );
+          return false;
+        }
+
+        const latestRoom = await getRoom(draftRoom.roomId);
+        if (!latestRoom) {
+          throw new Error('Room not found');
+        }
+
+        const nextSeats = { ...EMPTY_SYNC_ASSIGNMENTS } as Record<SeatKey, string>;
+        for (let index = 0; index < PLAYER_COUNT; index += 1) {
+          const seatKey = SEAT_KEYS[index];
+          const assignedRealPlayerId = syncSeatAssignments[seatKey];
+          if (assignedRealPlayerId) {
+            nextSeats[seatKey] = assignedRealPlayerId;
+            continue;
+          }
+          const temporaryPlayer = await addTemporaryPlayer({
+            roomId: latestRoom.roomId,
+            createdByUid: session.uid,
+            displayName: context.resolvedPlayers[index],
+          });
+          nextSeats[seatKey] = temporaryPlayer.playerId;
+        }
+
+        const startResult = await startRoom({
+          roomId: latestRoom.roomId,
+          startedByUid: session.uid,
+          baseVersion: latestRoom.currentVersion,
+          nextSeats,
+        });
+        if (!startResult.ok) {
+          setFormError(startResult.message);
+          return false;
+        }
+
+        navigation.replace('MultiplayerGameTable', { roomId: latestRoom.roomId });
+        return true;
+      } catch (err) {
+        console.error('[Cloud] start sync room failed', err);
+        setFormError(t('errors.createGame'));
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    }
+
     try {
       setLoading(true);
       await createGameWithPlayers(
@@ -456,6 +1114,13 @@ function NewGameStepperScreen({ navigation }: Props) {
 
     const gameFields: ConfirmField[] = [
       { label: t('newGame.confirmModal.field.title'), value: context.trimmedTitle },
+      {
+        label: screenCopy.creationModeLabel,
+        value:
+          context.creationMode === 'online'
+            ? translateWithFallback(t, 'newGame.creationMode.sync', '同步牌局')
+            : t('newGame.creationMode.local'),
+      },
       { label: t('newGame.confirmModal.field.mode'), value: modeLabel },
       { label: t('newGame.confirmModal.field.currency'), value: formatCurrencyUnit(context.rules.currencyCode) },
     ];
@@ -500,17 +1165,31 @@ function NewGameStepperScreen({ navigation }: Props) {
       scoringFields.push({ label: t('newGame.confirmModal.field.pmaMode'), value: t('newGame.pmaDescription') });
     }
 
-    const playerLabels: TranslationKey[] = [
-      'newGame.confirmModal.field.playersEast',
-      'newGame.confirmModal.field.playersSouth',
-      'newGame.confirmModal.field.playersWest',
-      'newGame.confirmModal.field.playersNorth',
-    ];
-    const playerFields: ConfirmField[] = context.resolvedPlayers.map((player, index) => ({ label: t(playerLabels[index]), value: player }));
-    playerFields[0] = {
-      label: `${t(playerLabels[0])} (${t('newGame.dealerBadge')})`,
-      value: context.resolvedPlayers[0],
-    };
+    let playerFields: ConfirmField[] = [];
+    if (context.creationMode === 'online') {
+      playerFields = context.resolvedPlayers.map((player, index) => {
+        const seatKey = SEAT_KEYS[index];
+        const syncPlayer = syncSeatAssignments[seatKey]
+          ? joinedSyncPlayers.find((joinedPlayer) => joinedPlayer.playerId === syncSeatAssignments[seatKey]) ?? null
+          : null;
+        return {
+          label: `${seatLabels[index]}${t('newGame.playerSeatSuffix')}`,
+          value: syncPlayer ? `${player} ← ${syncPlayer.displayName}` : player,
+        };
+      });
+    } else {
+      const playerLabels: TranslationKey[] = [
+        'newGame.confirmModal.field.playersEast',
+        'newGame.confirmModal.field.playersSouth',
+        'newGame.confirmModal.field.playersWest',
+        'newGame.confirmModal.field.playersNorth',
+      ];
+      playerFields = context.resolvedPlayers.map((player, index) => ({ label: t(playerLabels[index]), value: player }));
+      playerFields[0] = {
+        label: `${t(playerLabels[0])} (${t('newGame.dealerBadge')})`,
+        value: context.resolvedPlayers[0],
+      };
+    }
 
     return { game: gameFields, scoring: scoringFields, players: playerFields };
   };
@@ -579,6 +1258,10 @@ function NewGameStepperScreen({ navigation }: Props) {
             sectionY.current.title = event.nativeEvent.layout.y;
           }}
         >
+          <View style={styles.headerBlock}>
+            <Text style={styles.headerTitle}>{screenCopy.title}</Text>
+            <Text style={styles.headerSubtitle}>{screenCopy.subtitle}</Text>
+          </View>
           <GameTitleSection
             label={t('newGame.gameTitle')}
             value={title}
@@ -589,6 +1272,7 @@ function NewGameStepperScreen({ navigation }: Props) {
             }}
             inputRef={titleInputRef}
             error={titleError}
+            disabled={setupLocked || loading}
           />
         </View>
 
@@ -596,7 +1280,7 @@ function NewGameStepperScreen({ navigation }: Props) {
           title={t('newGame.modeTitle')}
           value={mode}
           onChange={setMode}
-          disabled={loading}
+          disabled={loading || setupLocked}
           labels={{ hk: t('newGame.mode.hk'), tw: t('newGame.mode.tw'), pma: t('newGame.mode.pma') }}
         />
 
@@ -604,7 +1288,7 @@ function NewGameStepperScreen({ navigation }: Props) {
           title={t('newGame.currencyTitle')}
           value={currencyCode}
           onChange={setCurrencyCode}
-          disabled={loading}
+          disabled={loading || setupLocked}
           labels={{ hkd: t('currency.hkd'), twd: t('currency.twd'), cny: t('currency.cny') }}
           helperText={`${t('newGame.currencySelectedPrefix')}${formatCurrencyUnit(currencyCode)}`}
         />
@@ -633,7 +1317,7 @@ function NewGameStepperScreen({ navigation }: Props) {
             sampleEffectiveFan={sampleEffectiveFan}
             sampleZimoEach={sampleZimoEach}
             sampleDiscarder={sampleDiscarder}
-            disabled={loading}
+            disabled={loading || setupLocked}
             minFanInputRef={minFanInputRef}
             unitPerFanInputRef={unitPerFanInputRef}
             customCapFanInputRef={customCapFanInputRef}
@@ -779,6 +1463,29 @@ function NewGameStepperScreen({ navigation }: Props) {
               startingDealerModeManual: t('newGame.startingDealerMode.manual'),
               autoFlowHint: t('newGame.autoFlowHint'),
               dealerBadge: t('newGame.dealerBadge'),
+              syncEnable: translateWithFallback(t, 'newGame.sync.enable', '加入同步玩家'),
+              syncEnableBusy: translateWithFallback(t, 'newGame.sync.enabling', '建立同步房中...'),
+              syncJoinedPlayersTitle: translateWithFallback(t, 'newGame.sync.joinedPlayersTitle', '已加入玩家'),
+              syncJoinedPlayersHint: translateWithFallback(
+                t,
+                'newGame.sync.joinedPlayersHint',
+                '其他玩家加入後，會出現在這裡供你安排到座位或留在後備。',
+              ),
+              syncSelectedPlayerHint: translateWithFallback(
+                t,
+                'newGame.sync.selectPlayerHint',
+                '點選一位已加入玩家，再點東南西北其中一格安排上枱。',
+              ),
+              syncSelectedPlayerHintWithName: translateWithFallback(
+                t,
+                'newGame.sync.selectedPlayerHintWithName',
+                '已選 {name}，而家可以點東南西北其中一格安排上枱。',
+              ),
+              syncSeatAssigned: translateWithFallback(t, 'newGame.sync.syncedSeatLabel', '已同步'),
+              syncBenchTitle: translateWithFallback(t, 'roomLobby.bench.title', '後備區'),
+              syncKeepBench: translateWithFallback(t, 'newGame.sync.keepBench', '留在後備'),
+              syncYou: t('roomLobby.member.self'),
+              syncHost: t('roomLobby.member.host'),
             }}
             onSeatModeChange={handleSeatModeChange}
             onSetPlayer={handleSetPlayer}
@@ -786,6 +1493,39 @@ function NewGameStepperScreen({ navigation }: Props) {
             onConfirmAutoSeat={handleConfirmAutoSeat}
             onStartingDealerModeChange={handleStartingDealerModeChange}
             onSelectStartingDealer={handleSelectStartingDealer}
+            syncEnabled={hasDraftRoom}
+            syncBusy={syncBusy}
+            syncedSeatDisplayNames={syncedSeatDisplayNames}
+            joinedSyncPlayers={joinedSyncPlayers.map((player) => ({
+              playerId: player.playerId,
+              displayName: player.displayName,
+              isHost: player.isHost,
+              isSelf: player.isSelf,
+            }))}
+            selectedSyncPlayerId={selectedSyncPlayerId}
+            selectedSyncPlayerName={selectedSyncPlayer?.displayName ?? null}
+            benchPlayerNames={benchSyncPlayers.map((player) => player.displayName)}
+            onEnableSync={() => {
+              handleEnableSync().catch((error) => {
+                console.error('[NewGame] enable sync failed', error);
+              });
+            }}
+            onSelectSyncPlayer={setSelectedSyncPlayerId}
+            onAssignSyncPlayerToSeat={(seatIndex) => {
+              const seatKey = SEAT_KEYS[seatIndex];
+              if (!seatKey) {
+                return;
+              }
+              handleAssignSyncPlayerToSeat(seatKey);
+            }}
+            onKeepSyncPlayerOnBench={() => {
+              if (selectedSyncPlayerId) {
+                handleKeepPlayerOnBench(selectedSyncPlayerId);
+              }
+            }}
+            onPlayersErrorLayout={(event) => {
+              sectionY.current.playersError = sectionY.current.players + event.nativeEvent.layout.y;
+            }}
           />
         </View>
 
@@ -794,9 +1534,56 @@ function NewGameStepperScreen({ navigation }: Props) {
         </ScrollView>
 
         <BottomActionBar
-          primaryLabel={loading ? t('newGame.creating') : t('newGame.create')}
+          primaryLabel={loading ? screenCopy.primaryActionBusy : screenCopy.primaryAction}
           onPrimaryPress={handlePressCreate}
-          disabled={loading || confirmBusy}
+          disabled={loading || confirmBusy || syncBusy}
+          topContent={
+            hasDraftRoom ? (
+              <View style={styles.syncToolbar}>
+                <View style={styles.syncToolbarRoomCode}>
+                  <Text style={styles.syncToolbarLabel}>
+                    {translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}
+                  </Text>
+                  <Text selectable style={styles.syncToolbarValue}>
+                    {draftRoom?.roomId ?? '-'}
+                  </Text>
+                </View>
+                <View style={styles.syncToolbarActions}>
+                  {DEBUG_FLAGS.enableSyncTestTools ? (
+                    <Pressable
+                      onPress={() => {
+                        handleAddDebugSyncPlayer().catch((error) => {
+                          console.error('[NewGame] add debug sync player failed', error);
+                        });
+                      }}
+                      style={styles.syncToolbarButton}
+                    >
+                      <Text style={styles.syncToolbarButtonText}>
+                        {translateWithFallback(t, 'newGame.sync.debugAddPlayer', '加入虛擬真人玩家')}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    onPress={() => {
+                      handleShareInvite().catch((error) => {
+                        console.error('[NewGame] share invite failed', error);
+                      });
+                    }}
+                    style={styles.syncToolbarButton}
+                  >
+                    <Text style={styles.syncToolbarButtonText}>
+                      {translateWithFallback(t, 'roomLobby.hostTools.shareInvite', '分享邀請')}
+                    </Text>
+                  </Pressable>
+                  <Pressable onPress={handleCancelSync} style={styles.syncToolbarButton}>
+                    <Text style={styles.syncToolbarButtonText}>
+                      {translateWithFallback(t, 'newGame.sync.cancelConfirmAction', '取消同步')}
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            ) : null
+          }
         />
 
         <CreateConfirmModal
@@ -804,14 +1591,14 @@ function NewGameStepperScreen({ navigation }: Props) {
           busy={confirmBusy}
           sections={confirmSections}
           labels={{
-            title: t('newGame.confirmModal.title'),
-            subtitle: t('newGame.confirmModal.subtitle'),
+            title: screenCopy.confirmTitle,
+            subtitle: screenCopy.confirmSubtitle,
             sectionGame: t('newGame.confirmModal.section.game'),
             sectionScoring: t('newGame.confirmModal.section.scoring'),
             sectionPlayers: t('newGame.confirmModal.section.players'),
             backToEdit: t('newGame.confirmModal.action.backToEdit'),
-            confirmCreate: t('newGame.confirmModal.action.confirmCreate'),
-            creating: t('newGame.creating'),
+            confirmCreate: screenCopy.confirmAction,
+            creating: screenCopy.primaryActionBusy,
           }}
           onClose={() => setConfirmVisible(false)}
           onConfirm={() => {
@@ -835,6 +1622,54 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: GRID.x2,
+  },
+  headerBlock: {
+    marginBottom: GRID.x2,
+    gap: 4,
+  },
+  headerTitle: {
+    ...typography.title,
+    color: theme.colors.textPrimary,
+  },
+  headerSubtitle: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
+  },
+  syncToolbar: {
+    gap: GRID.x1_5,
+  },
+  syncToolbarRoomCode: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: GRID.x1,
+  },
+  syncToolbarLabel: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+  },
+  syncToolbarValue: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+  },
+  syncToolbarActions: {
+    flexDirection: 'row',
+    gap: GRID.x1,
+    flexWrap: 'wrap',
+  },
+  syncToolbarButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    paddingHorizontal: GRID.x1_5,
+    paddingVertical: GRID.x1,
+    backgroundColor: theme.colors.surface,
+  },
+  syncToolbarButtonText: {
+    ...typography.caption,
+    color: theme.colors.primary,
+    fontWeight: '700',
   },
   errorText: {
     ...typography.body,

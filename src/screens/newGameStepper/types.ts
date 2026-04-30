@@ -16,6 +16,7 @@ export type InvalidTarget =
   | { kind: 'startingDealer' };
 
 export type PreparedCreateContext = {
+  creationMode: 'local' | 'online';
   gameId: string;
   trimmedTitle: string;
   resolvedPlayers: string[];

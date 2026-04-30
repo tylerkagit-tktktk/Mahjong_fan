@@ -1,3 +1,4 @@
+import { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import theme from '../theme/theme';
@@ -9,6 +10,7 @@ type BottomActionBarProps = {
   secondaryLabel?: string;
   onSecondaryPress?: () => void;
   disabled?: boolean;
+  topContent?: ReactNode;
 };
 
 function BottomActionBar({
@@ -17,11 +19,13 @@ function BottomActionBar({
   secondaryLabel,
   onSecondaryPress,
   disabled = false,
+  topContent,
 }: BottomActionBarProps) {
   const insets = useSafeAreaInsets();
 
   return (
     <View style={[styles.container, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      {topContent ? <View style={styles.topContent}>{topContent}</View> : null}
       <AppButton label={primaryLabel} onPress={onPrimaryPress} disabled={disabled} />
       {secondaryLabel && onSecondaryPress ? (
         <AppButton
@@ -43,6 +47,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
     backgroundColor: theme.colors.background,
+  },
+  topContent: {
+    marginBottom: 12,
   },
   secondaryAction: {
     marginTop: 12,

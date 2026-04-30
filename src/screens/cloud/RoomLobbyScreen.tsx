@@ -1,0 +1,965 @@
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import AppButton from '../../components/AppButton';
+import Card from '../../components/Card';
+import HostToolsCard from '../../components/HostToolsCard';
+import PlayerSeatCard from '../../components/PlayerSeatCard';
+import ScreenContainer from '../../components/ScreenContainer';
+import TextField from '../../components/TextField';
+import { ResolvedRoomPlayer, Room, RoomLineup, RoomStatus, SeatKey } from '../../models/cloud';
+import { RootStackParamList } from '../../navigation/types';
+import { typography } from '../../styles/typography';
+import { useAppLanguage } from '../../i18n/useAppLanguage';
+import {
+  addTemporaryPlayer,
+  createInvite,
+  deleteRoomAndFallbackToLocal,
+  getActiveLineup,
+  getBenchPlayers,
+  getDefaultStartSeats,
+  getRoom,
+  listRoomPlayers,
+  mergeTemporaryPlayerIntoRealPlayer,
+  proposeLineupChange,
+  startRoom,
+  subscribeActiveLineup,
+  subscribeRoom,
+  subscribeRoomPlayers,
+} from '../../services/cloud/roomRepo';
+import { ensureSession } from '../../services/cloud/authRepo';
+import theme from '../../theme/theme';
+
+type Props = NativeStackScreenProps<RootStackParamList, 'RoomLobby'>;
+
+const SEAT_KEYS: SeatKey[] = ['0', '1', '2', '3'];
+
+function RoomLobbyScreen({ navigation, route }: Props) {
+  const { t } = useAppLanguage();
+  const roomId = route.params.roomId;
+  const [sessionUid, setSessionUid] = useState('');
+  const [room, setRoom] = useState<Room | null>(null);
+  const [players, setPlayers] = useState<ResolvedRoomPlayer[]>([]);
+  const [lineup, setLineup] = useState<RoomLineup | null>(null);
+  const [hostToolsExpanded, setHostToolsExpanded] = useState(false);
+  const [inviteText, setInviteText] = useState('');
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [selectedSeat, setSelectedSeat] = useState<SeatKey>('0');
+  const [selectedBenchId, setSelectedBenchId] = useState('');
+  const [savingSwap, setSavingSwap] = useState(false);
+  const [tempPlayerName, setTempPlayerName] = useState('');
+  const [addingTempPlayer, setAddingTempPlayer] = useState(false);
+  const [startSetupVisible, setStartSetupVisible] = useState(false);
+  const [startTempNames, setStartTempNames] = useState<string[]>([]);
+  const [startingRoomBusy, setStartingRoomBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [selectedTempMergeId, setSelectedTempMergeId] = useState('');
+  const [selectedRealMergeUid, setSelectedRealMergeUid] = useState('');
+  const [mergingPlayers, setMergingPlayers] = useState(false);
+
+  const refresh = useCallback(async (nextRoomId: string, nextSessionUid = sessionUid) => {
+    const [nextRoom, nextPlayers, nextLineup] = await Promise.all([
+      getRoom(nextRoomId),
+      listRoomPlayers(nextRoomId, nextSessionUid),
+      getActiveLineup(nextRoomId),
+    ]);
+    setRoom(nextRoom);
+    setPlayers(nextPlayers);
+    setLineup(nextLineup);
+  }, [sessionUid]);
+
+  useEffect(() => {
+    let unSubRoom: (() => void) | null = null;
+    let unSubPlayers: (() => void) | null = null;
+    let unSubLineup: (() => void) | null = null;
+
+    const loadPromise = (async () => {
+      const session = await ensureSession('google');
+      setSessionUid(session.uid);
+
+      if (!roomId) {
+        Alert.alert(t('roomLobby.alert.missingRoomTitle'), t('roomLobby.alert.missingRoomMessage'));
+        navigation.goBack();
+        return;
+      }
+
+      await refresh(roomId, session.uid);
+      unSubRoom = subscribeRoom(roomId, setRoom);
+      unSubPlayers = subscribeRoomPlayers(roomId, session.uid, setPlayers);
+      unSubLineup = subscribeActiveLineup(roomId, setLineup);
+    })();
+
+    loadPromise.catch((error) => {
+      Alert.alert(t('roomLobby.alert.initFailedTitle'), String(error));
+    });
+
+    return () => {
+      unSubRoom?.();
+      unSubPlayers?.();
+      unSubLineup?.();
+    };
+  }, [navigation, refresh, roomId, t]);
+
+  const seatLabels = useMemo(
+    () => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')],
+    [t],
+  );
+
+  const playerById = useMemo(() => {
+    const next = new Map<string, ResolvedRoomPlayer>();
+    for (const player of players) {
+      next.set(player.playerId, player);
+    }
+    return next;
+  }, [players]);
+
+  const activeSeatCards = useMemo(() => {
+    return SEAT_KEYS.map((seatKey, index) => {
+      const playerId = lineup?.seats[seatKey] ?? null;
+      const player = playerId ? playerById.get(playerId) ?? null : null;
+      return {
+        key: seatKey,
+        seatLabel: seatLabels[index],
+        displayName: player?.displayName ?? t('roomLobby.seat.openSeat'),
+        avatarUrl: player?.avatarUrl ?? null,
+        isHost: Boolean(player?.isHost),
+        isSelf: Boolean(player?.isSelf),
+        isTemporary: player?.kind === 'temporary',
+        isOccupied: Boolean(player),
+        statusLabel: player
+          ? player.kind === 'temporary'
+            ? t('roomLobby.seat.status.temporary')
+            : t('roomLobby.seat.status.active')
+          : t('roomLobby.seat.status.empty'),
+      };
+    });
+  }, [lineup, playerById, seatLabels, t]);
+
+  const benchPlayers = useMemo(() => getBenchPlayers(players, lineup), [players, lineup]);
+  const hostPlayer = useMemo(() => players.find((player) => player.isHost) ?? null, [players]);
+  const temporaryPlayers = useMemo(() => players.filter((player) => player.kind === 'temporary'), [players]);
+  const realPlayers = useMemo(() => players.filter((player) => player.kind === 'member'), [players]);
+  const roomStatusLabel = useMemo(() => getRoomStatusLabel(t, room?.status ?? 'open'), [room?.status, t]);
+  const isHost = Boolean(room && sessionUid && room.hostUid === sessionUid);
+  const canCreateInvite = Boolean(room && (room.status === 'open' || room.status === 'active'));
+  const canSwap = Boolean(room && lineup && benchPlayers.length > 0);
+  const realPlayerCount = players.filter((player) => player.kind === 'member').length;
+  const totalPlayers = players.length;
+  const missingStartSeats = Math.max(0, 4 - totalPlayers);
+  const canAddTemporaryPlayer = Boolean(
+    room && isHost && totalPlayers < (room.memberCap ?? 8) && room.status !== 'ended' && room.status !== 'archived',
+  );
+
+  useEffect(() => {
+    if (!selectedBenchId) {
+      return;
+    }
+    if (benchPlayers.some((player) => player.playerId === selectedBenchId)) {
+      return;
+    }
+    setSelectedBenchId(benchPlayers[0]?.playerId ?? '');
+  }, [benchPlayers, selectedBenchId]);
+
+  useEffect(() => {
+    if (!selectedTempMergeId) {
+      return;
+    }
+    if (temporaryPlayers.some((player) => player.playerId === selectedTempMergeId)) {
+      return;
+    }
+    setSelectedTempMergeId(temporaryPlayers[0]?.playerId ?? '');
+  }, [selectedTempMergeId, temporaryPlayers]);
+
+  useEffect(() => {
+    if (!selectedRealMergeUid) {
+      return;
+    }
+    if (realPlayers.some((player) => player.uid === selectedRealMergeUid)) {
+      return;
+    }
+    setSelectedRealMergeUid(realPlayers.find((player) => player.uid)?.uid ?? '');
+  }, [realPlayers, selectedRealMergeUid]);
+
+  const handleCreateInvite = useCallback(async () => {
+    if (!room) {
+      return;
+    }
+    setInviteBusy(true);
+    try {
+      const invite = await createInvite(room.roomId);
+      const nextInviteText = [
+        room.title,
+        `${t('roomLobby.hostTools.roomCode')}: ${invite.roomId}`,
+        `${t('roomLobby.hostTools.inviteLink')}: ${invite.deepLink}`,
+      ].join('\n');
+      setInviteText(nextInviteText);
+    } catch (error) {
+      Alert.alert(t('roomLobby.alert.createInviteFailedTitle'), String(error));
+    } finally {
+      setInviteBusy(false);
+    }
+  }, [room, t]);
+
+  const handleShareInvite = useCallback(async () => {
+    if (!inviteText || !room) {
+      return;
+    }
+    try {
+      await Share.share({
+        title: room.title,
+        message: inviteText,
+      });
+    } catch (error) {
+      Alert.alert(t('roomLobby.alert.shareInviteFailedTitle'), String(error));
+    }
+  }, [inviteText, room, t]);
+
+  const handleSwapSeat = useCallback(async () => {
+    if (!room || !lineup || !selectedBenchId) {
+      return;
+    }
+    setSavingSwap(true);
+    try {
+      const nextSeats = {
+        ...lineup.seats,
+        [selectedSeat]: selectedBenchId,
+      } as Record<SeatKey, string>;
+      const result = await proposeLineupChange({
+        roomId: room.roomId,
+        createdByUid: sessionUid,
+        baseVersion: room.currentVersion,
+        nextSeats,
+      });
+      if (!result.ok) {
+        Alert.alert(t('roomLobby.alert.swapFailedTitle'), `${result.code}: ${result.message}`);
+        return;
+      }
+      setSelectedBenchId('');
+      setNotice(t('roomLobby.notice.swapSaved'));
+      await refresh(room.roomId);
+    } catch (error) {
+      Alert.alert(t('roomLobby.alert.swapFailedTitle'), String(error));
+    } finally {
+      setSavingSwap(false);
+    }
+  }, [lineup, refresh, room, selectedBenchId, selectedSeat, sessionUid, t]);
+
+  const handleAddTemporaryPlayer = useCallback(async () => {
+    if (!room || !tempPlayerName.trim()) {
+      return;
+    }
+    setAddingTempPlayer(true);
+    try {
+      await addTemporaryPlayer({
+        roomId: room.roomId,
+        createdByUid: sessionUid,
+        displayName: tempPlayerName,
+      });
+      setTempPlayerName('');
+      setNotice(t('roomLobby.notice.tempAdded'));
+      await refresh(room.roomId);
+    } catch (error) {
+      Alert.alert(t('roomLobby.alert.tempPlayerFailedTitle'), String(error));
+    } finally {
+      setAddingTempPlayer(false);
+    }
+  }, [refresh, room, sessionUid, t, tempPlayerName]);
+
+  const handleMergePlayers = useCallback(() => {
+    if (!room || !selectedTempMergeId || !selectedRealMergeUid) {
+      return;
+    }
+    Alert.alert(
+      t('roomLobby.alert.mergeConfirmTitle'),
+      t('roomLobby.alert.mergeConfirmMessage'),
+      [
+        { text: t('roomLobby.startSetup.cancel'), style: 'cancel' },
+        {
+          text: t('roomLobby.hostTools.mergeAction'),
+          onPress: () => {
+            setMergingPlayers(true);
+            mergeTemporaryPlayerIntoRealPlayer({
+              roomId: room.roomId,
+              tempPlayerId: selectedTempMergeId,
+              targetUid: selectedRealMergeUid,
+              mergedByUid: sessionUid,
+            })
+              .then(async (result) => {
+                if (!result.ok) {
+                  throw new Error(`${result.code}: ${result.message}`);
+                }
+                setNotice(t('roomLobby.notice.tempAdded'));
+                setSelectedTempMergeId('');
+                await refresh(room.roomId);
+              })
+              .catch((error) => {
+                Alert.alert(t('roomLobby.alert.mergeFailedTitle'), String(error));
+              })
+              .finally(() => {
+                setMergingPlayers(false);
+              });
+          },
+        },
+      ],
+    );
+  }, [refresh, room, selectedRealMergeUid, selectedTempMergeId, sessionUid, t]);
+
+  const executeStartRoom = useCallback(async () => {
+    if (!room) {
+      return;
+    }
+    setStartingRoomBusy(true);
+    try {
+      const latestPlayers = await listRoomPlayers(room.roomId, sessionUid);
+      const nextSeats = getDefaultStartSeats(latestPlayers);
+      if (!nextSeats) {
+        setNotice(t('roomLobby.notice.needFourPlayers'));
+        return;
+      }
+      const result = await startRoom({
+        roomId: room.roomId,
+        startedByUid: sessionUid,
+        baseVersion: room.currentVersion,
+        nextSeats,
+      });
+      if (!result.ok) {
+        setNotice(t('roomLobby.notice.startFailed', { code: result.code, message: result.message }));
+        return;
+      }
+      setNotice(t('roomLobby.notice.started'));
+      await refresh(room.roomId);
+      navigation.replace('MultiplayerGameTable', { roomId: room.roomId });
+    } catch (error) {
+      Alert.alert(t('roomLobby.alert.startFailedTitle'), String(error));
+    } finally {
+      setStartingRoomBusy(false);
+      setStartSetupVisible(false);
+      setStartTempNames([]);
+    }
+  }, [navigation, refresh, room, sessionUid, t]);
+
+  const handleConfirmSingleRealFallback = useCallback(() => {
+    if (!room) {
+      return;
+    }
+    Alert.alert(
+      t('roomLobby.alert.singleRealTitle'),
+      t('roomLobby.alert.singleRealMessage'),
+      [
+        { text: t('roomLobby.alert.singleRealStay'), style: 'cancel' },
+        {
+          text: t('roomLobby.alert.singleRealConfirm'),
+          style: 'destructive',
+          onPress: () => {
+            deleteRoomAndFallbackToLocal(room.roomId, sessionUid)
+              .then(() => {
+                navigation.replace('NewGameStepper', {
+                  prefill: {
+                    title: room.title,
+                    currencyCode:
+                      typeof room.rulesSnapshot.currencyCode === 'string'
+                        ? (room.rulesSnapshot.currencyCode as never)
+                        : undefined,
+                    serializedRules:
+                      typeof room.rulesSnapshot.serializedRules === 'string'
+                        ? room.rulesSnapshot.serializedRules
+                        : undefined,
+                  },
+                });
+              })
+              .catch((error) => {
+                Alert.alert(t('roomLobby.alert.startFailedTitle'), String(error));
+              });
+          },
+        },
+      ],
+    );
+  }, [navigation, room, sessionUid, t]);
+
+  const handlePressStart = useCallback(() => {
+    if (!room || !isHost) {
+      return;
+    }
+    if (realPlayerCount <= 1) {
+      handleConfirmSingleRealFallback();
+      return;
+    }
+    if (missingStartSeats > 0) {
+      setStartTempNames(Array.from({ length: missingStartSeats }, () => ''));
+      setStartSetupVisible(true);
+      return;
+    }
+    executeStartRoom().catch(() => {});
+  }, [executeStartRoom, handleConfirmSingleRealFallback, isHost, missingStartSeats, realPlayerCount, room]);
+
+  const handleConfirmStartWithTemps = useCallback(async () => {
+    if (!room) {
+      return;
+    }
+    const trimmedNames = startTempNames.map((value) => value.trim());
+    if (trimmedNames.some((value) => value.length === 0)) {
+      Alert.alert(t('roomLobby.alert.tempPlayerFailedTitle'), t('roomLobby.startSetup.required'));
+      return;
+    }
+
+    setStartingRoomBusy(true);
+    try {
+      for (const displayName of trimmedNames) {
+        await addTemporaryPlayer({
+          roomId: room.roomId,
+          createdByUid: sessionUid,
+          displayName,
+        });
+      }
+      await executeStartRoom();
+    } catch (error) {
+      Alert.alert(t('roomLobby.alert.startFailedTitle'), String(error));
+      setStartingRoomBusy(false);
+    }
+  }, [executeStartRoom, room, sessionUid, startTempNames, t]);
+
+  return (
+    <ScreenContainer>
+      <ScrollView contentContainerStyle={styles.container}>
+        <View style={styles.headerBlock}>
+          <View style={styles.pillRow}>
+            <Text style={styles.statusPill}>{roomStatusLabel}</Text>
+          </View>
+          <Text style={styles.title}>{room?.title ?? t('roomLobby.loading')}</Text>
+          <Text style={styles.subtitle}>{t('roomLobby.headerSubtitle')}</Text>
+        </View>
+
+        <Card style={styles.infoCard}>
+          <Text style={styles.sectionTitle}>{t('roomLobby.info.title')}</Text>
+          <InfoRow label={t('roomLobby.info.host')} value={hostPlayer?.displayName ?? '-'} />
+          <InfoRow label={t('roomLobby.info.memberCount')} value={`${totalPlayers}/${room?.memberCap ?? 8}`} />
+          <InfoRow label={t('roomLobby.info.status')} value={roomStatusLabel} />
+          <InfoRow label={t('roomLobby.info.lineupVersion')} value={room?.activeLineupVersion ? String(room.activeLineupVersion) : '-'} />
+          <InfoRow label={t('roomLobby.info.roomId')} value={room?.roomId ?? '-'} />
+        </Card>
+
+        {isHost && room?.status === 'open' ? (
+          <Card style={styles.startCard}>
+            <Text style={styles.sectionTitle}>{t('roomLobby.start.title')}</Text>
+            <Text style={styles.sectionSubtitle}>
+              {realPlayerCount <= 1
+                ? t('roomLobby.start.singleRealHint')
+                : missingStartSeats > 0
+                ? t('roomLobby.start.fillSeatsHint', { count: missingStartSeats })
+                : t('roomLobby.start.readyHint')}
+            </Text>
+            <AppButton
+              label={startingRoomBusy ? t('roomLobby.start.starting') : t('roomLobby.start.action')}
+              onPress={handlePressStart}
+              disabled={startingRoomBusy}
+            />
+          </Card>
+        ) : null}
+
+        {!isHost && room?.status === 'open' ? (
+          <Card>
+            <Text style={styles.noticeText}>{t('roomLobby.notice.waitingForHost')}</Text>
+          </Card>
+        ) : null}
+
+        {startSetupVisible ? (
+          <Card style={styles.startCard}>
+            <Text style={styles.sectionTitle}>{t('roomLobby.startSetup.title')}</Text>
+            <Text style={styles.sectionSubtitle}>{t('roomLobby.startSetup.subtitle')}</Text>
+            <View style={styles.actionStack}>
+              {startTempNames.map((value, index) => (
+                <TextField
+                  key={`start-temp-${index}`}
+                  label={t('roomLobby.startSetup.playerLabel', { seat: seatLabels[totalPlayers + index] ?? `${index + 1}` })}
+                  value={value}
+                  onChangeText={(text) => {
+                    setStartTempNames((prev) => {
+                      const next = [...prev];
+                      next[index] = text;
+                      return next;
+                    });
+                  }}
+                  placeholder={t('roomLobby.startSetup.placeholder')}
+                />
+              ))}
+              <AppButton
+                label={startingRoomBusy ? t('roomLobby.start.starting') : t('roomLobby.startSetup.confirm')}
+                onPress={() => {
+                  handleConfirmStartWithTemps().catch(() => {});
+                }}
+                disabled={startingRoomBusy}
+              />
+              <AppButton
+                label={t('roomLobby.startSetup.cancel')}
+                onPress={() => {
+                  setStartSetupVisible(false);
+                  setStartTempNames([]);
+                }}
+                variant="secondary"
+                disabled={startingRoomBusy}
+              />
+            </View>
+          </Card>
+        ) : null}
+
+        {room?.status === 'archived' ? (
+          <Card>
+            <Text style={styles.noticeText}>{t('roomLobby.archivedNotice')}</Text>
+          </Card>
+        ) : null}
+
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionTitle}>{t('roomLobby.seats.title')}</Text>
+          <Text style={styles.sectionSubtitle}>{t('roomLobby.seats.subtitle')}</Text>
+          <View style={styles.seatGrid}>
+            {activeSeatCards.map((seat) => (
+              <View key={seat.key} style={styles.seatCell}>
+                <PlayerSeatCard
+                  seatLabel={seat.seatLabel}
+                  displayName={seat.displayName}
+                  avatarUrl={seat.avatarUrl}
+                  isHost={seat.isHost}
+                  isSelf={seat.isSelf}
+                  isTemporary={seat.isTemporary}
+                  isOccupied={seat.isOccupied}
+                  statusLabel={seat.statusLabel}
+                  temporaryLabel={t('roomLobby.member.temporary')}
+                />
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <Card>
+          <Text style={styles.sectionTitle}>{t('roomLobby.bench.title')}</Text>
+          {benchPlayers.length ? (
+            <View style={styles.benchWrap}>
+              {benchPlayers.map((player) => (
+                <View key={player.playerId} style={styles.memberChip}>
+                  <Text style={styles.memberChipText}>{player.displayName}</Text>
+                  {player.kind === 'temporary' ? <Text style={styles.memberChipMeta}>{t('roomLobby.member.temporary')}</Text> : null}
+                  {player.isHost ? <Text style={styles.memberChipMeta}>{t('roomLobby.member.host')}</Text> : null}
+                  {player.isSelf ? <Text style={styles.memberChipMeta}>{t('roomLobby.member.self')}</Text> : null}
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.emptyText}>{t('roomLobby.bench.empty')}</Text>
+          )}
+        </Card>
+
+        {isHost ? (
+          <HostToolsCard
+            title={t('roomLobby.hostTools.title')}
+            subtitle={t('roomLobby.hostTools.subtitle')}
+            expanded={hostToolsExpanded}
+            onToggle={() => setHostToolsExpanded((prev) => !prev)}
+          >
+            <Text style={styles.helperText}>{t('roomLobby.hostTools.inviteHint')}</Text>
+            <View style={styles.actionStack}>
+              <AppButton
+                label={inviteBusy ? t('roomLobby.hostTools.generating') : t('roomLobby.hostTools.createInvite')}
+                onPress={() => {
+                  handleCreateInvite().catch(() => {});
+                }}
+                disabled={!canCreateInvite || inviteBusy}
+              />
+              <AppButton
+                label={t('roomLobby.hostTools.shareInvite')}
+                onPress={() => {
+                  handleShareInvite().catch(() => {});
+                }}
+                disabled={!inviteText}
+                variant="secondary"
+              />
+            </View>
+
+            {inviteText ? (
+              <View style={styles.inviteCard}>
+                <InviteRow label={t('roomLobby.hostTools.roomCode')} value={room?.roomId ?? '-'} />
+                <InviteRow
+                  label={t('roomLobby.hostTools.inviteLink')}
+                  value={inviteText.split('\n').slice(-1)[0]?.replace(`${t('roomLobby.hostTools.inviteLink')}: `, '') ?? '-'}
+                />
+              </View>
+            ) : null}
+
+            <Text style={styles.sectionTitle}>{t('roomLobby.hostTools.addTempTitle')}</Text>
+            <Text style={styles.sectionSubtitle}>{t('roomLobby.hostTools.addTempHint')}</Text>
+            <View style={styles.actionStack}>
+              <TextField
+                label={t('roomLobby.hostTools.addTempLabel')}
+                value={tempPlayerName}
+                onChangeText={setTempPlayerName}
+                placeholder={t('roomLobby.hostTools.addTempPlaceholder')}
+              />
+              <AppButton
+                label={addingTempPlayer ? t('roomLobby.hostTools.addTempAdding') : t('roomLobby.hostTools.addTempAction')}
+                onPress={() => {
+                  handleAddTemporaryPlayer().catch(() => {});
+                }}
+                disabled={!canAddTemporaryPlayer || !tempPlayerName.trim() || addingTempPlayer}
+              />
+            </View>
+
+            <Text style={styles.sectionTitle}>{t('roomLobby.hostTools.swapTitle')}</Text>
+            <Text style={styles.sectionSubtitle}>{t('roomLobby.hostTools.swapHint')}</Text>
+
+            {!lineup ? (
+              <Text style={styles.emptyText}>{t('roomLobby.hostTools.noLineup')}</Text>
+            ) : !canSwap ? (
+              <Text style={styles.emptyText}>{t('roomLobby.hostTools.noBench')}</Text>
+            ) : (
+              <>
+                <View style={styles.selectorBlock}>
+                  <Text style={styles.selectorLabel}>{t('roomLobby.hostTools.swapSeat')}</Text>
+                  <View style={styles.selectorWrap}>
+                    {activeSeatCards.map((seat) => (
+                      <Pressable
+                        key={`seat-${seat.key}`}
+                        onPress={() => setSelectedSeat(seat.key)}
+                        style={({ pressed }) => [
+                          styles.selectorChip,
+                          selectedSeat === seat.key && styles.selectorChipActive,
+                          pressed && styles.selectorChipPressed,
+                        ]}
+                      >
+                        <Text style={[styles.selectorChipText, selectedSeat === seat.key && styles.selectorChipTextActive]}>
+                          {seat.seatLabel}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+
+                <View style={styles.selectorBlock}>
+                  <Text style={styles.selectorLabel}>{t('roomLobby.hostTools.swapPlayer')}</Text>
+                  <View style={styles.selectorWrap}>
+                    {benchPlayers.map((player) => (
+                      <Pressable
+                        key={`bench-${player.playerId}`}
+                        onPress={() => setSelectedBenchId(player.playerId)}
+                        style={({ pressed }) => [
+                          styles.selectorChip,
+                          selectedBenchId === player.playerId && styles.selectorChipActive,
+                          pressed && styles.selectorChipPressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.selectorChipText,
+                            selectedBenchId === player.playerId && styles.selectorChipTextActive,
+                          ]}
+                        >
+                          {player.displayName}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+
+                <AppButton
+                  label={t('roomLobby.hostTools.swapAction')}
+                  onPress={() => {
+                    handleSwapSeat().catch(() => {});
+                  }}
+                  disabled={!selectedBenchId || savingSwap}
+                />
+              </>
+            )}
+
+            <Text style={styles.sectionTitle}>{t('roomLobby.hostTools.mergeTitle')}</Text>
+            <Text style={styles.sectionSubtitle}>{t('roomLobby.hostTools.mergeHint')}</Text>
+            {!temporaryPlayers.length ? (
+              <Text style={styles.emptyText}>{t('roomLobby.hostTools.noTempPlayers')}</Text>
+            ) : realPlayers.length < 2 ? (
+              <Text style={styles.emptyText}>{t('roomLobby.hostTools.noRealPlayers')}</Text>
+            ) : (
+              <>
+                <View style={styles.selectorBlock}>
+                  <Text style={styles.selectorLabel}>{t('roomLobby.hostTools.mergeTemp')}</Text>
+                  <View style={styles.selectorWrap}>
+                    {temporaryPlayers.map((player) => (
+                      <Pressable
+                        key={`temp-${player.playerId}`}
+                        onPress={() => setSelectedTempMergeId(player.playerId)}
+                        style={({ pressed }) => [
+                          styles.selectorChip,
+                          selectedTempMergeId === player.playerId && styles.selectorChipActive,
+                          pressed && styles.selectorChipPressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.selectorChipText,
+                            selectedTempMergeId === player.playerId && styles.selectorChipTextActive,
+                          ]}
+                        >
+                          {player.displayName}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+
+                <View style={styles.selectorBlock}>
+                  <Text style={styles.selectorLabel}>{t('roomLobby.hostTools.mergeReal')}</Text>
+                  <View style={styles.selectorWrap}>
+                    {realPlayers
+                      .filter((player) => !player.isHost || realPlayers.length > 1)
+                      .map((player) => (
+                        <Pressable
+                          key={`real-${player.playerId}`}
+                          onPress={() => setSelectedRealMergeUid(player.uid ?? '')}
+                          style={({ pressed }) => [
+                            styles.selectorChip,
+                            selectedRealMergeUid === player.uid && styles.selectorChipActive,
+                            pressed && styles.selectorChipPressed,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.selectorChipText,
+                              selectedRealMergeUid === player.uid && styles.selectorChipTextActive,
+                            ]}
+                          >
+                            {player.displayName}
+                          </Text>
+                        </Pressable>
+                      ))}
+                  </View>
+                </View>
+
+                <AppButton
+                  label={t('roomLobby.hostTools.mergeAction')}
+                  onPress={handleMergePlayers}
+                  disabled={!selectedTempMergeId || !selectedRealMergeUid || mergingPlayers}
+                  variant="secondary"
+                />
+              </>
+            )}
+          </HostToolsCard>
+        ) : null}
+
+        {notice ? (
+          <Card>
+            <Text style={styles.noticeText}>{notice}</Text>
+          </Card>
+        ) : null}
+
+        <View style={styles.footerActions}>
+          <AppButton
+            label={t('roomLobby.enterTable')}
+            onPress={() => navigation.navigate('MultiplayerGameTable', { roomId })}
+            disabled={!room || room.status !== 'active'}
+          />
+          <AppButton
+            label={t('roomLobby.viewProfile')}
+            onPress={() => navigation.navigate('Profile')}
+            variant="secondary"
+          />
+        </View>
+      </ScrollView>
+    </ScreenContainer>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue}>{value}</Text>
+    </View>
+  );
+}
+
+function InviteRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.inviteRow}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.inviteValue}>{value}</Text>
+    </View>
+  );
+}
+
+function getRoomStatusLabel(t: (...args: any[]) => string, status: RoomStatus): string {
+  if (status === 'active') {
+    return t('cloud.status.active' as never);
+  }
+  if (status === 'ended') {
+    return t('cloud.status.ended' as never);
+  }
+  if (status === 'archived') {
+    return t('cloud.status.archived' as never);
+  }
+  return t('cloud.status.open' as never);
+}
+
+const styles = StyleSheet.create({
+  container: {
+    paddingBottom: theme.spacing.xl,
+    gap: theme.spacing.md,
+  },
+  headerBlock: {
+    gap: 8,
+    paddingTop: 4,
+  },
+  pillRow: {
+    flexDirection: 'row',
+  },
+  statusPill: {
+    ...typography.caption,
+    color: theme.colors.primaryDark,
+    backgroundColor: theme.colors.primaryLight,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    overflow: 'hidden',
+  },
+  title: {
+    ...typography.subtitle,
+    fontSize: theme.fontSize.lg,
+    color: theme.colors.textPrimary,
+  },
+  subtitle: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+  },
+  infoCard: {
+    gap: theme.spacing.sm,
+  },
+  startCard: {
+    gap: theme.spacing.sm,
+  },
+  sectionBlock: {
+    gap: theme.spacing.sm,
+  },
+  sectionTitle: {
+    ...typography.subtitle,
+    color: theme.colors.textPrimary,
+  },
+  sectionSubtitle: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: theme.spacing.md,
+  },
+  infoLabel: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+  },
+  infoValue: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    flexShrink: 1,
+    textAlign: 'right',
+  },
+  seatGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -theme.spacing.xs,
+    rowGap: theme.spacing.sm,
+  },
+  seatCell: {
+    width: '50%',
+    paddingHorizontal: theme.spacing.xs,
+  },
+  benchWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.sm,
+  },
+  memberChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#F5F1EA',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  memberChipText: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+  },
+  memberChipMeta: {
+    ...typography.caption,
+    color: theme.colors.primaryDark,
+  },
+  helperText: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+  },
+  actionStack: {
+    gap: theme.spacing.sm,
+  },
+  inviteCard: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.md,
+    backgroundColor: '#FAF8F4',
+    padding: theme.spacing.md,
+    gap: theme.spacing.sm,
+  },
+  inviteRow: {
+    gap: 4,
+  },
+  inviteValue: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+  },
+  selectorBlock: {
+    gap: theme.spacing.xs,
+  },
+  selectorLabel: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+  },
+  selectorWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.sm,
+  },
+  selectorChip: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: theme.colors.surface,
+  },
+  selectorChipActive: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primaryLight,
+  },
+  selectorChipPressed: {
+    opacity: 0.9,
+  },
+  selectorChipText: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+  },
+  selectorChipTextActive: {
+    color: theme.colors.primaryDark,
+    fontWeight: '700',
+  },
+  emptyText: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+  },
+  noticeText: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+  },
+  footerActions: {
+    gap: theme.spacing.sm,
+  },
+});
+
+export default RoomLobbyScreen;

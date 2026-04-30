@@ -1,5 +1,4 @@
-// @ts-ignore
-import SQLite from 'react-native-sqlite-storage';
+import { SQLiteDatabase } from 'react-native-sqlite-storage';
 import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 
 const TABLES = [
@@ -43,15 +42,28 @@ const TABLES = [
     computedJson TEXT,
     createdAt INTEGER
   );`,
+  `CREATE TABLE IF NOT EXISTS cloud_archives(
+    roomId TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    endedAt INTEGER NOT NULL,
+    archivedFromCloudAt INTEGER NOT NULL,
+    expiresAt INTEGER NULL,
+    archiveVersion INTEGER NOT NULL DEFAULT 1,
+    memberCount INTEGER NOT NULL DEFAULT 0,
+    handCount INTEGER NOT NULL DEFAULT 0,
+    payloadJson TEXT NOT NULL
+  );`,
 ];
 
 const INDICES = [
   'CREATE INDEX IF NOT EXISTS idx_hands_game_handIndex ON hands(gameId, handIndex);',
   'CREATE INDEX IF NOT EXISTS idx_games_createdAt ON games(createdAt);',
   'CREATE INDEX IF NOT EXISTS idx_players_game ON players(gameId);',
+  'CREATE INDEX IF NOT EXISTS idx_cloud_archives_createdAt ON cloud_archives(createdAt DESC);',
 ];
 
-export async function initializeSchema(db: SQLite.SQLiteDatabase): Promise<void> {
+export async function initializeSchema(db: SQLiteDatabase): Promise<void> {
   await tryPragma(db, 'PRAGMA foreign_keys = ON;');
   await tryPragma(db, 'PRAGMA journal_mode = WAL;');
 
@@ -67,6 +79,7 @@ export async function initializeSchema(db: SQLite.SQLiteDatabase): Promise<void>
   await ensureColumn(db, 'games', 'seatRotationOffset', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'games', 'gameState', "TEXT NOT NULL DEFAULT 'draft'");
   await ensureColumn(db, 'games', 'currentRoundLabelZh', 'TEXT NULL');
+  await ensureColumn(db, 'games', 'languageOverride', 'TEXT NULL');
   await ensureColumn(db, 'games', 'endedAt', 'INTEGER NULL');
   await ensureColumn(db, 'games', 'handsCount', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'games', 'resultStatus', 'TEXT NULL');
@@ -79,6 +92,11 @@ export async function initializeSchema(db: SQLite.SQLiteDatabase): Promise<void>
   await ensureColumn(db, 'hands', 'winnerSeatIndex', 'INTEGER NULL');
   await ensureColumn(db, 'hands', 'deltasJson', 'TEXT NULL');
   await ensureColumn(db, 'hands', 'nextRoundLabelZh', 'TEXT NULL');
+  await ensureColumn(db, 'cloud_archives', 'expiresAt', 'INTEGER NULL');
+  await ensureColumn(db, 'cloud_archives', 'archiveVersion', 'INTEGER NOT NULL DEFAULT 1');
+  await ensureColumn(db, 'cloud_archives', 'memberCount', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'cloud_archives', 'handCount', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'cloud_archives', 'payloadJson', 'TEXT NOT NULL DEFAULT "{}"');
   await ensureBackfillDefaults(db);
 
   for (const statement of INDICES) {
@@ -90,7 +108,7 @@ export async function initializeSchema(db: SQLite.SQLiteDatabase): Promise<void>
 }
 
 async function ensureColumn(
-  db: SQLite.SQLiteDatabase,
+  db: SQLiteDatabase,
   table: string,
   column: string,
   definition: string,
@@ -105,7 +123,7 @@ async function ensureColumn(
   await db.executeSql(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
 }
 
-async function tryPragma(db: SQLite.SQLiteDatabase, statement: string) {
+async function tryPragma(db: SQLiteDatabase, statement: string) {
   try {
     await db.executeSql(statement);
   } catch (error) {
@@ -113,7 +131,7 @@ async function tryPragma(db: SQLite.SQLiteDatabase, statement: string) {
   }
 }
 
-async function ensureBackfillDefaults(db: SQLite.SQLiteDatabase) {
+async function ensureBackfillDefaults(db: SQLiteDatabase) {
   try {
     // Safety net for legacy rows. Idempotent and safe on repeated launches.
     await db.executeSql('UPDATE games SET startingDealerSeatIndex = 0 WHERE startingDealerSeatIndex IS NULL;');

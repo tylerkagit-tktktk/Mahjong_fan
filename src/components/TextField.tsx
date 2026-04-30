@@ -1,10 +1,9 @@
 import { Ref } from 'react';
 import {
-  NativeSyntheticEvent,
   StyleSheet,
   Text,
   TextInput,
-  TextInputFocusEventData,
+  TextInputProps,
   View,
   ViewStyle,
 } from 'react-native';
@@ -17,7 +16,8 @@ type TextFieldProps = {
   placeholder?: string;
   style?: ViewStyle;
   inputRef?: Ref<TextInput>;
-  onFocus?: (event: NativeSyntheticEvent<TextInputFocusEventData>) => void;
+  onFocus?: TextInputProps['onFocus'];
+  editable?: boolean;
 };
 
 function TextField({
@@ -28,6 +28,7 @@ function TextField({
   style,
   inputRef,
   onFocus,
+  editable = true,
 }: TextFieldProps) {
   return (
     <View style={[styles.container, style]}>
@@ -40,6 +41,7 @@ function TextField({
         onFocus={onFocus}
         placeholder={placeholder}
         placeholderTextColor={theme.colors.textSecondary}
+        editable={editable}
       />
     </View>
   );

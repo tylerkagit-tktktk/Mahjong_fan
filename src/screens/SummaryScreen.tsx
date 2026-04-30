@@ -45,7 +45,7 @@ function SummaryScreen({ navigation, route }: Props) {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <Text style={styles.title}>{title || t('summary.title')}</Text>
       <Text style={styles.subtitle}>{endedAt ? t('summary.ended') : t('summary.overview')}</Text>
-      <AppButton label={t('common.back')} onPress={() => navigation.replace('Tabs')} />
+      <AppButton label={t('common.back')} onPress={() => navigation.replace('Home')} />
     </SafeAreaView>
   );
 }

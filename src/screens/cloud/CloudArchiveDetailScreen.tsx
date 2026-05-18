@@ -168,10 +168,14 @@ function buildNameMap(payload: CloudArchivePayload): Map<string, string> {
 function getMostCount(
   counts: Record<string, number>,
   nameById: Map<string, string>,
+  sortLocale: string,
 ): { name: string; count: number } | null {
   const best = Object.entries(counts)
     .filter(([, count]) => count > 0)
-    .sort(([aId, aCount], [bId, bCount]) => bCount - aCount || (nameById.get(aId) ?? aId).localeCompare(nameById.get(bId) ?? bId, 'zh-Hant'))[0];
+    .sort(
+      ([aId, aCount], [bId, bCount]) =>
+        bCount - aCount || (nameById.get(aId) ?? aId).localeCompare(nameById.get(bId) ?? bId, sortLocale),
+    )[0];
   if (!best) {
     return null;
   }
@@ -179,7 +183,7 @@ function getMostCount(
   return { name: nameById.get(playerId) ?? playerId, count };
 }
 
-function buildArchiveDetails(payload: CloudArchivePayload, rules: RulesV1): ArchiveDetails {
+function buildArchiveDetails(payload: CloudArchivePayload, rules: RulesV1, sortLocale: string): ArchiveDetails {
   const sortedHands = [...payload.hands].sort((a, b) => a.handIndex - b.handIndex);
   const sortedLineups = [...payload.lineups].sort(
     (a, b) => a.effectiveFromHandIndex - b.effectiveFromHandIndex || a.lineupVersion - b.lineupVersion,
@@ -269,7 +273,7 @@ function buildArchiveDetails(payload: CloudArchivePayload, rules: RulesV1): Arch
       name: nameById.get(playerId) ?? playerId,
       total: toAmountFromQ(totalQ),
     }))
-    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'zh-Hant'));
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, sortLocale));
 
   const roundIndex = Math.floor(dealerAdvanceCount / 4) + 1;
   return {
@@ -284,8 +288,8 @@ function buildArchiveDetails(payload: CloudArchivePayload, rules: RulesV1): Arch
       winsByPlayerId,
       zimoByPlayerId,
       discardByPlayerId,
-      mostDiscarder: getMostCount(discardByPlayerId, nameById),
-      mostZimo: getMostCount(zimoByPlayerId, nameById),
+      mostDiscarder: getMostCount(discardByPlayerId, nameById, sortLocale),
+      mostZimo: getMostCount(zimoByPlayerId, nameById, sortLocale),
     },
     handDisplays,
   };
@@ -325,7 +329,7 @@ function getVariantLabel(rules: RulesV1, t: (key: TranslationKey) => string): st
 }
 
 function CloudArchiveDetailScreen({ route, navigation }: Props) {
-  const { t } = useAppLanguage();
+  const { language, t } = useAppLanguage();
   const { roomId } = route.params;
   const [payload, setPayload] = useState<CloudArchivePayload | null>(null);
   const [error, setError] = useState('');
@@ -363,7 +367,7 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
     [payload?.room.rulesSnapshot.serializedRules],
   );
 
-  const details = useMemo(() => (payload ? buildArchiveDetails(payload, rules) : null), [payload, rules]);
+  const details = useMemo(() => (payload ? buildArchiveDetails(payload, rules, language) : null), [language, payload, rules]);
   const summary = details?.summary ?? null;
   const stats = details?.stats ?? null;
   const currencySymbol = rules.currencySymbol || '';

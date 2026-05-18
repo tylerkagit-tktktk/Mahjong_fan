@@ -189,5 +189,16 @@ describe('CloudArchiveDetailScreen', () => {
     expect(text).toContain('銃制：全銃');
     expect(text).toContain('注碼：二五雞');
     expect(text).toContain('爆棚：10');
+    expect(text).toContain('統計');
+    expect(text).toContain('手數：1');
+    expect(text).toContain('流局：0');
+    expect(text).toContain('32：食糊 1 ｜ 自摸 0 ｜ 出銃 0');
+    expect(text).toContain('12232：食糊 0 ｜ 自摸 0 ｜ 出銃 1');
+    expect(text).toContain('最多出銃：12232 (1)');
+    expect(text).toContain('全部牌局');
+    expect(text).toContain('全部');
+    expect(text).toContain('食糊');
+    expect(text).toContain('流局');
+    expect(text).toContain('分享');
   });
 });

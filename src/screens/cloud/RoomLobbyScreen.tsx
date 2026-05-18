@@ -190,7 +190,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
       const nextInviteText = [
         room.title,
         `${t('roomLobby.hostTools.roomCode')}: ${invite.roomId}`,
-        `${t('roomLobby.hostTools.inviteLink')}: ${invite.deepLink}`,
+        t('roomLobby.hostTools.localInviteNotice'),
       ].join('\n');
       setInviteText(nextInviteText);
     } catch (error) {
@@ -578,8 +578,8 @@ function RoomLobbyScreen({ navigation, route }: Props) {
               <View style={styles.inviteCard}>
                 <InviteRow label={t('roomLobby.hostTools.roomCode')} value={room?.roomId ?? '-'} />
                 <InviteRow
-                  label={t('roomLobby.hostTools.inviteLink')}
-                  value={inviteText.split('\n').slice(-1)[0]?.replace(`${t('roomLobby.hostTools.inviteLink')}: `, '') ?? '-'}
+                  label={t('roomLobby.hostTools.localInviteNoticeLabel')}
+                  value={t('roomLobby.hostTools.localInviteNotice')}
                 />
               </View>
             ) : null}

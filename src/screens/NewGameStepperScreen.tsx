@@ -893,7 +893,11 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         [
           createdRoom.title,
           `${translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}: ${invite.roomId}`,
-          `${translateWithFallback(t, 'roomLobby.hostTools.inviteLink', '邀請連結')}: ${invite.deepLink}`,
+          translateWithFallback(
+            t,
+            'roomLobby.hostTools.localInviteNotice',
+            '目前為本機開發版，跨機邀請連結稍後支援。',
+          ),
         ].join('\n'),
       );
       setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);

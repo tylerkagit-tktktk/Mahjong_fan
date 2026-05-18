@@ -1,6 +1,14 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+
+def googleServicesFile = file("google-services.json")
+if (!googleServicesFile.exists()) {
+    throw new GradleException(
+        "Missing Firebase config: android/app/google-services.json. " +
+        "This file is ignored for public-repo safety; copy your local Firebase config into android/app/ before building Android."
+    )
+}
 apply plugin: "com.google.gms.google-services"
 
 /**

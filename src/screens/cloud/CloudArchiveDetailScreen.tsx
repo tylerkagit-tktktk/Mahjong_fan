@@ -1,6 +1,6 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import AppButton from '../../components/AppButton';
 import Card from '../../components/Card';
 import ScreenContainer from '../../components/ScreenContainer';
@@ -28,6 +28,32 @@ type ArchiveSummary = {
   handCount: number;
   rankedPlayers: PlayerTotal[];
 };
+
+type ArchiveStats = {
+  draws: number;
+  winsByPlayerId: Record<string, number>;
+  zimoByPlayerId: Record<string, number>;
+  discardByPlayerId: Record<string, number>;
+  mostDiscarder: { name: string; count: number } | null;
+  mostZimo: { name: string; count: number } | null;
+};
+
+type ArchiveHandDisplay = {
+  hand: HandLog;
+  roundLabel: string;
+  windLabel: string;
+  winnerName: string;
+  discarderName: string | null;
+  deltasQ: number[] | null;
+};
+
+type ArchiveDetails = {
+  summary: ArchiveSummary;
+  stats: ArchiveStats;
+  handDisplays: ArchiveHandDisplay[];
+};
+
+type HandFilter = 'all' | 'wins' | 'draws';
 
 const SEAT_KEYS: SeatKey[] = ['0', '1', '2', '3'];
 const SEAT_GLYPHS = ['東', '南', '西', '北'] as const;
@@ -84,6 +110,13 @@ function getRankPrefix(index: number): string {
   return `${index + 1}.`;
 }
 
+function formatHighlight(value: { name: string; count: number } | null): string {
+  if (!value) {
+    return '—';
+  }
+  return `${value.name} (${value.count})`;
+}
+
 function getCloudRoundLabel(roundIndex: number, dealerSeatIndex: number): string {
   const roundWind = SEAT_GLYPHS[(roundIndex - 1) % SEAT_GLYPHS.length] ?? '東';
   const dealerWind = SEAT_GLYPHS[dealerSeatIndex] ?? '東';
@@ -132,13 +165,32 @@ function buildNameMap(payload: CloudArchivePayload): Map<string, string> {
   return map;
 }
 
-function buildArchiveSummary(payload: CloudArchivePayload, rules: RulesV1): ArchiveSummary {
+function getMostCount(
+  counts: Record<string, number>,
+  nameById: Map<string, string>,
+): { name: string; count: number } | null {
+  const best = Object.entries(counts)
+    .filter(([, count]) => count > 0)
+    .sort(([aId, aCount], [bId, bCount]) => bCount - aCount || (nameById.get(aId) ?? aId).localeCompare(nameById.get(bId) ?? bId, 'zh-Hant'))[0];
+  if (!best) {
+    return null;
+  }
+  const [playerId, count] = best;
+  return { name: nameById.get(playerId) ?? playerId, count };
+}
+
+function buildArchiveDetails(payload: CloudArchivePayload, rules: RulesV1): ArchiveDetails {
   const sortedHands = [...payload.hands].sort((a, b) => a.handIndex - b.handIndex);
   const sortedLineups = [...payload.lineups].sort(
     (a, b) => a.effectiveFromHandIndex - b.effectiveFromHandIndex || a.lineupVersion - b.lineupVersion,
   );
   const nameById = buildNameMap(payload);
   const totalsQByPlayerId: Record<string, number> = {};
+  const winsByPlayerId: Record<string, number> = {};
+  const zimoByPlayerId: Record<string, number> = {};
+  const discardByPlayerId: Record<string, number> = {};
+  const handDisplays: ArchiveHandDisplay[] = [];
+  let draws = 0;
   let dealerSeatIndex = 0;
   let dealerAdvanceCount = 0;
 
@@ -153,6 +205,10 @@ function buildArchiveSummary(payload: CloudArchivePayload, rules: RulesV1): Arch
 
   for (const hand of sortedHands) {
     const lineup = getLineupForHand(sortedLineups, hand);
+    const roundIndex = Math.floor(dealerAdvanceCount / 4) + 1;
+    let deltasQ: number[] | null = null;
+    let winnerName = hand.winnerPlayerId ? nameById.get(hand.winnerPlayerId) ?? hand.winnerPlayerId : '—';
+    let discarderName = hand.discarderPlayerId ? nameById.get(hand.discarderPlayerId) ?? hand.discarderPlayerId : null;
 
     if (hand.type !== 'draw' && lineup && hand.winnerPlayerId) {
       const seatPlayerIds = getSeatPlayerIds(lineup);
@@ -170,6 +226,14 @@ function buildArchiveSummary(payload: CloudArchivePayload, rules: RulesV1): Arch
           winnerSeatIndex,
           discarderSeatIndex: hand.type === 'discard' ? discarderSeatIndex : null,
         });
+        deltasQ = settlement.deltasQ;
+        winsByPlayerId[hand.winnerPlayerId] = (winsByPlayerId[hand.winnerPlayerId] ?? 0) + 1;
+        if (hand.type === 'zimo') {
+          zimoByPlayerId[hand.winnerPlayerId] = (zimoByPlayerId[hand.winnerPlayerId] ?? 0) + 1;
+        }
+        if (hand.type === 'discard' && hand.discarderPlayerId) {
+          discardByPlayerId[hand.discarderPlayerId] = (discardByPlayerId[hand.discarderPlayerId] ?? 0) + 1;
+        }
 
         SEAT_KEYS.forEach((seatKey, seatIndex) => {
           const playerId = lineup.seats[seatKey];
@@ -179,7 +243,18 @@ function buildArchiveSummary(payload: CloudArchivePayload, rules: RulesV1): Arch
           totalsQByPlayerId[playerId] = (totalsQByPlayerId[playerId] ?? 0) + settlement.deltasQ[seatIndex];
         });
       }
+    } else if (hand.type === 'draw') {
+      draws += 1;
     }
+
+    handDisplays.push({
+      hand,
+      roundLabel: getCloudRoundLabel(roundIndex, dealerSeatIndex),
+      windLabel: getCloudRoundLabel(roundIndex, dealerSeatIndex).slice(0, 2),
+      winnerName,
+      discarderName,
+      deltasQ,
+    });
 
     const nextDealerSeatIndex = getDealerSeatIndexAfterHand(dealerSeatIndex, hand, lineup);
     if (nextDealerSeatIndex !== dealerSeatIndex) {
@@ -198,11 +273,45 @@ function buildArchiveSummary(payload: CloudArchivePayload, rules: RulesV1): Arch
 
   const roundIndex = Math.floor(dealerAdvanceCount / 4) + 1;
   return {
-    roundLabel: getCloudRoundLabel(roundIndex, dealerSeatIndex),
-    roundIndex,
-    handCount: sortedHands.length,
-    rankedPlayers,
+    summary: {
+      roundLabel: getCloudRoundLabel(roundIndex, dealerSeatIndex),
+      roundIndex,
+      handCount: sortedHands.length,
+      rankedPlayers,
+    },
+    stats: {
+      draws,
+      winsByPlayerId,
+      zimoByPlayerId,
+      discardByPlayerId,
+      mostDiscarder: getMostCount(discardByPlayerId, nameById),
+      mostZimo: getMostCount(zimoByPlayerId, nameById),
+    },
+    handDisplays,
   };
+}
+
+function getArchiveHandSummary(
+  hand: HandLog,
+  winnerName: string,
+  discarderName: string | null,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
+  if (hand.type === 'draw') {
+    return translateWithFallback(t, 'game.detail.hand.summary.draw', '流局');
+  }
+  const fanValue = hand.fan === null || hand.fan === undefined ? '—' : String(hand.fan);
+  if (hand.type === 'zimo') {
+    return translateWithFallback(t, 'game.detail.hand.summary.zimo', '{name} 自摸 {fan} 番', {
+      name: winnerName || '—',
+      fan: fanValue,
+    });
+  }
+  return translateWithFallback(t, 'game.detail.hand.summary.discard', '{loser} 出銃比 {winner} {fan} 番', {
+    loser: discarderName || '—',
+    winner: winnerName || '—',
+    fan: fanValue,
+  });
 }
 
 function getVariantLabel(rules: RulesV1, t: (key: TranslationKey) => string): string {
@@ -220,6 +329,8 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
   const { roomId } = route.params;
   const [payload, setPayload] = useState<CloudArchivePayload | null>(null);
   const [error, setError] = useState('');
+  const [handFilter, setHandFilter] = useState<HandFilter>('all');
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     try {
@@ -252,11 +363,57 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
     [payload?.room.rulesSnapshot.serializedRules],
   );
 
-  const summary = useMemo(() => (payload ? buildArchiveSummary(payload, rules) : null), [payload, rules]);
+  const details = useMemo(() => (payload ? buildArchiveDetails(payload, rules) : null), [payload, rules]);
+  const summary = details?.summary ?? null;
+  const stats = details?.stats ?? null;
   const currencySymbol = rules.currencySymbol || '';
+  const filteredHandDisplays = useMemo(() => {
+    const displays = details?.handDisplays ?? [];
+    if (handFilter === 'wins') {
+      return displays.filter((entry) => entry.hand.type !== 'draw');
+    }
+    if (handFilter === 'draws') {
+      return displays.filter((entry) => entry.hand.type === 'draw');
+    }
+    return displays;
+  }, [details?.handDisplays, handFilter]);
+  const handSections = useMemo(() => {
+    const sections = new Map<string, ArchiveHandDisplay[]>();
+    filteredHandDisplays.forEach((entry) => {
+      const list = sections.get(entry.windLabel) ?? [];
+      list.push(entry);
+      sections.set(entry.windLabel, list);
+    });
+    return Array.from(sections.entries()).map(([title, data]) => ({ title, data }));
+  }, [filteredHandDisplays]);
+  const filterOptions: Array<{ key: HandFilter; label: string }> = useMemo(
+    () => [
+      { key: 'all', label: translateWithFallback(t, 'game.detail.hands.filter.all', '全部') },
+      { key: 'wins', label: translateWithFallback(t, 'game.detail.hands.filter.wins', '食糊') },
+      { key: 'draws', label: translateWithFallback(t, 'game.detail.hands.filter.draws', '流局') },
+    ],
+    [t],
+  );
   const handCountText = summary
     ? translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', { count: summary.handCount })
     : '';
+
+  const handleShare = useCallback(async () => {
+    if (!payload || !summary) {
+      return;
+    }
+    const rankingLines = summary.rankedPlayers.map(
+      (player, index) => `${index + 1}. ${player.name} ${formatSignedMoney(player.total, currencySymbol)}`,
+    );
+    const message = [
+      payload.room.title,
+      `${summary.roundLabel} · ${handCountText}`,
+      '',
+      `${translateWithFallback(t, 'game.detail.players.title', '玩家排名')}:`,
+      ...rankingLines,
+    ].join('\n');
+    await Share.share({ title: payload.room.title, message });
+  }, [currencySymbol, handCountText, payload, summary, t]);
 
   if (!payload) {
     return (
@@ -278,8 +435,8 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
   }
 
   return (
-    <ScreenContainer>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Card style={styles.card}>
           <View style={styles.heroTopRow}>
             <Text style={styles.heroLabel}>
@@ -306,7 +463,9 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
             summary.rankedPlayers.map((player, index) => (
               <View key={`rank-${player.playerId}`} style={styles.playerRow}>
                 <Text style={styles.playerRank}>{getRankPrefix(index)}</Text>
-                <Text style={styles.playerName}>{player.name}</Text>
+                <View style={styles.playerMetaWrap}>
+                  <Text style={styles.playerName}>{player.name}</Text>
+                </View>
                 <Text style={styles.playerTotal}>{formatSignedMoney(player.total, currencySymbol)}</Text>
               </View>
             ))
@@ -365,6 +524,131 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
             </>
           ) : null}
         </Card>
+
+        <Card style={styles.card}>
+          <Text style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.stats.title', '統計')}</Text>
+          <Text style={styles.statsHeadline}>
+            {translateWithFallback(t, 'game.detail.stats.hands', '手數')}：{summary?.handCount ?? 0}
+            {'  ·  '}
+            {translateWithFallback(t, 'game.detail.stats.draws', '流局')}：{stats?.draws ?? 0}
+          </Text>
+          {summary?.rankedPlayers.map((player) => (
+            <Text key={`stats-${player.playerId}`} style={styles.statsPlayerLine}>
+              {player.name}：
+              {translateWithFallback(t, 'game.detail.stats.wins', '食糊')} {stats?.winsByPlayerId[player.playerId] ?? 0}
+              {' ｜ '}
+              {translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} {stats?.zimoByPlayerId[player.playerId] ?? 0}
+              {' ｜ '}
+              {translateWithFallback(t, 'game.detail.stats.discards', '出銃')} {stats?.discardByPlayerId[player.playerId] ?? 0}
+            </Text>
+          ))}
+          <Text style={styles.statsHighlightLine}>
+            {translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}：
+            {formatHighlight(stats?.mostDiscarder ?? null)}
+          </Text>
+          <Text style={styles.statsHighlightLine}>
+            {translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}：
+            {formatHighlight(stats?.mostZimo ?? null)}
+          </Text>
+        </Card>
+
+        <Card style={styles.card}>
+          <Text style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.hands.title', '全部牌局')}</Text>
+          <View style={styles.filterWrap}>
+            {filterOptions.map((option) => {
+              const selected = handFilter === option.key;
+              return (
+                <Pressable
+                  key={option.key}
+                  onPress={() => {
+                    setHandFilter(option.key);
+                    setCollapsedSections({});
+                  }}
+                  style={[styles.filterChip, selected && styles.filterChipActive]}
+                >
+                  <Text style={[styles.filterChipText, selected && styles.filterChipTextActive]}>{option.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {handSections.length ? (
+            handSections.map((section) => {
+              const collapsed = collapsedSections[section.title] !== false;
+              return (
+                <View key={`section-${section.title}`} style={styles.handSection}>
+                  <Pressable
+                    onPress={() => {
+                      setCollapsedSections((prev) => ({ ...prev, [section.title]: collapsed ? false : true }));
+                    }}
+                    style={styles.windSectionHeader}
+                  >
+                    <Text style={styles.windSectionTitle}>{section.title}</Text>
+                    <Text style={styles.windSectionToggle}>{collapsed ? '＋' : '－'}</Text>
+                  </Pressable>
+                  {!collapsed
+                    ? section.data.map((entry) => (
+                        <View key={entry.hand.handId} style={styles.handRow}>
+                          <View style={styles.handTopRow}>
+                            <Text style={styles.handIndex}>#{entry.hand.handIndex + 1}</Text>
+                            <Text style={styles.handRound}>{entry.roundLabel}</Text>
+                          </View>
+                          <View style={styles.handOutcomeRow}>
+                            <Text style={styles.handOutcomeIcon}>
+                              {entry.hand.type === 'draw' ? '⦿' : entry.hand.type === 'zimo' ? '◎' : '•'}
+                            </Text>
+                            <Text style={styles.handOutcomeText}>
+                              {entry.hand.type === 'draw'
+                                ? translateWithFallback(t, 'game.detail.hands.filter.draws', '流局')
+                                : entry.hand.type === 'zimo'
+                                  ? translateWithFallback(t, 'game.detail.stats.zimo', '自摸')
+                                  : translateWithFallback(t, 'game.detail.stats.discards', '出銃')}
+                            </Text>
+                            {entry.hand.type === 'draw' && entry.hand.dealerAction ? (
+                              <View style={styles.dealerActionBadge}>
+                                <Text style={styles.dealerActionText}>
+                                  {entry.hand.dealerAction === 'stick'
+                                    ? translateWithFallback(t, 'game.detail.hand.dealerAction.stick', '番莊')
+                                    : translateWithFallback(t, 'game.detail.hand.dealerAction.pass', '過莊')}
+                                </Text>
+                              </View>
+                            ) : null}
+                          </View>
+                          <Text style={styles.handMetaText}>
+                            {getArchiveHandSummary(entry.hand, entry.winnerName, entry.discarderName, t)}
+                          </Text>
+                          <View style={styles.deltaChipsRow}>
+                            {SEAT_GLYPHS.map((seat, seatIndex) => (
+                              <View key={`${entry.hand.handId}-delta-${seat}`} style={styles.deltaChip}>
+                                <Text style={styles.deltaChipSeat}>{seat}</Text>
+                                <Text style={styles.deltaChipValue}>
+                                  {entry.deltasQ
+                                    ? formatSignedMoney(toAmountFromQ(entry.deltasQ[seatIndex] ?? 0), currencySymbol)
+                                    : '—'}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      ))
+                    : null}
+                </View>
+              );
+            })
+          ) : (
+            <Text style={styles.metaText}>—</Text>
+          )}
+        </Card>
+
+        <View style={styles.actionsWrap}>
+          <AppButton
+            label={translateWithFallback(t, 'game.detail.action.share', '分享')}
+            onPress={() => {
+              handleShare().catch((shareError) => console.error('[CloudArchiveDetail] share failed', shareError));
+            }}
+            disabled={!summary}
+          />
+        </View>
       </ScrollView>
     </ScreenContainer>
   );
@@ -372,80 +656,236 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  scrollContent: {
+    padding: theme.spacing.lg,
     paddingBottom: theme.spacing.xl,
-    gap: theme.spacing.md,
   },
   loadingWrap: {
     flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: theme.spacing.md,
+    padding: theme.spacing.lg,
   },
   card: {
-    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.md,
   },
   heroTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
   },
   heroLabel: {
-    ...typography.body,
+    ...typography.caption,
     color: theme.colors.textSecondary,
+    fontWeight: '600',
+    letterSpacing: 0.3,
   },
   statusBadge: {
-    borderRadius: 999,
-    backgroundColor: '#E9E7E3',
     paddingHorizontal: theme.spacing.sm,
     paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(70,63,56,0.12)',
   },
   statusBadgeText: {
     ...typography.caption,
+    fontWeight: '600',
     color: theme.colors.textSecondary,
   },
   headerTitle: {
     ...typography.title,
+    fontWeight: '700',
     color: theme.colors.textPrimary,
-    marginTop: theme.spacing.xs,
+    marginBottom: theme.spacing.sm,
   },
   heroSubTitle: {
-    ...typography.subtitle,
+    ...typography.body,
     color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.sm,
   },
   heroDateText: {
     ...typography.body,
     color: theme.colors.textSecondary,
-    marginTop: theme.spacing.xs,
   },
   sectionTitle: {
     ...typography.subtitle,
+    fontWeight: '700',
     color: theme.colors.textPrimary,
     marginBottom: theme.spacing.sm,
   },
   playerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.spacing.sm,
-    minHeight: 34,
+    marginBottom: theme.spacing.sm,
   },
   playerRank: {
+    width: 34,
     ...typography.body,
     color: theme.colors.textSecondary,
-    width: 40,
+  },
+  playerMetaWrap: {
+    flex: 1,
   },
   playerName: {
     ...typography.subtitle,
     color: theme.colors.textPrimary,
-    flex: 1,
+    fontWeight: '600',
   },
   playerTotal: {
     ...typography.subtitle,
     color: theme.colors.textPrimary,
-    textAlign: 'right',
+    fontWeight: '700',
   },
   metaText: {
     ...typography.body,
     color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.xs,
+  },
+  statsHeadline: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.sm,
+    fontWeight: '600',
+  },
+  statsPlayerLine: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+    marginBottom: 6,
+  },
+  statsHighlightLine: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    marginTop: 4,
+  },
+  filterWrap: {
+    flexDirection: 'row',
+    marginBottom: theme.spacing.sm,
+  },
+  filterChip: {
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    marginRight: theme.spacing.xs,
+    backgroundColor: theme.colors.background,
+  },
+  filterChipActive: {
+    backgroundColor: 'rgba(53,92,86,0.14)',
+    borderColor: 'rgba(53,92,86,0.24)',
+  },
+  filterChipText: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+  },
+  filterChipTextActive: {
+    color: theme.colors.textPrimary,
+  },
+  handSection: {
+    marginBottom: theme.spacing.xs,
+  },
+  windSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.xs,
+    marginTop: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.xs,
+  },
+  windSectionTitle: {
+    ...typography.body,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+  windSectionToggle: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+  },
+  handRow: {
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    padding: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
+  },
+  handTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  handIndex: {
+    ...typography.body,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+  handRound: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+  },
+  handOutcomeRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  handOutcomeIcon: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    marginRight: 6,
+  },
+  handOutcomeText: {
+    ...typography.body,
+    fontWeight: '600',
+    color: theme.colors.textPrimary,
+  },
+  dealerActionBadge: {
+    marginLeft: theme.spacing.xs,
+    backgroundColor: 'rgba(53,92,86,0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  dealerActionText: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+  },
+  handMetaText: {
+    marginTop: 6,
+    ...typography.body,
+    color: theme.colors.textSecondary,
+  },
+  deltaChipsRow: {
+    flexDirection: 'row',
+    marginTop: 8,
+  },
+  deltaChip: {
+    flex: 1,
+    marginRight: 4,
+    borderRadius: theme.radius.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    backgroundColor: theme.colors.background,
+  },
+  deltaChipSeat: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+  },
+  deltaChipValue: {
+    marginTop: 2,
+    ...typography.caption,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+  },
+  actionsWrap: {
+    marginTop: theme.spacing.sm,
   },
   errorText: {
     ...typography.body,

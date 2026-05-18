@@ -448,6 +448,8 @@ export type TranslationKey =
   | 'roomLobby.hostTools.shareInvite'
   | 'roomLobby.hostTools.roomCode'
   | 'roomLobby.hostTools.inviteLink'
+  | 'roomLobby.hostTools.localInviteNoticeLabel'
+  | 'roomLobby.hostTools.localInviteNotice'
   | 'roomLobby.hostTools.swapTitle'
   | 'roomLobby.hostTools.swapHint'
   | 'roomLobby.hostTools.swapSeat'

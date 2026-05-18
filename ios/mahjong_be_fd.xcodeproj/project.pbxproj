@@ -109,6 +109,7 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "mahjong_be_fd" */;
 			buildPhases = (
 				C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */,
+				3A6A5F902F8E200000000001 /* Check Firebase config */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
@@ -208,6 +209,22 @@
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-mahjong_be_fd/Pods-mahjong_be_fd-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
+		};
+		3A6A5F902F8E200000000001 /* Check Firebase config */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/GoogleService-Info.plist",
+			);
+			name = "Check Firebase config";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ ! -f \"${SRCROOT}/GoogleService-Info.plist\" ]; then\n  echo \"error: Missing Firebase config: ios/GoogleService-Info.plist. This file is ignored for public-repo safety; copy your local Firebase config into ios/ before building iOS.\" >&2\n  exit 1\nfi\n";
 		};
 		C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;

@@ -4,6 +4,7 @@ import { Alert, StatusBar, StyleSheet, useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './src/navigation/RootNavigator';
+import { linking } from './src/navigation/linking';
 import { initializeI18n, t } from './src/i18n/i18n';
 import { dumpBreadcrumbs, getLastBreadcrumb, getLastSqlBreadcrumb } from './src/debug/breadcrumbs';
 import AppErrorBoundary from './src/components/AppErrorBoundary';
@@ -202,7 +203,7 @@ function App() {
             setNavigationKey((prev) => prev + 1);
           }}
         >
-          <NavigationContainer key={navigationKey}>
+          <NavigationContainer key={navigationKey} linking={linking}>
             <RootNavigator />
           </NavigationContainer>
         </AppErrorBoundary>

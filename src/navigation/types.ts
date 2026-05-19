@@ -19,6 +19,7 @@ export type RootStackParamList = {
   Settings: undefined;
   About: undefined;
   Profile: undefined;
+  JoinInvite: { roomId?: string; token?: string };
   RoomLobby: { roomId: string };
   MultiplayerGameTable: { roomId: string; displayName?: string };
   CloudArchiveDetail: { roomId: string };

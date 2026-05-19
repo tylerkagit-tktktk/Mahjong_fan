@@ -14,6 +14,7 @@ import ProfileScreen from '../screens/cloud/ProfileScreen';
 import RoomLobbyScreen from '../screens/cloud/RoomLobbyScreen';
 import MultiplayerGameTableScreen from '../screens/cloud/MultiplayerGameTableScreen';
 import CloudArchiveDetailScreen from '../screens/cloud/CloudArchiveDetailScreen';
+import JoinInviteScreen from '../screens/cloud/JoinInviteScreen';
 import { RootStackParamList } from './types';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 
@@ -80,6 +81,7 @@ function RootNavigator() {
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: t('nav.settings') }} />
       <Stack.Screen name="About" component={AboutScreen} options={{ title: t('about.title') }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('nav.profile') }} />
+      <Stack.Screen name="JoinInvite" component={JoinInviteScreen} options={{ title: t('nav.joinInvite') }} />
       <Stack.Screen name="RoomLobby" component={RoomLobbyScreen} options={{ title: t('nav.onlineGame') }} />
       <Stack.Screen
         name="MultiplayerGameTable"

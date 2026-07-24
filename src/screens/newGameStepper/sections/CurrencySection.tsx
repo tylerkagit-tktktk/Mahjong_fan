@@ -1,4 +1,5 @@
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet } from 'react-native';
+import AppText from '../../../components/AppText';
 import Card from '../../../components/Card';
 import SegmentedControl from '../../../components/SegmentedControl';
 import { CurrencyCode } from '../../../models/currency';
@@ -17,7 +18,7 @@ type Props = {
 function CurrencySection({ title, value, onChange, disabled, labels, helperText }: Props) {
   return (
     <Card style={styles.card}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <AppText style={styles.sectionTitle}>{title}</AppText>
       <SegmentedControl<CurrencyCode>
         options={[
           { value: 'HKD', label: labels.hkd },
@@ -28,7 +29,7 @@ function CurrencySection({ title, value, onChange, disabled, labels, helperText 
         onChange={onChange}
         disabled={disabled}
       />
-      <Text style={styles.helperText}>{helperText}</Text>
+      <AppText style={styles.helperText}>{helperText}</AppText>
     </Card>
   );
 }

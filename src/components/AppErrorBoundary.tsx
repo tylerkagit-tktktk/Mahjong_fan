@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import AppText from './AppText';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { t } from '../i18n/i18n';
 import theme from '../theme/theme';
 
@@ -39,10 +40,10 @@ class AppErrorBoundary extends React.Component<Props, State> {
 
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>{t('app.errorBoundary.title')}</Text>
-        <Text style={styles.message}>{t('app.errorBoundary.message')}</Text>
+        <AppText style={styles.title}>{t('app.errorBoundary.title')}</AppText>
+        <AppText style={styles.message}>{t('app.errorBoundary.message')}</AppText>
         <Pressable onPress={this.handleBackHome} style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}>
-          <Text style={styles.buttonText}>{t('app.errorBoundary.backHome')}</Text>
+          <AppText style={styles.buttonText}>{t('app.errorBoundary.backHome')}</AppText>
         </Pressable>
       </View>
     );

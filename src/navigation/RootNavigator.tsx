@@ -1,5 +1,6 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Pressable, Text } from 'react-native';
+import AppText from '../components/AppText';
+import { Pressable } from 'react-native';
 import AddHandScreen from '../screens/AddHandScreen';
 import AboutScreen from '../screens/AboutScreen';
 import GameDashboardScreen from '../screens/GameDashboardScreen';
@@ -30,7 +31,7 @@ function renderSettingsHeaderRight(onPress: () => void) {
   return function SettingsHeaderRight() {
     return (
       <Pressable onPress={onPress} hitSlop={10}>
-        <Text style={settingsHeaderTextStyle}>⚙︎</Text>
+        <AppText style={settingsHeaderTextStyle}>⚙︎</AppText>
       </Pressable>
     );
   };

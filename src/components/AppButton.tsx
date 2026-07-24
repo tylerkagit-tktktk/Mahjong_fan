@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, ViewStyle } from 'react-native';
+import AppText from './AppText';
 import theme from '../theme/theme';
 
 type AppButtonProps = {
@@ -33,7 +34,7 @@ function AppButton({
         style,
       ]}
     >
-      <Text style={[styles.text, isSecondary && styles.secondaryText]}>{label}</Text>
+      <AppText style={[styles.text, isSecondary && styles.secondaryText]}>{label}</AppText>
     </Pressable>
   );
 }

@@ -1,16 +1,19 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AppText from '../../components/AppText';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import AppButton from '../../components/AppButton';
 import Card from '../../components/Card';
 import ScreenContainer from '../../components/ScreenContainer';
 import { computeHkSettlement, toAmountFromQ } from '../../domain/hk/settlement';
 import { useAppLanguage } from '../../i18n/useAppLanguage';
 import { TranslationKey } from '../../i18n/types';
-import { CloudArchivePayload, HandLog, RoomLineup, SeatKey } from '../../models/cloud';
+import { ArchiveSyncStatus, CloudArchivePayload, HandLog, RoomLineup, RoomMember, SeatKey } from '../../models/cloud';
 import { parseRules, RulesV1 } from '../../models/rules';
 import { RootStackParamList } from '../../navigation/types';
 import { loadArchivedGame } from '../../services/cloud/archiveRepo';
+import { ensureSession } from '../../services/cloud/authRepo';
+import { deleteArchivedRoomAfterSync, getArchiveSyncStatus, subscribeMembers } from '../../services/cloud/roomRepo';
 import { typography } from '../../styles/typography';
 import theme from '../../theme/theme';
 
@@ -335,6 +338,12 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
   const [error, setError] = useState('');
   const [handFilter, setHandFilter] = useState<HandFilter>('all');
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const [sessionUid, setSessionUid] = useState('');
+  const [syncedMembers, setSyncedMembers] = useState<RoomMember[]>([]);
+  const [receivedMemberSnapshot, setReceivedMemberSnapshot] = useState(false);
+  const [deletingCloudRoom, setDeletingCloudRoom] = useState(false);
+  const [cloudRoomDeleted, setCloudRoomDeleted] = useState(false);
+  const [cloudCleanupError, setCloudCleanupError] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -355,6 +364,23 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
   useEffect(() => {
     load().catch(() => {});
   }, [load]);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    ensureSession()
+      .then((session) => {
+        setSessionUid(session.uid);
+        unsubscribe = subscribeMembers(roomId, (members) => {
+          setSyncedMembers(members);
+          setReceivedMemberSnapshot(true);
+          if (members.length === 0) {
+            setCloudRoomDeleted(true);
+          }
+        });
+      })
+      .catch(() => {});
+    return () => unsubscribe?.();
+  }, [roomId]);
 
   const rules = useMemo(
     () =>
@@ -401,6 +427,34 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
   const handCountText = summary
     ? translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', { count: summary.handCount })
     : '';
+  const syncMembers = receivedMemberSnapshot ? syncedMembers : payload?.members ?? [];
+  const archiveSyncStatus: ArchiveSyncStatus | null = payload
+    ? getArchiveSyncStatus(syncMembers, payload.archiveVersion)
+    : null;
+  const isHost = Boolean(payload && sessionUid && payload.room.hostUid === sessionUid);
+
+  const confirmCloudDeletion = useCallback(() => {
+    if (!payload || !isHost || !archiveSyncStatus?.isReadyForCloudDeletion || deletingCloudRoom) return;
+    Alert.alert(
+      translateWithFallback(t, 'cloudArchive.cleanup.confirmTitle', '刪除雲端房間？'),
+      translateWithFallback(t, 'cloudArchive.cleanup.confirmBody', '所有成員已封存到本機。此操作會永久刪除 Firebase 的房間、成員、座位及牌局紀錄；本機紀錄會保留。'),
+      [
+        { text: translateWithFallback(t, 'game.detail.action.cancel', '取消'), style: 'cancel' },
+        {
+          text: translateWithFallback(t, 'cloudArchive.cleanup.delete', '刪除雲端資料'),
+          style: 'destructive',
+          onPress: () => {
+            setDeletingCloudRoom(true);
+            setCloudCleanupError('');
+            deleteArchivedRoomAfterSync(payload.room.roomId, sessionUid)
+              .then(() => setCloudRoomDeleted(true))
+              .catch((nextError) => setCloudCleanupError(String(nextError)))
+              .finally(() => setDeletingCloudRoom(false));
+          },
+        },
+      ],
+    );
+  }, [archiveSyncStatus?.isReadyForCloudDeletion, deletingCloudRoom, isHost, payload, sessionUid, t]);
 
   const handleShare = useCallback(async () => {
     if (!payload || !summary) {
@@ -423,9 +477,9 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
     return (
       <ScreenContainer>
         <View style={styles.loadingWrap}>
-          <Text style={error ? styles.errorText : styles.metaText}>
+          <AppText style={error ? styles.errorText : styles.metaText}>
             {error || translateWithFallback(t, 'game.detail.loading', '載入中…')}
-          </Text>
+          </AppText>
           {error ? (
             <AppButton
               label={translateWithFallback(t, 'common.back', '返回')}
@@ -443,121 +497,160 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Card style={styles.card}>
           <View style={styles.heroTopRow}>
-            <Text style={styles.heroLabel}>
+            <AppText style={styles.heroLabel}>
               {translateWithFallback(t, 'game.detail.header.title', '對局總結')}
-            </Text>
+            </AppText>
             <View style={styles.statusBadge}>
-              <Text style={styles.statusBadgeText}>
+              <AppText style={styles.statusBadgeText}>
                 {translateWithFallback(t, 'game.detail.header.statusEnded', '已結束')}
-              </Text>
+              </AppText>
             </View>
           </View>
-          <Text style={styles.headerTitle}>{payload.room.title}</Text>
-          <Text style={styles.heroSubTitle}>{`${summary?.roundLabel ?? '—'} · ${handCountText}`}</Text>
-          <Text style={styles.heroDateText}>
+          <AppText style={styles.headerTitle}>{payload.room.title}</AppText>
+          <AppText style={styles.heroSubTitle}>{`${summary?.roundLabel ?? '—'} · ${handCountText}`}</AppText>
+          <AppText style={styles.heroDateText}>
             {formatDate(payload.room.archiveReadyAt ?? payload.archivedFromCloudAt ?? payload.room.createdAt)}
-          </Text>
+          </AppText>
         </Card>
 
         <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>
+          <AppText style={styles.sectionTitle}>
             {translateWithFallback(t, 'game.detail.players.title', '玩家排名')}
-          </Text>
+          </AppText>
           {summary?.rankedPlayers.length ? (
             summary.rankedPlayers.map((player, index) => (
               <View key={`rank-${player.playerId}`} style={styles.playerRow}>
-                <Text style={styles.playerRank}>{getRankPrefix(index)}</Text>
+                <AppText style={styles.playerRank}>{getRankPrefix(index)}</AppText>
                 <View style={styles.playerMetaWrap}>
-                  <Text style={styles.playerName}>{player.name}</Text>
+                  <AppText style={styles.playerName}>{player.name}</AppText>
                 </View>
-                <Text style={styles.playerTotal}>{formatSignedMoney(player.total, currencySymbol)}</Text>
+                <AppText style={styles.playerTotal}>{formatSignedMoney(player.total, currencySymbol)}</AppText>
               </View>
             ))
           ) : (
-            <Text style={styles.metaText}>—</Text>
+            <AppText style={styles.metaText}>—</AppText>
           )}
         </Card>
 
         <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.rules.title', '規則摘要')}</Text>
-          <Text style={styles.metaText}>
+          <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.rules.title', '規則摘要')}</AppText>
+          <AppText style={styles.metaText}>
             {translateWithFallback(t, 'game.detail.rules.variant', '牌型')}：{getVariantLabel(rules, t)}
-          </Text>
-          <Text style={styles.metaText}>
+          </AppText>
+          <AppText style={styles.metaText}>
             {translateWithFallback(t, 'game.detail.rules.currency', '幣別')}：{currencySymbol || rules.currencyCode}
-          </Text>
+          </AppText>
           {typeof rules.minFanToWin === 'number' ? (
-            <Text style={styles.metaText}>
+            <AppText style={styles.metaText}>
               {translateWithFallback(t, 'game.detail.rules.minFan', '最低番數')}：{rules.minFanToWin}
-            </Text>
+            </AppText>
           ) : null}
           {rules.mode === 'HK' && rules.hk ? (
             <>
-              <Text style={styles.metaText}>
+              <AppText style={styles.metaText}>
                 {translateWithFallback(t, 'game.detail.rules.hkPreset', '計分模式')}：
                 {rules.hk.scoringPreset === 'traditionalFan'
                   ? translateWithFallback(t, 'game.detail.rules.hkPreset.traditionalFan', '傳統番數')
                   : translateWithFallback(t, 'game.detail.rules.hkPreset.customTable', '自訂表')}
-              </Text>
-              <Text style={styles.metaText}>
+              </AppText>
+              <AppText style={styles.metaText}>
                 {translateWithFallback(t, 'game.detail.rules.hkGunMode', '銃制')}：
                 {rules.hk.gunMode === 'halfGun'
                   ? translateWithFallback(t, 'game.detail.rules.hkGunMode.halfGun', '半銃')
                   : translateWithFallback(t, 'game.detail.rules.hkGunMode.fullGun', '全銃')}
-              </Text>
+              </AppText>
               {rules.hk.scoringPreset === 'traditionalFan' ? (
-                <Text style={styles.metaText}>
+                <AppText style={styles.metaText}>
                   {translateWithFallback(t, 'game.detail.rules.hkStake', '注碼')}：
                   {rules.hk.stakePreset === 'FIVE_ONE'
                     ? translateWithFallback(t, 'game.detail.rules.hkStake.fiveOne', '五一')
                     : rules.hk.stakePreset === 'ONE_TWO'
                       ? translateWithFallback(t, 'game.detail.rules.hkStake.oneTwo', '一二蚊')
                       : translateWithFallback(t, 'game.detail.rules.hkStake.twoFiveChicken', '二五雞')}
-                </Text>
+                </AppText>
               ) : (
-                <Text style={styles.metaText}>
+                <AppText style={styles.metaText}>
                   {translateWithFallback(t, 'game.detail.rules.custom.unitPerFanLabel', '每番金額')}：
                   {currencySymbol}
                   {rules.hk.unitPerFan ?? 1}
-                </Text>
+                </AppText>
               )}
-              <Text style={styles.metaText}>
+              <AppText style={styles.metaText}>
                 {translateWithFallback(t, 'game.detail.rules.hkCapFan', '爆棚')}：
                 {rules.hk.capFan == null ? '∞' : rules.hk.capFan}
-              </Text>
+              </AppText>
             </>
           ) : null}
         </Card>
 
         <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.stats.title', '統計')}</Text>
-          <Text style={styles.statsHeadline}>
+          <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.stats.title', '統計')}</AppText>
+          <AppText style={styles.statsHeadline}>
             {translateWithFallback(t, 'game.detail.stats.hands', '手數')}：{summary?.handCount ?? 0}
             {'  ·  '}
             {translateWithFallback(t, 'game.detail.stats.draws', '流局')}：{stats?.draws ?? 0}
-          </Text>
+          </AppText>
           {summary?.rankedPlayers.map((player) => (
-            <Text key={`stats-${player.playerId}`} style={styles.statsPlayerLine}>
+            <AppText key={`stats-${player.playerId}`} style={styles.statsPlayerLine}>
               {player.name}：
               {translateWithFallback(t, 'game.detail.stats.wins', '食糊')} {stats?.winsByPlayerId[player.playerId] ?? 0}
               {' ｜ '}
               {translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} {stats?.zimoByPlayerId[player.playerId] ?? 0}
               {' ｜ '}
               {translateWithFallback(t, 'game.detail.stats.discards', '出銃')} {stats?.discardByPlayerId[player.playerId] ?? 0}
-            </Text>
+            </AppText>
           ))}
-          <Text style={styles.statsHighlightLine}>
+          <AppText style={styles.statsHighlightLine}>
             {translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}：
             {formatHighlight(stats?.mostDiscarder ?? null)}
-          </Text>
-          <Text style={styles.statsHighlightLine}>
+          </AppText>
+          <AppText style={styles.statsHighlightLine}>
             {translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}：
             {formatHighlight(stats?.mostZimo ?? null)}
-          </Text>
+          </AppText>
         </Card>
 
         <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.hands.title', '全部牌局')}</Text>
+          <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'cloudArchive.cleanup.title', '雲端清理')}</AppText>
+          {cloudRoomDeleted ? (
+            <AppText style={styles.cloudCleanupSuccess}>
+              {translateWithFallback(t, 'cloudArchive.cleanup.done', '雲端房間已刪除，本機封存會繼續保留。')}
+            </AppText>
+          ) : (
+            <>
+              <AppText style={styles.metaText}>
+                {translateWithFallback(t, 'cloudArchive.cleanup.syncProgress', '本機封存：{synced}/{total} 位成員已完成', {
+                  synced: archiveSyncStatus?.syncedMemberCount ?? 0,
+                  total: archiveSyncStatus?.requiredMemberCount ?? 0,
+                })}
+              </AppText>
+              {archiveSyncStatus?.pendingMemberNames.length ? (
+                <AppText style={styles.metaText}>
+                  {translateWithFallback(t, 'cloudArchive.cleanup.waiting', '等待：{players}', {
+                    players: archiveSyncStatus.pendingMemberNames.join('、'),
+                  })}
+                </AppText>
+              ) : null}
+              {isHost ? (
+                <AppButton
+                  label={translateWithFallback(t, 'cloudArchive.cleanup.delete', '刪除雲端資料')}
+                  onPress={confirmCloudDeletion}
+                  disabled={!archiveSyncStatus?.isReadyForCloudDeletion || deletingCloudRoom}
+                  variant="secondary"
+                  style={styles.cloudCleanupButton}
+                />
+              ) : (
+                <AppText style={styles.metaText}>
+                  {translateWithFallback(t, 'cloudArchive.cleanup.hostOnly', '全部成員完成後，主持人可刪除雲端資料。')}
+                </AppText>
+              )}
+              {cloudCleanupError ? <AppText style={styles.errorText}>{cloudCleanupError}</AppText> : null}
+            </>
+          )}
+        </Card>
+
+        <Card style={styles.card}>
+          <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.hands.title', '全部牌局')}</AppText>
           <View style={styles.filterWrap}>
             {filterOptions.map((option) => {
               const selected = handFilter === option.key;
@@ -570,7 +663,7 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
                   }}
                   style={[styles.filterChip, selected && styles.filterChipActive]}
                 >
-                  <Text style={[styles.filterChipText, selected && styles.filterChipTextActive]}>{option.label}</Text>
+                  <AppText style={[styles.filterChipText, selected && styles.filterChipTextActive]}>{option.label}</AppText>
                 </Pressable>
               );
             })}
@@ -587,49 +680,49 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
                     }}
                     style={styles.windSectionHeader}
                   >
-                    <Text style={styles.windSectionTitle}>{section.title}</Text>
-                    <Text style={styles.windSectionToggle}>{collapsed ? '＋' : '－'}</Text>
+                    <AppText style={styles.windSectionTitle}>{section.title}</AppText>
+                    <AppText style={styles.windSectionToggle}>{collapsed ? '＋' : '－'}</AppText>
                   </Pressable>
                   {!collapsed
                     ? section.data.map((entry) => (
                         <View key={entry.hand.handId} style={styles.handRow}>
                           <View style={styles.handTopRow}>
-                            <Text style={styles.handIndex}>#{entry.hand.handIndex + 1}</Text>
-                            <Text style={styles.handRound}>{entry.roundLabel}</Text>
+                            <AppText style={styles.handIndex}>#{entry.hand.handIndex + 1}</AppText>
+                            <AppText style={styles.handRound}>{entry.roundLabel}</AppText>
                           </View>
                           <View style={styles.handOutcomeRow}>
-                            <Text style={styles.handOutcomeIcon}>
+                            <AppText style={styles.handOutcomeIcon}>
                               {entry.hand.type === 'draw' ? '⦿' : entry.hand.type === 'zimo' ? '◎' : '•'}
-                            </Text>
-                            <Text style={styles.handOutcomeText}>
+                            </AppText>
+                            <AppText style={styles.handOutcomeText}>
                               {entry.hand.type === 'draw'
                                 ? translateWithFallback(t, 'game.detail.hands.filter.draws', '流局')
                                 : entry.hand.type === 'zimo'
                                   ? translateWithFallback(t, 'game.detail.stats.zimo', '自摸')
                                   : translateWithFallback(t, 'game.detail.stats.discards', '出銃')}
-                            </Text>
+                            </AppText>
                             {entry.hand.type === 'draw' && entry.hand.dealerAction ? (
                               <View style={styles.dealerActionBadge}>
-                                <Text style={styles.dealerActionText}>
+                                <AppText style={styles.dealerActionText}>
                                   {entry.hand.dealerAction === 'stick'
                                     ? translateWithFallback(t, 'game.detail.hand.dealerAction.stick', '番莊')
                                     : translateWithFallback(t, 'game.detail.hand.dealerAction.pass', '過莊')}
-                                </Text>
+                                </AppText>
                               </View>
                             ) : null}
                           </View>
-                          <Text style={styles.handMetaText}>
+                          <AppText style={styles.handMetaText}>
                             {getArchiveHandSummary(entry.hand, entry.winnerName, entry.discarderName, t)}
-                          </Text>
+                          </AppText>
                           <View style={styles.deltaChipsRow}>
                             {SEAT_GLYPHS.map((seat, seatIndex) => (
                               <View key={`${entry.hand.handId}-delta-${seat}`} style={styles.deltaChip}>
-                                <Text style={styles.deltaChipSeat}>{seat}</Text>
-                                <Text style={styles.deltaChipValue}>
+                                <AppText style={styles.deltaChipSeat}>{seat}</AppText>
+                                <AppText style={styles.deltaChipValue}>
                                   {entry.deltasQ
                                     ? formatSignedMoney(toAmountFromQ(entry.deltasQ[seatIndex] ?? 0), currencySymbol)
                                     : '—'}
-                                </Text>
+                                </AppText>
                               </View>
                             ))}
                           </View>
@@ -640,7 +733,7 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
               );
             })
           ) : (
-            <Text style={styles.metaText}>—</Text>
+            <AppText style={styles.metaText}>—</AppText>
           )}
         </Card>
 
@@ -890,6 +983,14 @@ const styles = StyleSheet.create({
   },
   actionsWrap: {
     marginTop: theme.spacing.sm,
+  },
+  cloudCleanupButton: {
+    marginTop: theme.spacing.xs,
+  },
+  cloudCleanupSuccess: {
+    ...typography.body,
+    color: theme.colors.primary,
+    fontWeight: '600',
   },
   errorText: {
     ...typography.body,

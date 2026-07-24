@@ -1,7 +1,8 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AppText from '../components/AppText';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
 import theme from '../theme/theme';
@@ -43,8 +44,8 @@ function SummaryScreen({ navigation, route }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <Text style={styles.title}>{title || t('summary.title')}</Text>
-      <Text style={styles.subtitle}>{endedAt ? t('summary.ended') : t('summary.overview')}</Text>
+      <AppText style={styles.title}>{title || t('summary.title')}</AppText>
+      <AppText style={styles.subtitle}>{endedAt ? t('summary.ended') : t('summary.overview')}</AppText>
       <AppButton label={t('common.back')} onPress={() => navigation.replace('Home')} />
     </SafeAreaView>
   );

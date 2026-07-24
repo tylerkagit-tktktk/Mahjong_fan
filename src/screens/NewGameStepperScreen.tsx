@@ -1,14 +1,17 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AppText from '../components/AppText';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomActionBar from '../components/BottomActionBar';
 import ScreenContainer from '../components/ScreenContainer';
+import TraditionalHkPaytableModal from '../components/TraditionalHkPaytableModal';
 import { createGameWithPlayers } from '../db/repo';
 import { DEBUG_FLAGS } from '../debug/debugFlags';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { DEFAULT_CURRENCY_CODE, CurrencyCode, formatCurrencyUnit, getCurrencyMeta } from '../models/currency';
+import { useAppPreferences } from '../settings/useAppPreferences';
 import { getDefaultRules, HkGunMode, HkScoringPreset, HkStakePreset, parseRules, RulesV1, serializeRules, Variant } from '../models/rules';
 import { ResolvedRoomPlayer, Room, SeatKey } from '../models/cloud';
 import { RootStackParamList } from '../navigation/types';
@@ -110,8 +113,10 @@ function translateWithFallback(
 
 function NewGameStepperScreen({ navigation, route }: Props) {
   const { t, language } = useAppLanguage();
+  const { defaultCurrencyCode } = useAppPreferences();
   const insets = useSafeAreaInsets();
   const prefill = route.params?.prefill;
+  const currencyManuallyChangedRef = useRef(false);
 
   const [title, setTitle] = useState(prefill?.title ?? '');
   const [seatMode, setSeatMode] = useState<SeatMode>('manual');
@@ -144,6 +149,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [stakePaytableVisible, setStakePaytableVisible] = useState(false);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [pendingPayload, setPendingPayload] = useState<PreparedCreateContext | null>(null);
   const [sessionUid, setSessionUid] = useState('');
@@ -161,6 +167,12 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       setMode('HK');
     }
   }, [mode]);
+
+  useEffect(() => {
+    if (!prefill && !currencyManuallyChangedRef.current) {
+      setCurrencyCode(defaultCurrencyCode);
+    }
+  }, [defaultCurrencyCode, prefill]);
 
   useEffect(() => {
     if (!prefill) {
@@ -893,11 +905,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         [
           createdRoom.title,
           `${translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}: ${invite.roomId}`,
-          translateWithFallback(
-            t,
-            'roomLobby.hostTools.localInviteNotice',
-            '目前為本機開發版，跨機邀請連結稍後支援。',
-          ),
+          invite.deepLink,
         ].join('\n'),
       );
       setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
@@ -1178,7 +1186,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           : null;
         return {
           label: `${seatLabels[index]}${t('newGame.playerSeatSuffix')}`,
-          value: syncPlayer ? `${player} ← ${syncPlayer.displayName}` : player,
+          value: syncPlayer?.displayName ?? player,
         };
       });
     } else {
@@ -1243,6 +1251,25 @@ function NewGameStepperScreen({ navigation, route }: Props) {
 
   const confirmSections = pendingPayload ? buildConfirmSections(pendingPayload) : null;
   const scoringHintLines = getStakePresetHintLines(hkStakePreset, hkGunMode, minFanForHint, capFan, t);
+  const stakePaytableRules = useMemo<RulesV1 | null>(() => {
+    if (mode !== 'HK' || hkScoringPreset !== 'traditionalFan') {
+      return null;
+    }
+    const defaultRules = getDefaultRules('HK');
+    return {
+      ...defaultRules,
+      languageDefault: language,
+      currencyCode,
+      currencySymbol,
+      minFanToWin: minFanForHint,
+      hk: {
+        ...defaultRules.hk!,
+        gunMode: hkGunMode,
+        stakePreset: hkStakePreset,
+        capFan,
+      },
+    };
+  }, [capFan, currencyCode, currencySymbol, hkGunMode, hkScoringPreset, hkStakePreset, language, minFanForHint, mode]);
 
   return (
     <ScreenContainer style={styles.container} horizontalPadding={0} includeTopInset={false} includeBottomInset={false}>
@@ -1263,8 +1290,8 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           }}
         >
           <View style={styles.headerBlock}>
-            <Text style={styles.headerTitle}>{screenCopy.title}</Text>
-            <Text style={styles.headerSubtitle}>{screenCopy.subtitle}</Text>
+            <AppText style={styles.headerTitle}>{screenCopy.title}</AppText>
+            <AppText style={styles.headerSubtitle}>{screenCopy.subtitle}</AppText>
           </View>
           <GameTitleSection
             label={t('newGame.gameTitle')}
@@ -1291,7 +1318,10 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         <CurrencySection
           title={t('newGame.currencyTitle')}
           value={currencyCode}
-          onChange={setCurrencyCode}
+          onChange={(nextCurrencyCode) => {
+            currencyManuallyChangedRef.current = true;
+            setCurrencyCode(nextCurrencyCode);
+          }}
           disabled={loading || setupLocked}
           labels={{ hkd: t('currency.hkd'), twd: t('currency.twd'), cny: t('currency.cny') }}
           helperText={`${t('newGame.currencySelectedPrefix')}${formatCurrencyUnit(currencyCode)}`}
@@ -1360,6 +1390,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
               pmaDescription: t('newGame.pmaDescription'),
             }}
             stakePresetHintLines={scoringHintLines}
+            onShowStakePaytable={() => setStakePaytableVisible(true)}
             onHkScoringPresetChange={(value) => {
               setHkScoringPreset(value);
               if (value === 'customTable') {
@@ -1532,8 +1563,13 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             }}
           />
         </View>
+        <TraditionalHkPaytableModal
+          visible={stakePaytableVisible}
+          rules={stakePaytableRules}
+          onClose={() => setStakePaytableVisible(false)}
+        />
 
-        {formError ? <Text style={styles.errorText}>{formError}</Text> : null}
+        {formError ? <AppText style={styles.errorText}>{formError}</AppText> : null}
         {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
         </ScrollView>
 
@@ -1545,12 +1581,12 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             hasDraftRoom ? (
               <View style={styles.syncToolbar}>
                 <View style={styles.syncToolbarRoomCode}>
-                  <Text style={styles.syncToolbarLabel}>
+                  <AppText style={styles.syncToolbarLabel}>
                     {translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}
-                  </Text>
-                  <Text selectable style={styles.syncToolbarValue}>
+                  </AppText>
+                  <AppText selectable style={styles.syncToolbarValue}>
                     {draftRoom?.roomId ?? '-'}
-                  </Text>
+                  </AppText>
                 </View>
                 <View style={styles.syncToolbarActions}>
                   {DEBUG_FLAGS.enableSyncTestTools ? (
@@ -1562,9 +1598,9 @@ function NewGameStepperScreen({ navigation, route }: Props) {
                       }}
                       style={styles.syncToolbarButton}
                     >
-                      <Text style={styles.syncToolbarButtonText}>
+                      <AppText style={styles.syncToolbarButtonText}>
                         {translateWithFallback(t, 'newGame.sync.debugAddPlayer', '加入虛擬真人玩家')}
-                      </Text>
+                      </AppText>
                     </Pressable>
                   ) : null}
                   <Pressable
@@ -1575,14 +1611,14 @@ function NewGameStepperScreen({ navigation, route }: Props) {
                     }}
                     style={styles.syncToolbarButton}
                   >
-                    <Text style={styles.syncToolbarButtonText}>
+                    <AppText style={styles.syncToolbarButtonText}>
                       {translateWithFallback(t, 'roomLobby.hostTools.shareInvite', '分享邀請')}
-                    </Text>
+                    </AppText>
                   </Pressable>
                   <Pressable onPress={handleCancelSync} style={styles.syncToolbarButton}>
-                    <Text style={styles.syncToolbarButtonText}>
+                    <AppText style={styles.syncToolbarButtonText}>
                       {translateWithFallback(t, 'newGame.sync.cancelConfirmAction', '取消同步')}
-                    </Text>
+                    </AppText>
                   </Pressable>
                 </View>
               </View>

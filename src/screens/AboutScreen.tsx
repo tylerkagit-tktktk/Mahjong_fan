@@ -1,5 +1,6 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Linking, Pressable, StyleSheet, Text } from 'react-native';
+import AppText from '../components/AppText';
+import { Linking, Pressable, StyleSheet } from 'react-native';
 import Card from '../components/Card';
 import ScreenContainer from '../components/ScreenContainer';
 import { useAppLanguage } from '../i18n/useAppLanguage';
@@ -25,30 +26,30 @@ function AboutScreen(_: Props) {
 
   return (
     <ScreenContainer style={styles.container} includeTopInset={false}>
-      <Text style={styles.title}>{t('about.appTitle')}</Text>
-      <Text style={styles.subtitle}>{t('about.subtitle')}</Text>
+      <AppText style={styles.title}>{t('about.appTitle')}</AppText>
+      <AppText style={styles.subtitle}>{t('about.subtitle')}</AppText>
 
       <Card style={[styles.card, styles.firstCard]}>
-        <Text style={styles.sectionTitle}>{t('about.section.usage.title')}</Text>
-        <Text style={styles.sectionBody}>{t('about.section.usage.body')}</Text>
+        <AppText style={styles.sectionTitle}>{t('about.section.usage.title')}</AppText>
+        <AppText style={styles.sectionBody}>{t('about.section.usage.body')}</AppText>
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.sectionTitle}>{t('about.section.privacy.title')}</Text>
-        <Text style={styles.sectionBody}>{t('about.section.privacy.body')}</Text>
+        <AppText style={styles.sectionTitle}>{t('about.section.privacy.title')}</AppText>
+        <AppText style={styles.sectionBody}>{t('about.section.privacy.body')}</AppText>
         <Pressable style={styles.privacyButton} onPress={handlePrivacyPress}>
-          <Text style={styles.privacyButtonLabel}>{t('about.section.privacy.linkLabel')}</Text>
+          <AppText style={styles.privacyButtonLabel}>{t('about.section.privacy.linkLabel')}</AppText>
         </Pressable>
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.sectionTitle}>{t('about.section.meta.title')}</Text>
-        <Text style={styles.sectionBody}>
+        <AppText style={styles.sectionTitle}>{t('about.section.meta.title')}</AppText>
+        <AppText style={styles.sectionBody}>
           {t('about.section.meta.version')}: {version}
-        </Text>
-        <Text style={[styles.sectionBody, styles.metaHint]}>{t('about.section.meta.support')}</Text>
+        </AppText>
+        <AppText style={[styles.sectionBody, styles.metaHint]}>{t('about.section.meta.support')}</AppText>
         <Pressable onPress={handleEmailPress}>
-          <Text style={styles.emailLink}>{SUPPORT_EMAIL}</Text>
+          <AppText style={styles.emailLink}>{SUPPORT_EMAIL}</AppText>
         </Pressable>
       </Card>
     </ScreenContainer>

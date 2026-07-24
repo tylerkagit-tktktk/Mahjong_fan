@@ -1,7 +1,8 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AppText from '../components/AppText';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomActionBar from '../components/BottomActionBar';
 import Card from '../components/Card';
@@ -378,17 +379,17 @@ function AddHandScreen({ navigation, route }: Props) {
           },
         ]}
       >
-        <Text style={styles.pageTitle}>{t('addHand.title')}</Text>
-        <Text style={styles.currencyText}>
+        <AppText style={styles.pageTitle}>{t('addHand.title')}</AppText>
+        <AppText style={styles.currencyText}>
           {`${t('addHand.currency')}${formatCurrencyUnit(currencyCode)}`}
-        </Text>
+        </AppText>
         {error && !showFanInlineError && !showWinnerInlineError && !showDiscarderInlineError ? (
-          <Text style={styles.errorText}>{error}</Text>
+          <AppText style={styles.errorText}>{error}</AppText>
         ) : null}
 
         {!isPma && !isHkCustom ? (
           <Card style={styles.card}>
-            <Text style={styles.sectionTitle}>{t('addHand.type')}</Text>
+            <AppText style={styles.sectionTitle}>{t('addHand.type')}</AppText>
             <SegmentedControl
               options={handTypeOptions}
               value={handType}
@@ -399,7 +400,7 @@ function AddHandScreen({ navigation, route }: Props) {
         ) : null}
 
         <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{inputLabel}</Text>
+          <AppText style={styles.sectionTitle}>{inputLabel}</AppText>
           <View style={styles.stepperContainer}>
             <Pressable
               style={styles.stepperButton}
@@ -407,55 +408,55 @@ function AddHandScreen({ navigation, route }: Props) {
                 setFanValue((prev) => Math.max(1, prev - 1));
               }}
             >
-              <Text style={styles.stepperButtonText}>-</Text>
+              <AppText style={styles.stepperButtonText}>-</AppText>
             </Pressable>
-            <Text style={styles.stepperValue}>{fanValue}</Text>
+            <AppText style={styles.stepperValue}>{fanValue}</AppText>
             <Pressable
               style={styles.stepperButton}
               onPress={() => {
                 setFanValue((prev) => Math.min(maxFan, prev + 1));
               }}
             >
-              <Text style={styles.stepperButtonText}>+</Text>
+              <AppText style={styles.stepperButtonText}>+</AppText>
             </Pressable>
           </View>
-          <Text style={styles.helperText}>{inputHint}</Text>
+          <AppText style={styles.helperText}>{inputHint}</AppText>
           {isHkCustom && liveFanValue >= 1 && liveFanValid && liveEffectiveFan !== null && liveBaseAmount !== null ? (
             <>
-              <Text style={styles.helperText}>
+              <AppText style={styles.helperText}>
                 {`${t('addHand.realtime.effectiveFan')} = ${
                   capFan === null ? `max(${liveFanValue}, ${minFanToWin})` : `min(max(${liveFanValue}, ${minFanToWin}), ${capFan})`
                 } = ${liveEffectiveFan}`}
-              </Text>
-              <Text style={styles.helperTextSubLine}>
+              </AppText>
+              <AppText style={styles.helperTextSubLine}>
                 {`${t('addHand.realtime.baseAmount')} = ${liveEffectiveFan} x ${unitPerFan} = ${formatCurrencyAmount(
                   liveBaseAmount,
                   currencyCode,
                 )}`}
-              </Text>
+              </AppText>
               {settlementType === 'zimo' && liveZimoPerLoser !== null ? (
-                <Text style={styles.helperTextSubLine}>
+                <AppText style={styles.helperTextSubLine}>
                   {t('addHand.realtime.custom.zimo')
                     .replace('{amount}', formatCurrencyAmount(liveZimoPerLoser, currencyCode))}
-                </Text>
+                </AppText>
               ) : null}
               {settlementType === 'discard' && liveDiscarderPays !== null ? (
-                <Text style={styles.helperTextSubLine}>
+                <AppText style={styles.helperTextSubLine}>
                   {t('addHand.realtime.custom.discard')
                     .replace('{amount}', formatCurrencyAmount(liveDiscarderPays, currencyCode))}
-                </Text>
+                </AppText>
               ) : null}
-              <Text style={styles.helperTextSubLine}>{t('addHand.realtime.reminder')}</Text>
+              <AppText style={styles.helperTextSubLine}>{t('addHand.realtime.reminder')}</AppText>
             </>
           ) : null}
-          {showFanInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
+          {showFanInlineError ? <AppText style={styles.errorText}>{error}</AppText> : null}
         </Card>
 
         {!isPma ? (
           <Card style={styles.card}>
             {isHkCustom ? (
               <>
-                <Text style={styles.sectionTitle}>{t('addHand.settlementType')}</Text>
+                <AppText style={styles.sectionTitle}>{t('addHand.settlementType')}</AppText>
                 <SegmentedControl
                   options={settlementOptions}
                   value={settlementType}
@@ -469,7 +470,7 @@ function AddHandScreen({ navigation, route }: Props) {
                 />
               </>
             ) : null}
-            <Text style={styles.sectionTitle}>{t('addHand.winner')}</Text>
+            <AppText style={styles.sectionTitle}>{t('addHand.winner')}</AppText>
             <PillGroup
               options={winnerOptions}
               valueKey={winnerId}
@@ -477,13 +478,13 @@ function AddHandScreen({ navigation, route }: Props) {
               disabled={saving}
               noneLabel={t('addHand.none')}
             />
-            {showWinnerInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
+            {showWinnerInlineError ? <AppText style={styles.errorText}>{error}</AppText> : null}
           </Card>
         ) : null}
 
         {!isPma && (!isHkCustom || settlementType === 'discard') ? (
           <Card style={styles.card}>
-            <Text style={styles.sectionTitle}>{t('addHand.discarder')}</Text>
+            <AppText style={styles.sectionTitle}>{t('addHand.discarder')}</AppText>
             <PillGroup
               options={discarderOptions}
               valueKey={discarderId}
@@ -491,7 +492,7 @@ function AddHandScreen({ navigation, route }: Props) {
               disabled={saving}
               noneLabel={t('addHand.none')}
             />
-            {showDiscarderInlineError ? <Text style={styles.errorText}>{error}</Text> : null}
+            {showDiscarderInlineError ? <AppText style={styles.errorText}>{error}</AppText> : null}
           </Card>
         ) : null}
 

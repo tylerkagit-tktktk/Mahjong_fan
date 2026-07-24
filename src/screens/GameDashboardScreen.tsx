@@ -1,7 +1,8 @@
 import { useFocusEffect } from '@react-navigation/native';
+import AppText from '../components/AppText';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, SectionList, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, SectionList, Share, StyleSheet, View } from 'react-native';
 import AppButton from '../components/AppButton';
 import Card from '../components/Card';
 import ScreenContainer from '../components/ScreenContainer';
@@ -621,63 +622,63 @@ function GameDashboardScreen({ navigation, route }: Props) {
           style={({ pressed }) => [styles.handRow, pressed && styles.handRowPressed]}
         >
           <View style={styles.handTopRow}>
-            <Text style={styles.handIndex}>#{hand.handIndex + 1}</Text>
-            <Text style={styles.handRound}>{handRoundLabel}</Text>
+            <AppText style={styles.handIndex}>#{hand.handIndex + 1}</AppText>
+            <AppText style={styles.handRound}>{handRoundLabel}</AppText>
           </View>
 
           <View style={styles.handOutcomeRow}>
-            <Text style={styles.handOutcomeIcon}>{hand.isDraw ? '⦿' : hand.type === 'zimo' ? '◎' : '•'}</Text>
-            <Text style={styles.handOutcomeText}>{outcomeLabel}</Text>
+            <AppText style={styles.handOutcomeIcon}>{hand.isDraw ? '⦿' : hand.type === 'zimo' ? '◎' : '•'}</AppText>
+            <AppText style={styles.handOutcomeText}>{outcomeLabel}</AppText>
             {hand.isDraw && dealerAction ? (
               <View style={styles.dealerActionBadge}>
-                <Text style={styles.dealerActionText}>
+                <AppText style={styles.dealerActionText}>
                   {dealerAction === 'stick'
                     ? translateWithFallback(t, 'game.detail.hand.dealerAction.stick', '番莊')
                     : translateWithFallback(t, 'game.detail.hand.dealerAction.pass', '過莊')}
-                </Text>
+                </AppText>
               </View>
             ) : null}
           </View>
 
-          <Text style={styles.handMetaText}>{getHandSummary(hand, winnerName, discarderName, t)}</Text>
+          <AppText style={styles.handMetaText}>{getHandSummary(hand, winnerName, discarderName, t)}</AppText>
 
           <View style={styles.deltaChipsRow}>
             {seatLabels.map((seat) => (
               <View key={`${hand.id}-delta-${seat.seatIndex}`} style={styles.deltaChip}>
-                <Text style={styles.deltaChipSeat}>{seat.label}</Text>
-                <Text style={styles.deltaChipValue}>
+                <AppText style={styles.deltaChipSeat}>{seat.label}</AppText>
+                <AppText style={styles.deltaChipValue}>
                   {deltasQ
                     ? formatSignedMoney((deltasQ[seat.seatIndex] ?? 0) / 4, bundle.game.currencySymbol ?? '')
                     : '—'}
-                </Text>
+                </AppText>
               </View>
             ))}
           </View>
 
           {expanded ? (
             <View style={styles.expandedWrap}>
-              <Text style={styles.expandedText}>
+              <AppText style={styles.expandedText}>
                 {translateWithFallback(t, 'game.detail.hand.field.winnerSeat', '贏家座位')}：{hand.winnerSeatIndex ?? '—'}
-              </Text>
-              <Text style={styles.expandedText}>
+              </AppText>
+              <AppText style={styles.expandedText}>
                 {translateWithFallback(t, 'game.detail.hand.field.winner', '贏家')}：{winnerName}
-              </Text>
+              </AppText>
               {!hand.isDraw && discarderName ? (
-                <Text style={styles.expandedText}>
+                <AppText style={styles.expandedText}>
                   {translateWithFallback(t, 'game.detail.hand.field.discarder', '點炮者')}：{discarderName}
-                </Text>
+                </AppText>
               ) : null}
               {hand.isDraw && dealerAction ? (
-                <Text style={styles.expandedText}>
+                <AppText style={styles.expandedText}>
                   {translateWithFallback(t, 'game.detail.hand.field.dealerAction', '莊家處理')}：
                   {dealerAction === 'stick'
                     ? translateWithFallback(t, 'game.detail.hand.dealerAction.stick', '番莊')
                     : translateWithFallback(t, 'game.detail.hand.dealerAction.pass', '過莊')}
-                </Text>
+                </AppText>
               ) : null}
-              <Text style={styles.expandedText}>
+              <AppText style={styles.expandedText}>
                 {translateWithFallback(t, 'game.detail.hand.nextRound', '下一手')}：{hand.nextRoundLabelZh || '—'}
-              </Text>
+              </AppText>
             </View>
           ) : null}
         </Pressable>
@@ -698,7 +699,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
         }}
         style={styles.windSectionHeader}
       >
-        <Text style={styles.windSectionTitle}>
+        <AppText style={styles.windSectionTitle}>
           {section.totalCount > section.data.length
             ? translateWithFallback(
                 t,
@@ -711,8 +712,8 @@ function GameDashboardScreen({ navigation, route }: Props) {
                 },
               )
             : section.title}
-        </Text>
-        <Text style={styles.windSectionToggle}>{collapsedSections[section.title] !== false ? '＋' : '－'}</Text>
+        </AppText>
+        <AppText style={styles.windSectionToggle}>{collapsedSections[section.title] !== false ? '＋' : '－'}</AppText>
       </Pressable>
     ),
     [collapsedSections, t],
@@ -731,7 +732,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
     return (
       <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
         <View style={styles.loadingWrap}>
-          <Text style={styles.metaText}>{translateWithFallback(t, 'game.detail.loading', '載入中…')}</Text>
+          <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.loading', '載入中…')}</AppText>
         </View>
       </ScreenContainer>
     );
@@ -741,7 +742,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
     return (
       <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
         <View style={styles.loadingWrap}>
-          <Text style={styles.errorText}>{error ?? translateWithFallback(t, 'errors.loadGame', '載入對局失敗')}</Text>
+          <AppText style={styles.errorText}>{error ?? translateWithFallback(t, 'errors.loadGame', '載入對局失敗')}</AppText>
           <AppButton
             label={translateWithFallback(t, 'common.back', '返回')}
             onPress={() => navigation.goBack()}
@@ -770,128 +771,128 @@ function GameDashboardScreen({ navigation, route }: Props) {
           <>
             <Card style={styles.card}>
               <View style={styles.heroTopRow}>
-                <Text style={styles.heroLabel}>
+                <AppText style={styles.heroLabel}>
                   {translateWithFallback(t, 'game.detail.header.title', '對局總結')}
-                </Text>
+                </AppText>
                 <View style={styles.statusBadge}>
-                  <Text style={styles.statusBadgeText}>
+                  <AppText style={styles.statusBadgeText}>
                     {translateWithFallback(t, 'game.detail.header.statusEnded', '已結束')}
-                  </Text>
+                  </AppText>
                 </View>
               </View>
-              <Text style={styles.headerTitle}>{bundle.game.title}</Text>
-              <Text style={styles.heroSubTitle}>
+              <AppText style={styles.headerTitle}>{bundle.game.title}</AppText>
+              <AppText style={styles.heroSubTitle}>
                 {`${bundle.game.currentRoundLabelZh ?? '—'} · ${translateWithFallback(
                   t,
                   'game.detail.header.handsPlayed',
                   '已打 {count} 鋪',
                   { count: handsCount },
                 )}`}
-              </Text>
+              </AppText>
               <View style={styles.headerRow}>
-                <Text style={styles.heroDateText}>{formatDate(bundle.game.createdAt)}</Text>
+                <AppText style={styles.heroDateText}>{formatDate(bundle.game.createdAt)}</AppText>
               </View>
             </Card>
 
             {!isEnded ? (
               <Card style={styles.card}>
-                <Text style={styles.warningText}>
+                <AppText style={styles.warningText}>
                   {translateWithFallback(t, 'game.detail.readOnlyWarning', '此頁僅供已結束對局查看。')}
-                </Text>
+                </AppText>
               </Card>
             ) : null}
 
             <Card style={styles.card}>
-              <Text style={styles.sectionTitle}>
+              <AppText style={styles.sectionTitle}>
                 {translateWithFallback(t, 'game.detail.players.title', '玩家排名')}
-              </Text>
+              </AppText>
               {rankedPlayers.map((player, index) => (
                 <View key={`rank-${player.playerId}`} style={styles.playerRow}>
-                  <Text style={styles.playerRank}>{getRankPrefix(index)}</Text>
+                  <AppText style={styles.playerRank}>{getRankPrefix(index)}</AppText>
                   <View style={styles.playerMetaWrap}>
-                    <Text style={styles.playerName}>{player.name}</Text>
+                    <AppText style={styles.playerName}>{player.name}</AppText>
                   </View>
-                  <Text style={styles.playerTotal}>
+                  <AppText style={styles.playerTotal}>
                     {formatSignedMoney(player.total, bundle.game.currencySymbol ?? '')}
-                  </Text>
+                  </AppText>
                 </View>
               ))}
             </Card>
 
             <Card style={styles.card}>
-              <Text style={styles.sectionTitle}>
+              <AppText style={styles.sectionTitle}>
                 {translateWithFallback(t, 'game.detail.rules.title', '規則摘要')}
-              </Text>
-              <Text style={styles.metaText}>
+              </AppText>
+              <AppText style={styles.metaText}>
                 {translateWithFallback(t, 'game.detail.rules.variant', '牌型')}：{localizedVariant}
-              </Text>
-              <Text style={styles.metaText}>
+              </AppText>
+              <AppText style={styles.metaText}>
                 {translateWithFallback(t, 'game.detail.rules.currency', '幣別')}：
                 {bundle.game.currencySymbol || '—'}
-              </Text>
+              </AppText>
               {typeof rules?.minFanToWin === 'number' ? (
-                <Text style={styles.metaText}>
+                <AppText style={styles.metaText}>
                   {translateWithFallback(t, 'game.detail.rules.minFan', '最低番數')}：{rules.minFanToWin}
-                </Text>
+                </AppText>
               ) : null}
               {rules?.variant === 'HK' ? (
                 <>
-                  <Text style={styles.metaText}>
+                  <AppText style={styles.metaText}>
                     {translateWithFallback(t, 'game.detail.rules.hkPreset', '計分模式')}：{localizedScoringPreset}
-                  </Text>
+                  </AppText>
                   {rules.hk?.scoringPreset === 'traditionalFan' ? (
                     <>
-                      <Text style={styles.metaText}>
+                      <AppText style={styles.metaText}>
                         {translateWithFallback(t, 'game.detail.rules.hkGunMode', '銃制')}：{localizedGunMode}
-                      </Text>
-                      <Text style={styles.metaText}>
+                      </AppText>
+                      <AppText style={styles.metaText}>
                         {translateWithFallback(t, 'game.detail.rules.hkStake', '注碼')}：{localizedStakePreset}
-                      </Text>
+                      </AppText>
                     </>
                   ) : null}
                   {customUnitPerFanLine ? (
-                    <Text style={styles.metaText}>{customUnitPerFanLine}</Text>
+                    <AppText style={styles.metaText}>{customUnitPerFanLine}</AppText>
                   ) : null}
                   {customMultiplierSummary ? (
-                    <Text style={styles.metaText}>{customMultiplierSummary}</Text>
+                    <AppText style={styles.metaText}>{customMultiplierSummary}</AppText>
                   ) : null}
-                  <Text style={styles.metaText}>
+                  <AppText style={styles.metaText}>
                     {translateWithFallback(t, 'game.detail.rules.hkCapFan', '爆棚')}：
                     {rules.hk?.capFan == null ? '∞' : rules.hk.capFan}
-                  </Text>
+                  </AppText>
                 </>
               ) : null}
             </Card>
 
             <Card style={styles.card}>
-              <Text style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.stats.title', '統計')}</Text>
-              <Text style={styles.statsHeadline}>
+              <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.stats.title', '統計')}</AppText>
+              <AppText style={styles.statsHeadline}>
                 {translateWithFallback(t, 'game.detail.stats.hands', '手數')}：{handsCount}
                 {'  ·  '}
                 {translateWithFallback(t, 'game.detail.stats.draws', '流局')}：{gameStats?.draws ?? 0}
-              </Text>
+              </AppText>
               {rankedPlayers.map((player) => (
-                <Text key={`wins-${player.playerId}`} style={styles.statsPlayerLine}>
+                <AppText key={`wins-${player.playerId}`} style={styles.statsPlayerLine}>
                   {player.name}：
                   {translateWithFallback(t, 'game.detail.stats.wins', '食糊')} {gameStats?.winsByPlayerId[player.playerId] ?? 0}
                   {' ｜ '}
                   {translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} {gameStats?.zimoByPlayerId[player.playerId] ?? 0}
                   {' ｜ '}
                   {translateWithFallback(t, 'game.detail.stats.discards', '出銃')} {gameStats?.discardByPlayerId[player.playerId] ?? 0}
-                </Text>
+                </AppText>
               ))}
-              <Text style={styles.statsHighlightLine}>
+              <AppText style={styles.statsHighlightLine}>
                 {translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}：
                 {gameStats?.mostDiscarder ? `${gameStats.mostDiscarder.name} (${gameStats.mostDiscarder.count})` : '—'}
-              </Text>
-              <Text style={styles.statsHighlightLine}>
+              </AppText>
+              <AppText style={styles.statsHighlightLine}>
                 {translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}：
                 {gameStats?.mostZimo ? `${gameStats.mostZimo.name} (${gameStats.mostZimo.count})` : '—'}
-              </Text>
+              </AppText>
             </Card>
 
             <Card style={styles.card}>
-              <Text style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.hands.title', '全部牌局')}</Text>
+              <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.hands.title', '全部牌局')}</AppText>
               <View style={styles.filterWrap}>
                 {filterOptions.map((option) => {
                   const selected = handFilter === option.key;
@@ -905,18 +906,18 @@ function GameDashboardScreen({ navigation, route }: Props) {
                       }}
                       style={[styles.filterChip, selected && styles.filterChipActive]}
                     >
-                      <Text style={[styles.filterChipText, selected && styles.filterChipTextActive]}>
+                      <AppText style={[styles.filterChipText, selected && styles.filterChipTextActive]}>
                         {option.label}
-                      </Text>
+                      </AppText>
                     </Pressable>
                   );
                 })}
               </View>
 
               <View style={styles.jumpWrap}>
-                <Text style={styles.jumpLabel}>
+                <AppText style={styles.jumpLabel}>
                   {translateWithFallback(t, 'game.detail.hands.jumpTo', '跳到：')}
-                </Text>
+                </AppText>
                 {jumpButtons.map((jump) => (
                   <Pressable
                     key={jump.wind}
@@ -924,9 +925,9 @@ function GameDashboardScreen({ navigation, route }: Props) {
                     onPress={() => jumpToWind(jump.wind)}
                     style={styles.jumpButton}
                   >
-                    <Text style={styles.jumpButtonText}>
+                    <AppText style={styles.jumpButtonText}>
                       {translateWithFallback(t, jump.key, jump.wind)}
-                    </Text>
+                    </AppText>
                   </Pressable>
                 ))}
               </View>

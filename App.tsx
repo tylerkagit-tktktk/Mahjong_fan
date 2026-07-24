@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './src/navigation/RootNavigator';
 import { linking } from './src/navigation/linking';
 import { initializeI18n, t } from './src/i18n/i18n';
+import { initializeAppPreferences } from './src/settings/appPreferences';
 import { dumpBreadcrumbs, getLastBreadcrumb, getLastSqlBreadcrumb } from './src/debug/breadcrumbs';
 import AppErrorBoundary from './src/components/AppErrorBoundary';
 import { isDev } from './src/debug/isDev';
@@ -38,6 +39,9 @@ function App() {
   useEffect(() => {
     initializeI18n().catch((error) => {
       console.warn('[i18n] initialize failed', error);
+    });
+    initializeAppPreferences().catch((error) => {
+      console.warn('[settings] initialize failed', error);
     });
   }, []);
 

@@ -1,4 +1,5 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
+import AppText from './AppText';
 import theme from '../theme/theme';
 import { typography } from '../styles/typography';
 
@@ -38,8 +39,8 @@ function PlayerSeatCard({
   return (
     <View style={[styles.card, compact && styles.cardCompact, !isOccupied && styles.cardEmpty]}>
       <View style={styles.headerRow}>
-        <Text style={styles.seatLabel}>{seatLabel}</Text>
-        {statusLabel ? <Text style={[styles.statusTag, !isOccupied && styles.statusTagMuted]}>{statusLabel}</Text> : null}
+        <AppText style={styles.seatLabel}>{seatLabel}</AppText>
+        {statusLabel ? <AppText style={[styles.statusTag, !isOccupied && styles.statusTagMuted]}>{statusLabel}</AppText> : null}
       </View>
 
       <View style={styles.contentRow}>
@@ -47,18 +48,18 @@ function PlayerSeatCard({
           {avatarUrl ? (
             <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
           ) : (
-            <Text style={[styles.avatarFallback, compact && styles.avatarFallbackCompact]}>{getInitials(displayName)}</Text>
+            <AppText style={[styles.avatarFallback, compact && styles.avatarFallbackCompact]}>{getInitials(displayName)}</AppText>
           )}
         </View>
 
         <View style={styles.nameBlock}>
-          <Text style={[styles.displayName, !isOccupied && styles.displayNameMuted]} numberOfLines={1}>
+          <AppText style={[styles.displayName, !isOccupied && styles.displayNameMuted]} numberOfLines={1}>
             {displayName}
-          </Text>
+          </AppText>
           <View style={styles.badgesRow}>
-            {isTemporary ? <Text style={styles.badgeMuted}>{temporaryLabel}</Text> : null}
-            {isHost ? <Text style={styles.badge}>房主</Text> : null}
-            {isSelf ? <Text style={styles.badgePrimary}>你</Text> : null}
+            {isTemporary ? <AppText style={styles.badgeMuted}>{temporaryLabel}</AppText> : null}
+            {isHost ? <AppText style={styles.badge}>房主</AppText> : null}
+            {isSelf ? <AppText style={styles.badgePrimary}>你</AppText> : null}
           </View>
         </View>
       </View>

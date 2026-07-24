@@ -1,5 +1,6 @@
 import { Ref } from 'react';
-import { StyleSheet, Text, TextInput } from 'react-native';
+import AppText from '../../../components/AppText';
+import { StyleSheet, TextInput } from 'react-native';
 import Card from '../../../components/Card';
 import TextField from '../../../components/TextField';
 import theme from '../../../theme/theme';
@@ -26,7 +27,7 @@ function GameTitleSection({ label, value, placeholder, onChangeText, inputRef, e
         placeholder={placeholder}
         editable={!disabled}
       />
-      {error ? <Text style={styles.inlineErrorText}>{error}</Text> : null}
+      {error ? <AppText style={styles.inlineErrorText}>{error}</AppText> : null}
     </Card>
   );
 }

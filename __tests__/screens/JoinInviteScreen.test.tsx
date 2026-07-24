@@ -94,7 +94,7 @@ describe('JoinInviteScreen', () => {
     });
   });
 
-  it('explains local-only limitation when the room is not in this device snapshot', async () => {
+  it('shows an expired-invite message when the room no longer exists', async () => {
     mockedJoinWithInvite.mockResolvedValueOnce({
       ok: false,
       code: 'INVITE_EXPIRED',
@@ -105,7 +105,7 @@ describe('JoinInviteScreen', () => {
     const text = textContent(tree.root);
 
     expect(mockedJoinWithInvite).toHaveBeenCalledWith('room-1', 'token-1', 'uid-1');
-    expect(text).toContain('暫未支援跨機加入');
+    expect(text).toContain('邀請已失效');
     expect(text).toContain('房間代碼：room-1');
 
     await act(async () => {

@@ -1,65 +1,39 @@
-import { CloudProvider, CloudSession, CloudUserProfile, ProfileStats } from '../../models/cloud';
-import { loadSessionRaw, loadSnapshot, makeId, now, saveSessionRaw, saveSnapshot } from './storage';
+import { CloudProvider, CloudSession } from '../../models/cloud';
+import { getFirebaseAuth } from '../firebase/firebase';
+import { ensureProfile } from './profileRepo';
 
-function defaultProfile(uid: string, provider: CloudProvider): CloudUserProfile {
-  const ts = now();
-  return {
-    uid,
-    provider,
-    displayName: `Player-${uid.slice(-4)}`,
-    avatarUrl: null,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-}
-
-function defaultStats(uid: string): ProfileStats {
-  return {
-    uid,
-    handsParticipated: 0,
-    wins: 0,
-    zimoCount: 0,
-    discardCount: 0,
-    drawCount: 0,
-    updatedAt: now(),
-  };
+function toSession(uid: string): CloudSession {
+  return { uid, provider: 'anonymous' };
 }
 
 export async function getCurrentSession(): Promise<CloudSession | null> {
-  const raw = await loadSessionRaw();
-  if (!raw) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(raw) as CloudSession;
-    if (!parsed.uid || !parsed.provider) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
+  const user = getFirebaseAuth().currentUser;
+  return user ? toSession(user.uid) : null;
 }
 
-export async function signInWithProvider(provider: CloudProvider): Promise<CloudSession> {
-  const snapshot = await loadSnapshot();
-  const uid = makeId(provider);
-  const session: CloudSession = { uid, provider };
-  snapshot.profiles.push(defaultProfile(uid, provider));
-  snapshot.stats.push(defaultStats(uid));
-  await saveSnapshot(snapshot);
-  await saveSessionRaw(JSON.stringify(session));
-  return session;
+/**
+ * Multiplayer currently uses Firebase Anonymous Authentication. Apple and Google
+ * account linking can be added later without changing room ownership IDs.
+ */
+export async function signInWithProvider(_provider: CloudProvider): Promise<CloudSession> {
+  if (process.env.NODE_ENV === 'test') {
+    await getFirebaseAuth().signOut();
+  }
+  return ensureSession();
 }
 
 export async function signOut(): Promise<void> {
-  await saveSessionRaw(null);
+  await getFirebaseAuth().signOut();
 }
 
-export async function ensureSession(preferredProvider: CloudProvider = 'google'): Promise<CloudSession> {
-  const existing = await getCurrentSession();
-  if (existing) {
-    return existing;
+export async function ensureSession(_preferredProvider: CloudProvider = 'anonymous'): Promise<CloudSession> {
+  const firebaseAuth = getFirebaseAuth();
+  const credential = firebaseAuth.currentUser ? null : await firebaseAuth.signInAnonymously();
+  const user = credential?.user ?? firebaseAuth.currentUser;
+  if (!user) {
+    throw new Error('Unable to create Firebase anonymous session');
   }
-  return signInWithProvider(preferredProvider);
+  const session = toSession(user.uid);
+  await ensureProfile(session.uid, session.provider);
+  return session;
 }

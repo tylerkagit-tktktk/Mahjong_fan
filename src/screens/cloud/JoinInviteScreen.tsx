@@ -1,6 +1,7 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AppText from '../../components/AppText';
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import AppButton from '../../components/AppButton';
 import Card from '../../components/Card';
 import ScreenContainer from '../../components/ScreenContainer';
@@ -14,7 +15,7 @@ import theme from '../../theme/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinInvite'>;
 
-type JoinState = 'loading' | 'missingParams' | 'localOnlyUnsupported' | 'invalidInvite' | 'roomFull' | 'roomEnded' | 'error';
+type JoinState = 'loading' | 'missingParams' | 'invalidInvite' | 'roomFull' | 'roomEnded' | 'error';
 
 function translateWithFallback(
   t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
@@ -80,11 +81,6 @@ function JoinInviteScreen({ navigation, route }: Props) {
           setDetail(result.message);
           return;
         }
-        if (result.code === 'INVITE_EXPIRED' && result.message.toLowerCase().includes('not found')) {
-          setState('localOnlyUnsupported');
-          setDetail(result.message);
-          return;
-        }
         if (result.code === 'INVITE_EXPIRED') {
           setState('invalidInvite');
           setDetail(result.message);
@@ -125,15 +121,6 @@ function JoinInviteScreen({ navigation, route }: Props) {
           title: translateWithFallback(t, 'joinInvite.missingTitle', '邀請連結不完整'),
           body: translateWithFallback(t, 'joinInvite.missingBody', '此邀請缺少房間代碼或驗證資料，請房主重新產生邀請。'),
         };
-      case 'localOnlyUnsupported':
-        return {
-          title: translateWithFallback(t, 'joinInvite.localOnlyTitle', '暫未支援跨機加入'),
-          body: translateWithFallback(
-            t,
-            'joinInvite.localOnlyBody',
-            '目前同步房間仍儲存在房主本機。此裝置找不到該房間，等 Firebase 同步接上後就可以用邀請連結跨機加入。',
-          ),
-        };
       case 'invalidInvite':
         return {
           title: translateWithFallback(t, 'joinInvite.invalidTitle', '邀請已失效'),
@@ -162,15 +149,15 @@ function JoinInviteScreen({ navigation, route }: Props) {
     <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
       <View style={styles.content}>
         <Card style={styles.card}>
-          <Text style={styles.kicker}>{translateWithFallback(t, 'joinInvite.kicker', '房間邀請')}</Text>
-          <Text style={styles.title}>{copy.title}</Text>
-          <Text style={styles.body}>{copy.body}</Text>
+          <AppText style={styles.kicker}>{translateWithFallback(t, 'joinInvite.kicker', '房間邀請')}</AppText>
+          <AppText style={styles.title}>{copy.title}</AppText>
+          <AppText style={styles.body}>{copy.body}</AppText>
           {roomId ? (
-            <Text style={styles.meta}>
+            <AppText style={styles.meta}>
               {translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}：{roomId}
-            </Text>
+            </AppText>
           ) : null}
-          {detail ? <Text style={styles.detail}>{detail}</Text> : null}
+          {detail ? <AppText style={styles.detail}>{detail}</AppText> : null}
           <View style={styles.actions}>
             <AppButton
               label={translateWithFallback(t, 'common.back', '返回')}

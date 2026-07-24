@@ -241,6 +241,29 @@ describe('MultiplayerGameTableScreen end game flow', () => {
     });
   });
 
+  it('archives and opens the summary when another player ends the room', async () => {
+    let emitRoom: ((room: ReturnType<typeof createRoom>) => void) | null = null;
+    mockedSubscribeRoom.mockImplementation((_roomId, cb) => {
+      emitRoom = cb;
+      cb(createRoom());
+      return jest.fn();
+    });
+    const { tree, navigation } = await renderScreen();
+
+    await act(async () => {
+      emitRoom?.({ ...createRoom(), status: 'ended' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockedArchiveRoomToLocal).toHaveBeenCalledWith('room-1', 'uid-1');
+    expect(navigation.replace).toHaveBeenCalledWith('CloudArchiveDetail', { roomId: 'room-1' });
+
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
   it('prevents duplicate end submits while ending is in-flight', async () => {
     let resolveEndRoom: (() => void) | null = null;
     mockedEndRoom.mockImplementation(

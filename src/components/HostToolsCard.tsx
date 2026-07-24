@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import AppText from './AppText';
+import { Pressable, StyleSheet, View } from 'react-native';
 import theme from '../theme/theme';
 import { typography } from '../styles/typography';
 
@@ -16,10 +17,10 @@ function HostToolsCard({ title, subtitle, expanded, onToggle, children }: Props)
     <View style={styles.card}>
       <Pressable style={({ pressed }) => [styles.headerButton, pressed && styles.headerPressed]} onPress={onToggle}>
         <View style={styles.headerTextBlock}>
-          <Text style={styles.title}>{title}</Text>
-          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          <AppText style={styles.title}>{title}</AppText>
+          {subtitle ? <AppText style={styles.subtitle}>{subtitle}</AppText> : null}
         </View>
-        <Text style={styles.chevron}>{expanded ? '收起' : '展開'}</Text>
+        <AppText style={styles.chevron}>{expanded ? '收起' : '展開'}</AppText>
       </Pressable>
 
       {expanded ? <View style={styles.content}>{children}</View> : null}

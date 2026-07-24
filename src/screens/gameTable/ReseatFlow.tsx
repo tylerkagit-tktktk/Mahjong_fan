@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import AppText from '../../components/AppText';
+import { Alert, Modal, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import AppButton from '../../components/AppButton';
 import { useAppLanguage } from '../../i18n/useAppLanguage';
 import theme from '../../theme/theme';
@@ -234,8 +235,8 @@ function ReseatFlow({
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalCardLarge}>
-          <Text style={styles.modalTitle}>{t('gameTable.reseat.modalTitle')}</Text>
-          <Text style={styles.modalSubtitleText}>{t('gameTable.reseat.modalSubtitle')}</Text>
+          <AppText style={styles.modalTitle}>{t('gameTable.reseat.modalTitle')}</AppText>
+          <AppText style={styles.modalSubtitleText}>{t('gameTable.reseat.modalSubtitle')}</AppText>
 
           <ScrollView
             style={styles.reseatScroll}

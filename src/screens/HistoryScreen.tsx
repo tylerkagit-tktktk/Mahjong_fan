@@ -1,7 +1,8 @@
 import { useFocusEffect } from '@react-navigation/native';
+import AppText from '../components/AppText';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import ScreenContainer from '../components/ScreenContainer';
@@ -208,7 +209,7 @@ function HistoryScreen({ navigation }: Props) {
         hitSlop={10}
         style={({ pressed }) => [styles.headerIconHitArea, pressed && styles.headerIconPressed]}
       >
-        <Text style={styles.headerBackIcon}>‹</Text>
+        <AppText style={styles.headerBackIcon}>‹</AppText>
       </Pressable>
     ),
     [navigation],
@@ -221,7 +222,7 @@ function HistoryScreen({ navigation }: Props) {
         hitSlop={10}
         style={({ pressed }) => [styles.headerIconHitArea, pressed && styles.headerIconPressed]}
       >
-        <Text style={styles.headerGearIcon}>⚙︎</Text>
+        <AppText style={styles.headerGearIcon}>⚙︎</AppText>
       </Pressable>
     ),
     [navigation],
@@ -385,7 +386,7 @@ function HistoryScreen({ navigation }: Props) {
 
   const renderItem = ({ item }: { item: FlatRow }) => {
     if (item.type === 'header') {
-      return <Text style={styles.groupHeader}>{item.label}</Text>;
+      return <AppText style={styles.groupHeader}>{item.label}</AppText>;
     }
 
     if (item.type === 'archive') {
@@ -423,9 +424,9 @@ function HistoryScreen({ navigation }: Props) {
               onPress={() => showDeleteConfirm(archive.roomId)}
               style={({ pressed }) => [styles.deleteAction, pressed && styles.deleteActionPressed]}
             >
-              <Text style={styles.deleteActionText}>
+              <AppText style={styles.deleteActionText}>
                 {translateWithFallback(t, 'games.deleteGameAlert.confirm', '刪除')}
-              </Text>
+              </AppText>
             </Pressable>
           )}
         >
@@ -434,23 +435,23 @@ function HistoryScreen({ navigation }: Props) {
             style={({ pressed }) => [styles.itemCard, pressed && styles.itemPressed]}
           >
             <View style={styles.itemHeaderRow}>
-              <Text style={styles.itemTitle} numberOfLines={1} ellipsizeMode="tail">
+              <AppText style={styles.itemTitle} numberOfLines={1} ellipsizeMode="tail">
                 {archive.title}
-              </Text>
-              <Text style={styles.itemDateText}>{formatDateTime(archive.createdAt)}</Text>
+              </AppText>
+              <AppText style={styles.itemDateText}>{formatDateTime(archive.createdAt)}</AppText>
             </View>
             <View style={styles.itemMetaRow}>
-              <Text style={styles.itemMeta}>{metaLine}</Text>
+              <AppText style={styles.itemMeta}>{metaLine}</AppText>
               <View style={styles.rightMetaWrap}>
                 <View style={[styles.itemStatusPill, styles.itemStatusEnded]}>
-                  <Text style={styles.itemStatusText}>雲端封存</Text>
+                  <AppText style={styles.itemStatusText}>雲端封存</AppText>
                 </View>
-                <Text style={styles.chevron}>›</Text>
+                <AppText style={styles.chevron}>›</AppText>
               </View>
             </View>
-            <Text style={styles.itemSummary}>
+            <AppText style={styles.itemSummary}>
               {`已封存到本機 ｜ ${archive.handCount} 手 ｜ v${archive.archiveVersion}`}
-            </Text>
+            </AppText>
           </Pressable>
         </Swipeable>
       );
@@ -524,9 +525,9 @@ function HistoryScreen({ navigation }: Props) {
             onPress={() => showDeleteConfirm(game.id)}
             style={({ pressed }) => [styles.deleteAction, pressed && styles.deleteActionPressed]}
           >
-            <Text style={styles.deleteActionText}>
+            <AppText style={styles.deleteActionText}>
               {translateWithFallback(t, 'games.deleteGameAlert.confirm', '刪除')}
-            </Text>
+            </AppText>
           </Pressable>
         )}
       >
@@ -542,13 +543,13 @@ function HistoryScreen({ navigation }: Props) {
           ]}
         >
           <View style={styles.itemHeaderRow}>
-            <Text style={styles.itemTitle} numberOfLines={1} ellipsizeMode="tail">
+            <AppText style={styles.itemTitle} numberOfLines={1} ellipsizeMode="tail">
               {game.title}
-            </Text>
-            <Text style={styles.itemDateText}>{formatDateTime(game.createdAt)}</Text>
+            </AppText>
+            <AppText style={styles.itemDateText}>{formatDateTime(game.createdAt)}</AppText>
           </View>
           <View style={styles.itemMetaRow}>
-            <Text style={styles.itemMeta}>{metaLine}</Text>
+            <AppText style={styles.itemMeta}>{metaLine}</AppText>
             <View style={styles.rightMetaWrap}>
               <View
                 style={[
@@ -556,12 +557,12 @@ function HistoryScreen({ navigation }: Props) {
                   isInProgress ? styles.itemStatusActive : isAbandoned ? styles.itemStatusAbandoned : styles.itemStatusEnded,
                 ]}
               >
-                <Text style={styles.itemStatusText}>{statusLabel}</Text>
+                <AppText style={styles.itemStatusText}>{statusLabel}</AppText>
               </View>
-              {canOpenDetail ? <Text style={styles.chevron}>›</Text> : null}
+              {canOpenDetail ? <AppText style={styles.chevron}>›</AppText> : null}
             </View>
           </View>
-          <Text style={hasResult ? styles.itemSummary : styles.itemSummaryMuted}>{settlementLine}</Text>
+          <AppText style={hasResult ? styles.itemSummary : styles.itemSummaryMuted}>{settlementLine}</AppText>
         </Pressable>
       </Swipeable>
     );
@@ -577,10 +578,10 @@ function HistoryScreen({ navigation }: Props) {
 
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
-      <Text style={styles.emptyTitle}>{translateWithFallback(t, 'history.empty.title', '未有對局記錄')}</Text>
-      <Text style={styles.emptySubtitle}>{translateWithFallback(t, 'history.empty.subtitle', '按「新開局」開始第一局')}</Text>
+      <AppText style={styles.emptyTitle}>{translateWithFallback(t, 'history.empty.title', '未有對局記錄')}</AppText>
+      <AppText style={styles.emptySubtitle}>{translateWithFallback(t, 'history.empty.subtitle', '按「新開局」開始第一局')}</AppText>
       <Pressable style={styles.emptyAction} onPress={() => navigation.navigate('NewGameStepper')}>
-        <Text style={styles.emptyActionText}>{translateWithFallback(t, 'history.empty.actionStart', '開始新對局')}</Text>
+        <AppText style={styles.emptyActionText}>{translateWithFallback(t, 'history.empty.actionStart', '開始新對局')}</AppText>
       </Pressable>
     </View>
   );
@@ -597,22 +598,22 @@ function HistoryScreen({ navigation }: Props) {
                 onPress={() => setFilter(option.key)}
                 style={[styles.filterPill, selected && styles.filterPillActive]}
               >
-                <Text style={[styles.filterText, selected && styles.filterTextActive]}>{option.label}</Text>
+                <AppText style={[styles.filterText, selected && styles.filterTextActive]}>{option.label}</AppText>
               </Pressable>
             );
           })}
         </View>
         <View style={styles.summaryBar}>
           <View style={styles.summaryCell}>
-            <Text style={styles.summaryKicker}>
+            <AppText style={styles.summaryKicker}>
               {`${filterLabel}${translateWithFallback(t, 'history.summary.matches', '場數')}`}
-            </Text>
-            <Text style={styles.summaryValue}>{summaryStats.totalMatches}</Text>
+            </AppText>
+            <AppText style={styles.summaryValue}>{summaryStats.totalMatches}</AppText>
           </View>
           <View style={styles.summaryDivider} />
           <View style={styles.summaryCell}>
-            <Text style={styles.summaryKicker}>{translateWithFallback(t, 'history.summary.ended', '已結束')}</Text>
-            <Text style={styles.summaryValue}>{summaryStats.endedMatches}</Text>
+            <AppText style={styles.summaryKicker}>{translateWithFallback(t, 'history.summary.ended', '已結束')}</AppText>
+            <AppText style={styles.summaryValue}>{summaryStats.endedMatches}</AppText>
           </View>
         </View>
       </View>

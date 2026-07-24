@@ -55,11 +55,10 @@ function formatAmountRaw(amount: number): string {
 }
 
 export function formatCurrencyAmount(amount: number, code: CurrencyCode): string {
-  const { symbol, code: safeCode } = getCurrencyMeta(code);
-  return `${symbol}${formatAmountRaw(amount)} (${safeCode})`;
+  const { symbol } = getCurrencyMeta(code);
+  return `${symbol}${formatAmountRaw(amount)}`;
 }
 
 export function formatCurrencyUnit(code: CurrencyCode): string {
-  const { symbol, code: safeCode } = getCurrencyMeta(code);
-  return `${symbol} (${safeCode})`;
+  return getCurrencyMeta(code).symbol;
 }

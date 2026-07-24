@@ -1,7 +1,8 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AppText from '../components/AppText';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
-import { Image, Modal, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Image, Modal, Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { endGame, listGames } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
@@ -344,7 +345,7 @@ function HomeScreen({ navigation }: Props) {
         >
           <View style={styles.tileHighlight} />
           <View style={styles.tileRim} />
-          <Text style={[styles.tileGlyph, styles.tileGlyphRed]}>中</Text>
+          <AppText style={[styles.tileGlyph, styles.tileGlyphRed]}>中</AppText>
         </View>
 
         <View
@@ -358,7 +359,7 @@ function HomeScreen({ navigation }: Props) {
         >
           <View style={styles.tileHighlight} />
           <View style={styles.tileRim} />
-          <Text style={[styles.tileGlyph, styles.tileGlyphGreen]}>發</Text>
+          <AppText style={[styles.tileGlyph, styles.tileGlyphGreen]}>發</AppText>
         </View>
 
         <View
@@ -415,15 +416,15 @@ function HomeScreen({ navigation }: Props) {
           ]}
         >
           <View style={styles.heroGroup}>
-            <Text style={styles.appTitle}>{t('home.brandTitle')}</Text>
-            <Text style={styles.tagline}>{copy.tagline}</Text>
+            <AppText style={styles.appTitle}>{t('home.brandTitle')}</AppText>
+            <AppText style={styles.tagline}>{copy.tagline}</AppText>
 
             <Pressable
               onPress={handleNewGamePress}
               style={({ pressed }) => [styles.primaryPressable, { width: ctaWidth }, pressed && styles.primaryPressed]}
             >
               <View style={styles.primaryButton}>
-                  <Text style={styles.primaryButtonText}>{copy.newGame}</Text>
+                  <AppText style={styles.primaryButtonText}>{copy.newGame}</AppText>
               </View>
             </Pressable>
 
@@ -431,7 +432,7 @@ function HomeScreen({ navigation }: Props) {
               onPress={() => navigation.navigate('History')}
               style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryPressed]}
             >
-              <Text style={styles.secondaryButtonText}>{copy.historyAll}</Text>
+              <AppText style={styles.secondaryButtonText}>{copy.historyAll}</AppText>
             </Pressable>
 
           </View>
@@ -458,11 +459,11 @@ function HomeScreen({ navigation }: Props) {
             }}
           />
           <View style={styles.promptCard}>
-            <Text style={styles.promptTitle}>{copy.promptTitle}</Text>
-            <Text style={styles.promptMessage}>{copy.promptMessage}</Text>
-            <Text style={styles.promptGameTitle}>{blockingGame?.title ?? copy.unnamedGame}</Text>
-            <Text style={styles.promptDuration}>{blockingGameDuration}</Text>
-            <Text style={styles.promptHint}>{copy.promptHint}</Text>
+            <AppText style={styles.promptTitle}>{copy.promptTitle}</AppText>
+            <AppText style={styles.promptMessage}>{copy.promptMessage}</AppText>
+            <AppText style={styles.promptGameTitle}>{blockingGame?.title ?? copy.unnamedGame}</AppText>
+            <AppText style={styles.promptDuration}>{blockingGameDuration}</AppText>
+            <AppText style={styles.promptHint}>{copy.promptHint}</AppText>
 
             <Pressable
               style={({ pressed }) => [
@@ -473,7 +474,7 @@ function HomeScreen({ navigation }: Props) {
               disabled={endingBlockingGame}
               onPress={handleContinueBlockingGame}
             >
-              <Text style={styles.promptPrimaryText}>{copy.continue}</Text>
+              <AppText style={styles.promptPrimaryText}>{copy.continue}</AppText>
             </Pressable>
 
             <Pressable
@@ -489,11 +490,11 @@ function HomeScreen({ navigation }: Props) {
                 });
               }}
             >
-              <Text style={styles.promptSecondaryText}>{copy.endThenStart}</Text>
+              <AppText style={styles.promptSecondaryText}>{copy.endThenStart}</AppText>
             </Pressable>
 
             <View style={styles.promptDisabledButton}>
-              <Text style={styles.promptDisabledText}>{copy.abandonSoon}</Text>
+              <AppText style={styles.promptDisabledText}>{copy.abandonSoon}</AppText>
             </View>
 
             <Pressable
@@ -501,7 +502,7 @@ function HomeScreen({ navigation }: Props) {
               disabled={endingBlockingGame}
               style={({ pressed }) => [styles.promptCancelButton, pressed && styles.promptCancelPressed]}
             >
-              <Text style={styles.promptCancelText}>{copy.cancel}</Text>
+              <AppText style={styles.promptCancelText}>{copy.cancel}</AppText>
             </Pressable>
           </View>
         </View>
@@ -526,11 +527,11 @@ function HomeScreen({ navigation }: Props) {
             }}
           />
           <View style={styles.promptCard}>
-            <Text style={styles.promptTitle}>{onboardingCopy.title}</Text>
-            <Text style={styles.promptMessage}>{onboardingCopy.subtitle}</Text>
-            <Text style={styles.onboardingStep}>{onboardingCopy.stepCreate}</Text>
-            <Text style={styles.onboardingStep}>{onboardingCopy.stepHands}</Text>
-            <Text style={styles.onboardingStep}>{onboardingCopy.stepSummary}</Text>
+            <AppText style={styles.promptTitle}>{onboardingCopy.title}</AppText>
+            <AppText style={styles.promptMessage}>{onboardingCopy.subtitle}</AppText>
+            <AppText style={styles.onboardingStep}>{onboardingCopy.stepCreate}</AppText>
+            <AppText style={styles.onboardingStep}>{onboardingCopy.stepHands}</AppText>
+            <AppText style={styles.onboardingStep}>{onboardingCopy.stepSummary}</AppText>
 
             <Pressable
               style={({ pressed }) => [styles.promptPrimaryButton, pressed && styles.promptPrimaryPressed]}
@@ -540,7 +541,7 @@ function HomeScreen({ navigation }: Props) {
                 });
               }}
             >
-              <Text style={styles.promptPrimaryText}>{onboardingCopy.continue}</Text>
+              <AppText style={styles.promptPrimaryText}>{onboardingCopy.continue}</AppText>
             </Pressable>
 
             <Pressable
@@ -555,7 +556,7 @@ function HomeScreen({ navigation }: Props) {
                   });
               }}
             >
-              <Text style={styles.promptSecondaryText}>{onboardingCopy.startNow}</Text>
+              <AppText style={styles.promptSecondaryText}>{onboardingCopy.startNow}</AppText>
             </Pressable>
 
             <Pressable
@@ -566,7 +567,7 @@ function HomeScreen({ navigation }: Props) {
               }}
               style={({ pressed }) => [styles.promptCancelButton, pressed && styles.promptCancelPressed]}
             >
-              <Text style={styles.promptCancelText}>{onboardingCopy.skip}</Text>
+              <AppText style={styles.promptCancelText}>{onboardingCopy.skip}</AppText>
             </Pressable>
           </View>
         </View>

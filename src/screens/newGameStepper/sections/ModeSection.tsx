@@ -1,4 +1,5 @@
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet } from 'react-native';
+import AppText from '../../../components/AppText';
 import Card from '../../../components/Card';
 import SegmentedControl from '../../../components/SegmentedControl';
 import { Variant } from '../../../models/rules';
@@ -16,7 +17,7 @@ type Props = {
 function ModeSection({ title, value, onChange, disabled, labels }: Props) {
   return (
     <Card style={styles.card}>
-      <Text style={styles.sectionTitle}>{title}</Text>
+      <AppText style={styles.sectionTitle}>{title}</AppText>
       <SegmentedControl<Variant>
         options={[
           { value: 'HK', label: labels.hk },

@@ -1,18 +1,8 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AppText from '../../components/AppText';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
-  LayoutChangeEvent,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleProp,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-  ViewStyle,
-} from 'react-native';
+  Alert, LayoutChangeEvent, Modal, Pressable, ScrollView, StyleProp, StyleSheet, useWindowDimensions, View, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppButton from '../../components/AppButton';
 import Card from '../../components/Card';
@@ -167,6 +157,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
             handCount: summary.handCount,
           }),
         );
+        navigation.replace('CloudArchiveDetail', { roomId: room.roomId });
       })
       .catch((error) => {
         setNotice(t('multiplayer.notice.archiveFailed', { message: String(error) }));
@@ -174,7 +165,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
       .finally(() => {
         setArchiving(false);
       });
-  }, [archiving, room, t, uid]);
+  }, [archiving, navigation, room, t, uid]);
 
   const playerById = useMemo(() => {
     const next = new Map<string, ResolvedRoomPlayer>();
@@ -668,10 +659,10 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
       <View style={styles.container}>
         <View style={styles.contentArea}>
           <View style={styles.headerInfoBlock}>
-            <Text style={styles.roundLabel}>{roundLabel}</Text>
-            <Text style={styles.roundSummaryLine}>
+            <AppText style={styles.roundLabel}>{roundLabel}</AppText>
+            <AppText style={styles.roundSummaryLine}>
               {t('gameTable.roundSummary').replace('{round}', String(roundIndex)).replace('{status}', handCountLabel)}
-            </Text>
+            </AppText>
             <View style={styles.roundDivider} />
           </View>
 
@@ -680,18 +671,18 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
               <View style={styles.ruleTagsRow}>
                 {rulesSummaryTags.map((tag) => (
                   <View key={tag} style={styles.ruleTag}>
-                    <Text style={styles.ruleTagText}>{tag}</Text>
+                    <AppText style={styles.ruleTagText}>{tag}</AppText>
                   </View>
                 ))}
               </View>
               {rulesSummaryStats ? (
                 <View style={styles.rulesStatsRow}>
                   <View style={styles.rulesStatBadge}>
-                    <Text style={styles.rulesStatEmoji}>🧨</Text>
-                    <Text style={styles.rulesStatValue}>{rulesSummaryStats.capText}</Text>
+                    <AppText style={styles.rulesStatEmoji}>🧨</AppText>
+                    <AppText style={styles.rulesStatValue}>{rulesSummaryStats.capText}</AppText>
                   </View>
                   <View style={styles.rulesStatBadge}>
-                    <Text style={styles.rulesStatValue}>{rulesSummaryStats.minFanText}</Text>
+                    <AppText style={styles.rulesStatValue}>{rulesSummaryStats.minFanText}</AppText>
                   </View>
                 </View>
               ) : null}
@@ -699,7 +690,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
                 <View style={styles.ruleTagsRow}>
                   {customRulesSummaryStats.map((tag) => (
                     <View key={tag} style={styles.ruleTag}>
-                      <Text style={styles.ruleTagText}>{tag}</Text>
+                      <AppText style={styles.ruleTagText}>{tag}</AppText>
                     </View>
                   ))}
                 </View>
@@ -717,10 +708,10 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
 
               <View style={styles.centerBadge}>
                 <View style={styles.centerDealerDot} />
-                <Text style={styles.centerBadgeLabel}>{t('gameTable.currentDealer')}</Text>
-                <Text style={[styles.centerBadgeValue, { color: SEAT_COLORS[dealerSeatIndex] ?? theme.colors.danger }]}>
+                <AppText style={styles.centerBadgeLabel}>{t('gameTable.currentDealer')}</AppText>
+                <AppText style={[styles.centerBadgeValue, { color: SEAT_COLORS[dealerSeatIndex] ?? theme.colors.danger }]}>
                   {SEAT_GLYPHS[dealerSeatIndex] ?? t('seat.east')}
-                </Text>
+                </AppText>
               </View>
 
               {panelStyleBySeat
@@ -751,7 +742,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
         </View>
 
         <View style={[styles.footerArea, { paddingBottom: insets.bottom + 16 }]}>
-          {footerLabel ? <Text style={styles.elapsedText}>{footerLabel}</Text> : null}
+          {footerLabel ? <AppText style={styles.elapsedText}>{footerLabel}</AppText> : null}
 
           <View style={styles.footerButtonsRow}>
             <AppButton
@@ -778,24 +769,24 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
           <Pressable style={styles.modalCard} onPress={(event) => event.stopPropagation()}>
             <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator={false}>
               <Card style={styles.sectionCard}>
-                <Text style={styles.sectionTitle}>{t('addHand.winner')}</Text>
-                <Text style={styles.readonlyWinnerText}>
+                <AppText style={styles.sectionTitle}>{t('addHand.winner')}</AppText>
+                <AppText style={styles.readonlyWinnerText}>
                   {currentWinner && currentWinnerSeatIndex !== null
                     ? `${formatSeatLabel(t, currentWinnerSeatIndex, currentWinnerSeatIndex === dealerSeatIndex)} ${currentWinner.displayName}`
                     : '--'}
-                </Text>
+                </AppText>
               </Card>
 
               <Card style={styles.sectionCard}>
-                <Text style={styles.sectionTitle}>{t('addHand.settlementType')}</Text>
+                <AppText style={styles.sectionTitle}>{t('addHand.settlementType')}</AppText>
                 <View style={styles.modeRow}>
                   <Pressable
                     style={[styles.modeButton, settlementType === 'discard' ? styles.modeButtonActive : null]}
                     onPress={() => setSettlementType('discard')}
                   >
-                    <Text style={[styles.modeButtonText, settlementType === 'discard' ? styles.modeButtonTextActive : null]}>
+                    <AppText style={[styles.modeButtonText, settlementType === 'discard' ? styles.modeButtonTextActive : null]}>
                       {t('addHand.settlementType.discard')}
-                    </Text>
+                    </AppText>
                   </Pressable>
                   <Pressable
                     style={[styles.modeButton, settlementType === 'zimo' ? styles.modeButtonActive : null]}
@@ -804,16 +795,16 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
                       setSelectedDiscarderId('');
                     }}
                   >
-                    <Text style={[styles.modeButtonText, settlementType === 'zimo' ? styles.modeButtonTextActive : null]}>
+                    <AppText style={[styles.modeButtonText, settlementType === 'zimo' ? styles.modeButtonTextActive : null]}>
                       {t('addHand.settlementType.zimo')}
-                    </Text>
+                    </AppText>
                   </Pressable>
                 </View>
               </Card>
 
               {settlementType === 'discard' ? (
                 <Card style={styles.sectionCard}>
-                  <Text style={styles.sectionTitle}>{t('addHand.discarder')}</Text>
+                  <AppText style={styles.sectionTitle}>{t('addHand.discarder')}</AppText>
                   <PillGroup
                     options={discarderOptions}
                     valueKey={selectedDiscarderId || null}
@@ -824,7 +815,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
               ) : null}
 
               <Card style={styles.sectionCard}>
-                <Text style={styles.sectionTitle}>{t('addHand.inputFan')}</Text>
+                <AppText style={styles.sectionTitle}>{t('addHand.inputFan')}</AppText>
                 <View style={styles.stepperContainer}>
                   <Pressable
                     style={styles.stepperButton}
@@ -832,21 +823,21 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
                       setFanInput(String(Math.max(minFanInput, currentFanInput - 1)));
                     }}
                   >
-                    <Text style={styles.stepperButtonText}>-</Text>
+                    <AppText style={styles.stepperButtonText}>-</AppText>
                   </Pressable>
-                  <Text style={styles.stepperValue}>{currentFanInput}</Text>
+                  <AppText style={styles.stepperValue}>{currentFanInput}</AppText>
                   <Pressable
                     style={styles.stepperButton}
                     onPress={() => {
                       setFanInput(String(Math.min(maxFanInput, currentFanInput + 1)));
                     }}
                   >
-                    <Text style={styles.stepperButtonText}>+</Text>
+                    <AppText style={styles.stepperButtonText}>+</AppText>
                   </Pressable>
                 </View>
               </Card>
 
-              {notice ? <Text style={styles.modalErrorText}>{notice}</Text> : null}
+              {notice ? <AppText style={styles.modalErrorText}>{notice}</AppText> : null}
             </ScrollView>
 
             <View style={styles.modalActions}>
@@ -907,18 +898,18 @@ function CloudPlayerPanel({
   return (
     <Pressable style={[styles.playerPanel, style, disabled ? styles.playerPanelDisabled : null]} onPress={onPress} disabled={disabled}>
       <View style={styles.playerPanelCard}>
-        <Text style={styles.playerName} numberOfLines={1}>
+        <AppText style={styles.playerName} numberOfLines={1}>
           {displayName}
-        </Text>
+        </AppText>
         <View style={styles.playerMetaRow}>
-          <Text style={[styles.playerSeat, { color: SEAT_COLORS[seatIndex] ?? theme.colors.textSecondary }]}>{SEAT_GLYPHS[seatIndex] ?? seatLabel}</Text>
-          {isDealer ? <Text style={styles.dealerText}>{` · ${'莊'}`}</Text> : null}
+          <AppText style={[styles.playerSeat, { color: SEAT_COLORS[seatIndex] ?? theme.colors.textSecondary }]}>{SEAT_GLYPHS[seatIndex] ?? seatLabel}</AppText>
+          {isDealer ? <AppText style={styles.dealerText}>{` · ${'莊'}`}</AppText> : null}
         </View>
         {occupied ? (
-          <Text style={[styles.playerAmount, { color: amountColor }]}>
+          <AppText style={[styles.playerAmount, { color: amountColor }]}>
             {`${sign}${symbol}${formatMoneyValue(Math.abs(amount))}`}
-          </Text>
-        ) : <Text style={styles.playerAmount}>{'--'}</Text>}
+          </AppText>
+        ) : <AppText style={styles.playerAmount}>{'--'}</AppText>}
       </View>
     </Pressable>
   );

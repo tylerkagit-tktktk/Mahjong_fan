@@ -1,5 +1,7 @@
 import { Ref } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import AppTextInput from './AppTextInput';
+import AppText from './AppText';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import theme from '../theme/theme';
 
 type StepperNumberInputProps = {
@@ -37,9 +39,9 @@ function StepperNumberInput({
         accessibilityState={{ disabled: !editable }}
         hitSlop={HIT_SLOP}
       >
-        <Text style={styles.adjustText}>-</Text>
+        <AppText style={styles.adjustText}>-</AppText>
       </Pressable>
-      <TextInput
+      <AppTextInput
         ref={inputRef}
         style={[styles.input, hasError ? styles.inputError : null]}
         keyboardType="number-pad"
@@ -58,7 +60,7 @@ function StepperNumberInput({
         accessibilityState={{ disabled: !editable }}
         hitSlop={HIT_SLOP}
       >
-        <Text style={styles.adjustText}>+</Text>
+        <AppText style={styles.adjustText}>+</AppText>
       </Pressable>
     </View>
   );

@@ -1,11 +1,10 @@
 import { saveCloudArchive, loadCloudArchive } from '../../db/cloudArchiveRepo';
 import { CloudArchivePayload } from '../../models/cloud';
-import { loadSnapshot } from './storage';
-import { getRoom, markArchiveSynced, markRoomArchived } from './roomRepo';
+import { getRoom, listLineups, listMembers, listTemporaryPlayers, markArchiveSynced, markRoomArchived } from './roomRepo';
+import { listHands } from './handRepo';
 
 export async function buildArchivePayload(roomId: string): Promise<CloudArchivePayload> {
-  const snapshot = await loadSnapshot();
-  const room = snapshot.rooms.find((entry) => entry.roomId === roomId);
+  const room = await getRoom(roomId);
   if (!room) {
     throw new Error('Room not found');
   }
@@ -13,14 +12,12 @@ export async function buildArchivePayload(roomId: string): Promise<CloudArchiveP
     throw new Error('Room is not ready to archive');
   }
 
-  const members = snapshot.members
-    .filter((entry) => entry.roomId === roomId && entry.membershipStatus === 'active')
-    .sort((a, b) => a.joinedAt - b.joinedAt);
-  const tempPlayers = snapshot.tempPlayers.filter((entry) => entry.roomId === roomId).sort((a, b) => a.createdAt - b.createdAt);
-  const lineups = snapshot.lineups
-    .filter((entry) => entry.roomId === roomId)
-    .sort((a, b) => a.effectiveFromHandIndex - b.effectiveFromHandIndex || a.lineupVersion - b.lineupVersion);
-  const hands = snapshot.hands.filter((entry) => entry.roomId === roomId).sort((a, b) => a.handIndex - b.handIndex);
+  const [members, tempPlayers, lineups, hands] = await Promise.all([
+    listMembers(roomId),
+    listTemporaryPlayers(roomId),
+    listLineups(roomId),
+    listHands(roomId),
+  ]);
   const archiveVersion = room.archiveVersion ?? 1;
 
   return {

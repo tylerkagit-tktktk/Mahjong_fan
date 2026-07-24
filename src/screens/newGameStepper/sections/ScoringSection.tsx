@@ -1,5 +1,6 @@
 import { Ref } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import AppText from '../../../components/AppText';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Card from '../../../components/Card';
 import SegmentedControl from '../../../components/SegmentedControl';
 import StepperNumberInput from '../../../components/StepperNumberInput';
@@ -66,6 +67,7 @@ type Props = {
     pmaDescription: string;
   };
   stakePresetHintLines: string[];
+  onShowStakePaytable: () => void;
   onHkScoringPresetChange: (value: HkScoringPreset) => void;
   onHkGunModeChange: (value: HkGunMode) => void;
   onHkStakePresetChange: (value: HkStakePreset) => void;
@@ -113,6 +115,7 @@ function ScoringSection({
   customCapFanInputRef,
   labels,
   stakePresetHintLines,
+  onShowStakePaytable,
   onHkScoringPresetChange,
   onHkGunModeChange,
   onHkStakePresetChange,
@@ -136,7 +139,7 @@ function ScoringSection({
 }: Props) {
   return (
     <Card style={styles.card}>
-      <Text style={styles.sectionTitle}>{labels.title}</Text>
+      <AppText style={styles.sectionTitle}>{labels.title}</AppText>
 
       {mode === 'HK' ? (
         <>
@@ -152,7 +155,7 @@ function ScoringSection({
 
               {hkScoringPreset === 'traditionalFan' ? (
             <View style={styles.blockSpacing}>
-              <Text style={styles.inputLabel}>{labels.hkGunModeLabel}</Text>
+              <AppText style={styles.inputLabel}>{labels.hkGunModeLabel}</AppText>
               <SegmentedControl<HkGunMode>
                 options={[
                   { value: 'halfGun', label: labels.hkGunModeHalf },
@@ -164,7 +167,18 @@ function ScoringSection({
               />
 
               <View style={styles.blockSpacing}>
-                <Text style={styles.inputLabel}>{labels.hkStakePresetLabel}</Text>
+                <View style={styles.labelRow}>
+                  <AppText style={[styles.inputLabel, styles.labelRowText]}>{labels.hkStakePresetLabel}</AppText>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={labels.hkPresetTraditional}
+                    hitSlop={12}
+                    onPress={onShowStakePaytable}
+                    style={styles.paytableInfoButton}
+                  >
+                    <AppText style={styles.paytableInfoIcon}>ⓘ</AppText>
+                  </Pressable>
+                </View>
                 <SegmentedControl<HkStakePreset>
                   options={[
                     { value: 'TWO_FIVE_CHICKEN', label: labels.hkStakePresetTwoFive },
@@ -176,14 +190,14 @@ function ScoringSection({
                   disabled={disabled}
                 />
                 {stakePresetHintLines.map((line, index) => (
-                  <Text key={`${hkStakePreset}-${hkGunMode}-${index}`} style={index === 0 ? styles.helperText : styles.helperTextSubLine}>
+                  <AppText key={`${hkStakePreset}-${hkGunMode}-${index}`} style={index === 0 ? styles.helperText : styles.helperTextSubLine}>
                     {line}
-                  </Text>
+                  </AppText>
                 ))}
               </View>
 
               <View style={styles.blockSpacing}>
-                <Text style={styles.inputLabel}>{labels.minFanThresholdLabel}</Text>
+                <AppText style={styles.inputLabel}>{labels.minFanThresholdLabel}</AppText>
                 <StepperNumberInput
                   inputRef={minFanInputRef}
                   valueText={minFanInput}
@@ -197,13 +211,13 @@ function ScoringSection({
                 />
               </View>
 
-              <Text style={styles.helperText}>{labels.hkThresholdHelp}</Text>
-              {minFanError ? <Text style={styles.inlineErrorText}>{minFanError}</Text> : null}
+              <AppText style={styles.helperText}>{labels.hkThresholdHelp}</AppText>
+              {minFanError ? <AppText style={styles.inlineErrorText}>{minFanError}</AppText> : null}
             </View>
           ) : (
             <View style={styles.blockSpacing}>
               <View>
-                <Text style={styles.inputLabel}>{labels.minFanThresholdLabel}</Text>
+                <AppText style={styles.inputLabel}>{labels.minFanThresholdLabel}</AppText>
                 <StepperNumberInput
                   inputRef={minFanInputRef}
                   valueText={minFanInput}
@@ -215,12 +229,12 @@ function ScoringSection({
                   editable={!disabled}
                   hasError={Boolean(minFanError)}
                 />
-                <Text style={styles.helperText}>{labels.hkThresholdHelp}</Text>
-                {minFanError ? <Text style={styles.inlineErrorText}>{minFanError}</Text> : null}
+                <AppText style={styles.helperText}>{labels.hkThresholdHelp}</AppText>
+                {minFanError ? <AppText style={styles.inlineErrorText}>{minFanError}</AppText> : null}
               </View>
 
               <View style={styles.blockSpacing}>
-                <Text style={styles.inputLabel}>{labels.unitPerFanLabel}</Text>
+                <AppText style={styles.inputLabel}>{labels.unitPerFanLabel}</AppText>
                 <StepperNumberInput
                   inputRef={unitPerFanInputRef}
                   valueText={unitPerFanInput}
@@ -232,15 +246,15 @@ function ScoringSection({
                   editable={!disabled}
                   hasError={Boolean(unitPerFanError)}
                 />
-                <Text style={styles.helperText}>{labels.unitPerFanHelp}</Text>
-                {unitPerFanError ? <Text style={styles.inlineErrorText}>{unitPerFanError}</Text> : null}
+                <AppText style={styles.helperText}>{labels.unitPerFanHelp}</AppText>
+                {unitPerFanError ? <AppText style={styles.inlineErrorText}>{unitPerFanError}</AppText> : null}
               </View>
             </View>
           )}
 
           {hkScoringPreset === 'traditionalFan' ? (
             <View style={styles.blockSpacing}>
-              <Text style={styles.inputLabel}>{labels.capModeLabel}</Text>
+              <AppText style={styles.inputLabel}>{labels.capModeLabel}</AppText>
               <SegmentedControl<8 | 10 | 13>
                 options={[
                   { value: 8, label: labels.capModeEight },
@@ -254,7 +268,7 @@ function ScoringSection({
             </View>
           ) : (
             <View style={styles.blockSpacing}>
-              <Text style={styles.inputLabel}>{labels.customCapModeLabel}</Text>
+              <AppText style={styles.inputLabel}>{labels.customCapModeLabel}</AppText>
               <SegmentedControl<CapMode>
                 options={[
                   { value: 'none', label: labels.customCapModeNone },
@@ -268,7 +282,7 @@ function ScoringSection({
               {customCapMode === 'fanCap' ? (
                 <>
                   <View style={styles.blockSpacing}>
-                    <Text style={styles.inputLabel}>{labels.customCapFanLabel}</Text>
+                    <AppText style={styles.inputLabel}>{labels.customCapFanLabel}</AppText>
                     <StepperNumberInput
                       inputRef={customCapFanInputRef}
                       valueText={customCapFanInput}
@@ -280,19 +294,19 @@ function ScoringSection({
                       editable={!disabled}
                       hasError={Boolean(customCapFanError)}
                     />
-                    {customCapFanError ? <Text style={styles.inlineErrorText}>{customCapFanError}</Text> : null}
+                    {customCapFanError ? <AppText style={styles.inlineErrorText}>{customCapFanError}</AppText> : null}
                   </View>
-                  <Text style={styles.helperText}>{labels.customCapValueHelp.replaceAll('{capFan}', customCapFanInput || '0')}</Text>
+                  <AppText style={styles.helperText}>{labels.customCapValueHelp.replaceAll('{capFan}', customCapFanInput || '0')}</AppText>
                 </>
               ) : (
-                <Text style={styles.helperText}>{labels.customCapNoneHelp}</Text>
+                <AppText style={styles.helperText}>{labels.customCapNoneHelp}</AppText>
               )}
             </View>
           )}
 
           {hkScoringPreset === 'customTable' ? (
             <View style={styles.blockSpacing}>
-              <Text style={styles.inputLabel}>{labels.sampleFanLabel}</Text>
+              <AppText style={styles.inputLabel}>{labels.sampleFanLabel}</AppText>
               <StepperNumberInput
                 valueText={String(sampleFan)}
                 onChangeText={onSampleFanInputChange}
@@ -303,15 +317,15 @@ function ScoringSection({
               />
               {sampleBaseAmount !== null ? (
                 <>
-                  <Text style={styles.helperText}>{`${labels.realtimeEffectiveFan} = ${sampleEffectiveFan}`}</Text>
-                  <Text style={styles.helperTextSubLine}>
+                  <AppText style={styles.helperText}>{`${labels.realtimeEffectiveFan} = ${sampleEffectiveFan}`}</AppText>
+                  <AppText style={styles.helperTextSubLine}>
                     {labels.realtimeZimoSplitLabel
                       .replaceAll('{amount}', `${currencySymbol}${String(sampleZimoEach ?? 0)}`)}
-                  </Text>
-                  <Text style={styles.helperTextSubLine}>
+                  </AppText>
+                  <AppText style={styles.helperTextSubLine}>
                     {labels.realtimeDiscarderLabel
                       .replaceAll('{amount}', `${currencySymbol}${String(sampleDiscarder ?? 0)}`)}
-                  </Text>
+                  </AppText>
                 </>
               ) : null}
             </View>
@@ -321,7 +335,7 @@ function ScoringSection({
 
       {mode === 'TW' ? (
         <View style={styles.blockSpacing}>
-          <Text style={styles.inputLabel}>{labels.minFanThresholdLabel}</Text>
+          <AppText style={styles.inputLabel}>{labels.minFanThresholdLabel}</AppText>
           <StepperNumberInput
             valueText={minFanInput}
             onChangeText={onMinFanInputChange}
@@ -332,12 +346,12 @@ function ScoringSection({
             editable={!disabled}
             hasError={Boolean(minFanError)}
           />
-          <Text style={styles.helperText}>{labels.twThresholdHelp}</Text>
-          {minFanError ? <Text style={styles.inlineErrorText}>{minFanError}</Text> : null}
+          <AppText style={styles.helperText}>{labels.twThresholdHelp}</AppText>
+          {minFanError ? <AppText style={styles.inlineErrorText}>{minFanError}</AppText> : null}
         </View>
       ) : null}
 
-      {mode === 'PMA' ? <Text style={styles.helperText}>{labels.pmaDescription}</Text> : null}
+      {mode === 'PMA' ? <AppText style={styles.helperText}>{labels.pmaDescription}</AppText> : null}
     </Card>
   );
 }
@@ -360,6 +374,26 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
     marginBottom: GRID.x1,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: GRID.x1,
+  },
+  labelRowText: {
+    marginBottom: 0,
+  },
+  paytableInfoButton: {
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  paytableInfoIcon: {
+    fontSize: 18,
+    lineHeight: 20,
+    color: theme.colors.textSecondary,
   },
   helperText: {
     marginTop: GRID.x1,

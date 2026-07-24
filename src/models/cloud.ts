@@ -1,4 +1,4 @@
-export type CloudProvider = 'apple' | 'google';
+export type CloudProvider = 'anonymous' | 'apple' | 'google';
 
 export type CloudUserProfile = {
   uid: string;
@@ -52,6 +52,8 @@ export type RoomMember = {
   joinedAt: number;
   displayName: string;
   avatarUrl: string | null;
+  archiveSyncedAt?: number | null;
+  archiveSyncedVersion?: number | null;
 };
 
 export type RoomTemporaryPlayer = {
@@ -178,6 +180,13 @@ export type CloudArchiveSync = {
   actorUid: string;
   archiveVersion: number;
   syncedAt: number;
+};
+
+export type ArchiveSyncStatus = {
+  requiredMemberCount: number;
+  syncedMemberCount: number;
+  pendingMemberNames: string[];
+  isReadyForCloudDeletion: boolean;
 };
 
 export type CloudSnapshot = {

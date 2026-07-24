@@ -1,19 +1,9 @@
 import { useFocusEffect } from '@react-navigation/native';
+import AppText from '../components/AppText';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
-  type LayoutChangeEvent,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  type StyleProp,
-  Text,
-  type ViewStyle,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+  Alert, type LayoutChangeEvent, Modal, Pressable, ScrollView, StyleSheet, type StyleProp, type ViewStyle, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
 import Card from '../components/Card';
@@ -898,12 +888,12 @@ function GameTableScreen({ route, navigation }: Props) {
       <View style={styles.container}>
         <View style={styles.contentArea}>
           <View style={styles.headerInfoBlock}>
-            {roundLabel ? <Text style={styles.roundLabel}>{roundLabel}</Text> : null}
-            <Text style={styles.roundSummaryLine}>
+            {roundLabel ? <AppText style={styles.roundLabel}>{roundLabel}</AppText> : null}
+            <AppText style={styles.roundSummaryLine}>
               {roundLabel
                 ? t('gameTable.roundSummary').replace('{round}', String(roundIndex)).replace('{status}', handCountLabel)
                 : handCountLabel}
-            </Text>
+            </AppText>
             <View style={styles.roundDivider} />
           </View>
 
@@ -919,14 +909,14 @@ function GameTableScreen({ route, navigation }: Props) {
                         style={[styles.ruleTag, styles.ruleTagInteractive]}
                         onPress={handleStakeChipPress}
                       >
-                        <Text style={styles.ruleTagText}>{tag}</Text>
-                        <Text style={styles.rulesChipInfo}>ⓘ</Text>
+                        <AppText style={styles.ruleTagText}>{tag}</AppText>
+                        <AppText style={styles.rulesChipInfo}>ⓘ</AppText>
                       </Pressable>
                     );
                   }
                   return (
                     <View key={tag} style={styles.ruleTag}>
-                      <Text style={styles.ruleTagText}>{tag}</Text>
+                      <AppText style={styles.ruleTagText}>{tag}</AppText>
                     </View>
                   );
                 })}
@@ -934,11 +924,11 @@ function GameTableScreen({ route, navigation }: Props) {
               {rulesSummaryStats ? (
                 <View style={styles.rulesStatsRow}>
                   <View style={styles.rulesStatBadge}>
-                    <Text style={styles.rulesStatEmoji}>🧨</Text>
-                    <Text style={styles.rulesStatValue}>{rulesSummaryStats.capText}</Text>
+                    <AppText style={styles.rulesStatEmoji}>🧨</AppText>
+                    <AppText style={styles.rulesStatValue}>{rulesSummaryStats.capText}</AppText>
                   </View>
                   <View style={styles.rulesStatBadge}>
-                    <Text style={styles.rulesStatValue}>{rulesSummaryStats.minFanText}</Text>
+                    <AppText style={styles.rulesStatValue}>{rulesSummaryStats.minFanText}</AppText>
                   </View>
                 </View>
               ) : null}
@@ -946,14 +936,14 @@ function GameTableScreen({ route, navigation }: Props) {
                 <View style={styles.ruleTagsRow}>
                   {customRulesSummaryStats.map((tag) => (
                     <View key={tag} style={styles.ruleTag}>
-                      <Text style={styles.ruleTagText}>{tag}</Text>
+                      <AppText style={styles.ruleTagText}>{tag}</AppText>
                     </View>
                   ))}
                 </View>
               ) : null}
             </View>
           ) : null}
-          {isEnded ? <Text style={styles.readonlyText}>{t('gameTable.readonly')}</Text> : null}
+          {isEnded ? <AppText style={styles.readonlyText}>{t('gameTable.readonly')}</AppText> : null}
 
           <View style={styles.tableZone}>
             <View
@@ -970,8 +960,8 @@ function GameTableScreen({ route, navigation }: Props) {
 
               <View style={styles.centerBadge}>
                 <View style={styles.centerDealerDot} />
-                <Text style={styles.centerBadgeLabel}>{t('gameTable.currentDealer')}</Text>
-                <Text
+                <AppText style={styles.centerBadgeLabel}>{t('gameTable.currentDealer')}</AppText>
+                <AppText
                   style={[
                     styles.centerBadgeValue,
                     {
@@ -980,7 +970,7 @@ function GameTableScreen({ route, navigation }: Props) {
                   ]}
                 >
                   {WIND_HONOR_GLYPHS[dealerSeatIndex] ?? seatLabels[dealerSeatIndex] ?? t('seat.east')}
-                </Text>
+                </AppText>
               </View>
 
               {panelStyleBySeat
@@ -1005,11 +995,11 @@ function GameTableScreen({ route, navigation }: Props) {
             </View>
           </View>
 
-          {error ? <Text style={styles.errorBanner}>{error}</Text> : null}
+          {error ? <AppText style={styles.errorBanner}>{error}</AppText> : null}
         </View>
 
         <View style={[styles.footerArea, { paddingBottom: insets.bottom + GRID.x2 }]}>
-          {footerLabel ? <Text style={styles.elapsedText}>{footerLabel}</Text> : null}
+          {footerLabel ? <AppText style={styles.elapsedText}>{footerLabel}</AppText> : null}
 
           <View style={styles.footerButtonsRow}>
             <AppButton
@@ -1033,8 +1023,8 @@ function GameTableScreen({ route, navigation }: Props) {
         <Pressable style={styles.modalOverlay} onPress={closeRecordModal}>
           <Pressable style={styles.modalCard} onPress={(event) => event.stopPropagation()}>
             <Card style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>{t('addHand.winner')}</Text>
-              <Text style={styles.readonlyWinnerText}>
+              <AppText style={styles.sectionTitle}>{t('addHand.winner')}</AppText>
+              <AppText style={styles.readonlyWinnerText}>
                 {winnerSeatIndex === null
                   ? '--'
                   : `${formatSeatLabel(
@@ -1042,20 +1032,20 @@ function GameTableScreen({ route, navigation }: Props) {
                       winnerSeatIndex,
                       winnerSeatIndex === dealerSeatIndex,
                     )} ${playersBySeat[winnerSeatIndex]?.name ?? ''}`}
-              </Text>
+              </AppText>
             </Card>
 
             <Card style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>{t('addHand.settlementType')}</Text>
+              <AppText style={styles.sectionTitle}>{t('addHand.settlementType')}</AppText>
               <View style={styles.modeRow}>
                 <Pressable
                   style={[styles.modeButton, settlementType === 'discard' ? styles.modeButtonActive : null]}
                   onPress={() => setSettlementType('discard')}
                   disabled={saving}
                 >
-                  <Text style={[styles.modeButtonText, settlementType === 'discard' ? styles.modeButtonTextActive : null]}>
+                  <AppText style={[styles.modeButtonText, settlementType === 'discard' ? styles.modeButtonTextActive : null]}>
                     {t('addHand.settlementType.discard')}
-                  </Text>
+                  </AppText>
                 </Pressable>
                 <Pressable
                   style={[styles.modeButton, settlementType === 'zimo' ? styles.modeButtonActive : null]}
@@ -1065,16 +1055,16 @@ function GameTableScreen({ route, navigation }: Props) {
                   }}
                   disabled={saving}
                 >
-                  <Text style={[styles.modeButtonText, settlementType === 'zimo' ? styles.modeButtonTextActive : null]}>
+                  <AppText style={[styles.modeButtonText, settlementType === 'zimo' ? styles.modeButtonTextActive : null]}>
                     {t('addHand.settlementType.zimo')}
-                  </Text>
+                  </AppText>
                 </Pressable>
               </View>
             </Card>
 
             {settlementType === 'discard' ? (
               <Card style={styles.sectionCard}>
-                <Text style={styles.sectionTitle}>{t('addHand.discarder')}</Text>
+                <AppText style={styles.sectionTitle}>{t('addHand.discarder')}</AppText>
                 <PillGroup
                   options={discarderOptions}
                   valueKey={discarderSeatIndex === null ? null : String(discarderSeatIndex)}
@@ -1086,7 +1076,7 @@ function GameTableScreen({ route, navigation }: Props) {
             ) : null}
 
             <Card style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>{t('addHand.inputFan')}</Text>
+              <AppText style={styles.sectionTitle}>{t('addHand.inputFan')}</AppText>
               <View style={styles.stepperContainer}>
                 <Pressable
                   style={styles.stepperButton}
@@ -1095,9 +1085,9 @@ function GameTableScreen({ route, navigation }: Props) {
                   }}
                   disabled={saving}
                 >
-                  <Text style={styles.stepperButtonText}>-</Text>
+                  <AppText style={styles.stepperButtonText}>-</AppText>
                 </Pressable>
-                <Text style={styles.stepperValue}>{currentFanInput}</Text>
+                <AppText style={styles.stepperValue}>{currentFanInput}</AppText>
                 <Pressable
                   style={styles.stepperButton}
                   onPress={() => {
@@ -1105,12 +1095,12 @@ function GameTableScreen({ route, navigation }: Props) {
                   }}
                   disabled={saving}
                 >
-                  <Text style={styles.stepperButtonText}>+</Text>
+                  <AppText style={styles.stepperButtonText}>+</AppText>
                 </Pressable>
               </View>
             </Card>
 
-            {error ? <Text style={styles.modalErrorText}>{error}</Text> : null}
+            {error ? <AppText style={styles.modalErrorText}>{error}</AppText> : null}
 
             <View style={styles.modalActions}>
               <AppButton
@@ -1157,35 +1147,35 @@ function GameTableScreen({ route, navigation }: Props) {
         <Pressable style={styles.paytableBackdrop} onPress={() => setShowStakePaytable(false)}>
           <Pressable style={styles.paytableCard} onPress={(event) => event.stopPropagation()}>
             <View style={styles.paytableHeader}>
-              <Text style={styles.paytableTitle}>
+              <AppText style={styles.paytableTitle}>
                 {paytableMeta?.stakeLabel ?? rulesSummaryMeta?.stakeLabel ?? ''} · {paytableMeta?.gunModeLabel ?? (rules?.hk?.gunMode === 'halfGun' ? t('newGame.hkGunMode.half') : t('newGame.hkGunMode.full'))}
-              </Text>
-              <Text style={styles.paytableSubtitle}>{paytableRangeLabel}</Text>
-              <Text style={styles.paytableCaption}>{t('gameTable.paytable.caption')}</Text>
+              </AppText>
+              <AppText style={styles.paytableSubtitle}>{paytableRangeLabel}</AppText>
+              <AppText style={styles.paytableCaption}>{t('gameTable.paytable.caption')}</AppText>
             </View>
 
             <ScrollView style={styles.paytableScroll} horizontal>
               <View>
                 <View style={styles.paytableRowHeader}>
-                  <Text style={[styles.paytableCell, styles.paytableCellFan]}>{t('gameTable.paytable.col.fan')}</Text>
-                  <Text style={styles.paytableCell}>{t('gameTable.paytable.col.discard')}</Text>
-                  <Text style={styles.paytableCell}>{t('gameTable.paytable.col.zimo')}</Text>
+                  <AppText style={[styles.paytableCell, styles.paytableCellFan]}>{t('gameTable.paytable.col.fan')}</AppText>
+                  <AppText style={styles.paytableCell}>{t('gameTable.paytable.col.discard')}</AppText>
+                  <AppText style={styles.paytableCell}>{t('gameTable.paytable.col.zimo')}</AppText>
                 </View>
 
                 {paytableRows.map((row) => (
                   <View key={row.fan} style={styles.paytableRow}>
-                    <Text style={[styles.paytableCell, styles.paytableCellFan]}>
+                    <AppText style={[styles.paytableCell, styles.paytableCellFan]}>
                       {t('gameTable.paytable.fanValue').replace('{fan}', String(row.fan))}
-                    </Text>
-                    <Text style={styles.paytableCell}>HK${formatMoneyValue(row.discardTotal)}</Text>
-                    <Text style={styles.paytableCell}>HK${formatMoneyValue(row.zimoTotal)}</Text>
+                    </AppText>
+                    <AppText style={styles.paytableCell}>HK${formatMoneyValue(row.discardTotal)}</AppText>
+                    <AppText style={styles.paytableCell}>HK${formatMoneyValue(row.zimoTotal)}</AppText>
                   </View>
                 ))}
               </View>
             </ScrollView>
 
             <Pressable style={styles.paytableCloseButton} onPress={() => setShowStakePaytable(false)}>
-              <Text style={styles.paytableCloseText}>{t('gameTable.paytable.close')}</Text>
+              <AppText style={styles.paytableCloseText}>{t('gameTable.paytable.close')}</AppText>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -1221,16 +1211,16 @@ function PlayerPanel({
       disabled={disabled}
     >
       <View style={styles.playerPanelCard}>
-        <Text style={styles.playerName}>
+        <AppText style={styles.playerName}>
           {name}
-        </Text>
+        </AppText>
         <View style={styles.playerMetaRow}>
-          <Text style={[styles.playerSeat, { color: windColor }]}>{windGlyph}</Text>
-          {isDealer ? <Text style={styles.dealerText}>{` · ${t('newGame.dealerBadge')}`}</Text> : null}
+          <AppText style={[styles.playerSeat, { color: windColor }]}>{windGlyph}</AppText>
+          {isDealer ? <AppText style={styles.dealerText}>{` · ${t('newGame.dealerBadge')}`}</AppText> : null}
         </View>
-        <Text style={[styles.playerAmount, { color: amountColor }]}>
+        <AppText style={[styles.playerAmount, { color: amountColor }]}>
           {`${sign}${symbol}${formatMoneyValue(absolute)}`}
-        </Text>
+        </AppText>
       </View>
     </Pressable>
   );

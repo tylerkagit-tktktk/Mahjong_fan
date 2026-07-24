@@ -1,4 +1,5 @@
-import { StyleProp, StyleSheet, Text, View, ViewStyle, Pressable } from 'react-native';
+import { StyleProp, StyleSheet, View, ViewStyle, Pressable } from 'react-native';
+import AppText from './AppText';
 import theme from '../theme/theme';
 
 type PillOption = {
@@ -67,9 +68,9 @@ function Pill({ label, selected, onPress, disabled }: PillProps) {
       accessibilityState={{ disabled, selected }}
       hitSlop={HIT_SLOP}
     >
-      <Text style={[styles.pillText, selected ? styles.pillTextActive : null]}>
+      <AppText style={[styles.pillText, selected ? styles.pillTextActive : null]}>
         {label}
-      </Text>
+      </AppText>
     </Pressable>
   );
 }

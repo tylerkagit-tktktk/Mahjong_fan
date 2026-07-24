@@ -200,5 +200,6 @@ describe('CloudArchiveDetailScreen', () => {
     expect(text).toContain('食糊');
     expect(text).toContain('流局');
     expect(text).toContain('分享');
+    expect(text).toContain('雲端房間已刪除，本機封存會繼續保留。');
   });
 });

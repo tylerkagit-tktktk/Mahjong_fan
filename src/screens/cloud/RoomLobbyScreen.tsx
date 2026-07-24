@@ -1,6 +1,7 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import AppText from '../../components/AppText';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import AppButton from '../../components/AppButton';
 import Card from '../../components/Card';
 import HostToolsCard from '../../components/HostToolsCard';
@@ -56,6 +57,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
   const [selectedTempMergeId, setSelectedTempMergeId] = useState('');
   const [selectedRealMergeUid, setSelectedRealMergeUid] = useState('');
   const [mergingPlayers, setMergingPlayers] = useState(false);
+  const didEnterActiveTable = useRef(false);
 
   const refresh = useCallback(async (nextRoomId: string, nextSessionUid = sessionUid) => {
     const [nextRoom, nextPlayers, nextLineup] = await Promise.all([
@@ -99,6 +101,15 @@ function RoomLobbyScreen({ navigation, route }: Props) {
       unSubLineup?.();
     };
   }, [navigation, refresh, roomId, t]);
+
+  useEffect(() => {
+    if (room?.status !== 'active' || didEnterActiveTable.current) {
+      return;
+    }
+
+    didEnterActiveTable.current = true;
+    navigation.replace('MultiplayerGameTable', { roomId });
+  }, [navigation, room?.status, roomId]);
 
   const seatLabels = useMemo(
     () => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')],
@@ -423,14 +434,13 @@ function RoomLobbyScreen({ navigation, route }: Props) {
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.headerBlock}>
           <View style={styles.pillRow}>
-            <Text style={styles.statusPill}>{roomStatusLabel}</Text>
+            <AppText style={styles.statusPill}>{roomStatusLabel}</AppText>
           </View>
-          <Text style={styles.title}>{room?.title ?? t('roomLobby.loading')}</Text>
-          <Text style={styles.subtitle}>{t('roomLobby.headerSubtitle')}</Text>
+          <AppText style={styles.title}>{room?.title ?? t('roomLobby.loading')}</AppText>
         </View>
 
         <Card style={styles.infoCard}>
-          <Text style={styles.sectionTitle}>{t('roomLobby.info.title')}</Text>
+          <AppText style={styles.sectionTitle}>{t('roomLobby.info.title')}</AppText>
           <InfoRow label={t('roomLobby.info.host')} value={hostPlayer?.displayName ?? '-'} />
           <InfoRow label={t('roomLobby.info.memberCount')} value={`${totalPlayers}/${room?.memberCap ?? 8}`} />
           <InfoRow label={t('roomLobby.info.status')} value={roomStatusLabel} />
@@ -440,14 +450,14 @@ function RoomLobbyScreen({ navigation, route }: Props) {
 
         {isHost && room?.status === 'open' ? (
           <Card style={styles.startCard}>
-            <Text style={styles.sectionTitle}>{t('roomLobby.start.title')}</Text>
-            <Text style={styles.sectionSubtitle}>
+            <AppText style={styles.sectionTitle}>{t('roomLobby.start.title')}</AppText>
+            <AppText style={styles.sectionSubtitle}>
               {realPlayerCount <= 1
                 ? t('roomLobby.start.singleRealHint')
                 : missingStartSeats > 0
                 ? t('roomLobby.start.fillSeatsHint', { count: missingStartSeats })
                 : t('roomLobby.start.readyHint')}
-            </Text>
+            </AppText>
             <AppButton
               label={startingRoomBusy ? t('roomLobby.start.starting') : t('roomLobby.start.action')}
               onPress={handlePressStart}
@@ -458,14 +468,14 @@ function RoomLobbyScreen({ navigation, route }: Props) {
 
         {!isHost && room?.status === 'open' ? (
           <Card>
-            <Text style={styles.noticeText}>{t('roomLobby.notice.waitingForHost')}</Text>
+            <AppText style={styles.noticeText}>{t('roomLobby.notice.waitingForHost')}</AppText>
           </Card>
         ) : null}
 
         {startSetupVisible ? (
           <Card style={styles.startCard}>
-            <Text style={styles.sectionTitle}>{t('roomLobby.startSetup.title')}</Text>
-            <Text style={styles.sectionSubtitle}>{t('roomLobby.startSetup.subtitle')}</Text>
+            <AppText style={styles.sectionTitle}>{t('roomLobby.startSetup.title')}</AppText>
+            <AppText style={styles.sectionSubtitle}>{t('roomLobby.startSetup.subtitle')}</AppText>
             <View style={styles.actionStack}>
               {startTempNames.map((value, index) => (
                 <TextField
@@ -504,13 +514,13 @@ function RoomLobbyScreen({ navigation, route }: Props) {
 
         {room?.status === 'archived' ? (
           <Card>
-            <Text style={styles.noticeText}>{t('roomLobby.archivedNotice')}</Text>
+            <AppText style={styles.noticeText}>{t('roomLobby.archivedNotice')}</AppText>
           </Card>
         ) : null}
 
         <View style={styles.sectionBlock}>
-          <Text style={styles.sectionTitle}>{t('roomLobby.seats.title')}</Text>
-          <Text style={styles.sectionSubtitle}>{t('roomLobby.seats.subtitle')}</Text>
+          <AppText style={styles.sectionTitle}>{t('roomLobby.seats.title')}</AppText>
+          <AppText style={styles.sectionSubtitle}>{t('roomLobby.seats.subtitle')}</AppText>
           <View style={styles.seatGrid}>
             {activeSeatCards.map((seat) => (
               <View key={seat.key} style={styles.seatCell}>
@@ -531,20 +541,20 @@ function RoomLobbyScreen({ navigation, route }: Props) {
         </View>
 
         <Card>
-          <Text style={styles.sectionTitle}>{t('roomLobby.bench.title')}</Text>
+          <AppText style={styles.sectionTitle}>{t('roomLobby.bench.title')}</AppText>
           {benchPlayers.length ? (
             <View style={styles.benchWrap}>
               {benchPlayers.map((player) => (
                 <View key={player.playerId} style={styles.memberChip}>
-                  <Text style={styles.memberChipText}>{player.displayName}</Text>
-                  {player.kind === 'temporary' ? <Text style={styles.memberChipMeta}>{t('roomLobby.member.temporary')}</Text> : null}
-                  {player.isHost ? <Text style={styles.memberChipMeta}>{t('roomLobby.member.host')}</Text> : null}
-                  {player.isSelf ? <Text style={styles.memberChipMeta}>{t('roomLobby.member.self')}</Text> : null}
+                  <AppText style={styles.memberChipText}>{player.displayName}</AppText>
+                  {player.kind === 'temporary' ? <AppText style={styles.memberChipMeta}>{t('roomLobby.member.temporary')}</AppText> : null}
+                  {player.isHost ? <AppText style={styles.memberChipMeta}>{t('roomLobby.member.host')}</AppText> : null}
+                  {player.isSelf ? <AppText style={styles.memberChipMeta}>{t('roomLobby.member.self')}</AppText> : null}
                 </View>
               ))}
             </View>
           ) : (
-            <Text style={styles.emptyText}>{t('roomLobby.bench.empty')}</Text>
+            <AppText style={styles.emptyText}>{t('roomLobby.bench.empty')}</AppText>
           )}
         </Card>
 
@@ -555,7 +565,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
             expanded={hostToolsExpanded}
             onToggle={() => setHostToolsExpanded((prev) => !prev)}
           >
-            <Text style={styles.helperText}>{t('roomLobby.hostTools.inviteHint')}</Text>
+            <AppText style={styles.helperText}>{t('roomLobby.hostTools.inviteHint')}</AppText>
             <View style={styles.actionStack}>
               <AppButton
                 label={inviteBusy ? t('roomLobby.hostTools.generating') : t('roomLobby.hostTools.createInvite')}
@@ -584,8 +594,8 @@ function RoomLobbyScreen({ navigation, route }: Props) {
               </View>
             ) : null}
 
-            <Text style={styles.sectionTitle}>{t('roomLobby.hostTools.addTempTitle')}</Text>
-            <Text style={styles.sectionSubtitle}>{t('roomLobby.hostTools.addTempHint')}</Text>
+            <AppText style={styles.sectionTitle}>{t('roomLobby.hostTools.addTempTitle')}</AppText>
+            <AppText style={styles.sectionSubtitle}>{t('roomLobby.hostTools.addTempHint')}</AppText>
             <View style={styles.actionStack}>
               <TextField
                 label={t('roomLobby.hostTools.addTempLabel')}
@@ -602,17 +612,17 @@ function RoomLobbyScreen({ navigation, route }: Props) {
               />
             </View>
 
-            <Text style={styles.sectionTitle}>{t('roomLobby.hostTools.swapTitle')}</Text>
-            <Text style={styles.sectionSubtitle}>{t('roomLobby.hostTools.swapHint')}</Text>
+            <AppText style={styles.sectionTitle}>{t('roomLobby.hostTools.swapTitle')}</AppText>
+            <AppText style={styles.sectionSubtitle}>{t('roomLobby.hostTools.swapHint')}</AppText>
 
             {!lineup ? (
-              <Text style={styles.emptyText}>{t('roomLobby.hostTools.noLineup')}</Text>
+              <AppText style={styles.emptyText}>{t('roomLobby.hostTools.noLineup')}</AppText>
             ) : !canSwap ? (
-              <Text style={styles.emptyText}>{t('roomLobby.hostTools.noBench')}</Text>
+              <AppText style={styles.emptyText}>{t('roomLobby.hostTools.noBench')}</AppText>
             ) : (
               <>
                 <View style={styles.selectorBlock}>
-                  <Text style={styles.selectorLabel}>{t('roomLobby.hostTools.swapSeat')}</Text>
+                  <AppText style={styles.selectorLabel}>{t('roomLobby.hostTools.swapSeat')}</AppText>
                   <View style={styles.selectorWrap}>
                     {activeSeatCards.map((seat) => (
                       <Pressable
@@ -624,16 +634,16 @@ function RoomLobbyScreen({ navigation, route }: Props) {
                           pressed && styles.selectorChipPressed,
                         ]}
                       >
-                        <Text style={[styles.selectorChipText, selectedSeat === seat.key && styles.selectorChipTextActive]}>
+                        <AppText style={[styles.selectorChipText, selectedSeat === seat.key && styles.selectorChipTextActive]}>
                           {seat.seatLabel}
-                        </Text>
+                        </AppText>
                       </Pressable>
                     ))}
                   </View>
                 </View>
 
                 <View style={styles.selectorBlock}>
-                  <Text style={styles.selectorLabel}>{t('roomLobby.hostTools.swapPlayer')}</Text>
+                  <AppText style={styles.selectorLabel}>{t('roomLobby.hostTools.swapPlayer')}</AppText>
                   <View style={styles.selectorWrap}>
                     {benchPlayers.map((player) => (
                       <Pressable
@@ -645,14 +655,14 @@ function RoomLobbyScreen({ navigation, route }: Props) {
                           pressed && styles.selectorChipPressed,
                         ]}
                       >
-                        <Text
+                        <AppText
                           style={[
                             styles.selectorChipText,
                             selectedBenchId === player.playerId && styles.selectorChipTextActive,
                           ]}
                         >
                           {player.displayName}
-                        </Text>
+                        </AppText>
                       </Pressable>
                     ))}
                   </View>
@@ -668,16 +678,16 @@ function RoomLobbyScreen({ navigation, route }: Props) {
               </>
             )}
 
-            <Text style={styles.sectionTitle}>{t('roomLobby.hostTools.mergeTitle')}</Text>
-            <Text style={styles.sectionSubtitle}>{t('roomLobby.hostTools.mergeHint')}</Text>
+            <AppText style={styles.sectionTitle}>{t('roomLobby.hostTools.mergeTitle')}</AppText>
+            <AppText style={styles.sectionSubtitle}>{t('roomLobby.hostTools.mergeHint')}</AppText>
             {!temporaryPlayers.length ? (
-              <Text style={styles.emptyText}>{t('roomLobby.hostTools.noTempPlayers')}</Text>
+              <AppText style={styles.emptyText}>{t('roomLobby.hostTools.noTempPlayers')}</AppText>
             ) : realPlayers.length < 2 ? (
-              <Text style={styles.emptyText}>{t('roomLobby.hostTools.noRealPlayers')}</Text>
+              <AppText style={styles.emptyText}>{t('roomLobby.hostTools.noRealPlayers')}</AppText>
             ) : (
               <>
                 <View style={styles.selectorBlock}>
-                  <Text style={styles.selectorLabel}>{t('roomLobby.hostTools.mergeTemp')}</Text>
+                  <AppText style={styles.selectorLabel}>{t('roomLobby.hostTools.mergeTemp')}</AppText>
                   <View style={styles.selectorWrap}>
                     {temporaryPlayers.map((player) => (
                       <Pressable
@@ -689,21 +699,21 @@ function RoomLobbyScreen({ navigation, route }: Props) {
                           pressed && styles.selectorChipPressed,
                         ]}
                       >
-                        <Text
+                        <AppText
                           style={[
                             styles.selectorChipText,
                             selectedTempMergeId === player.playerId && styles.selectorChipTextActive,
                           ]}
                         >
                           {player.displayName}
-                        </Text>
+                        </AppText>
                       </Pressable>
                     ))}
                   </View>
                 </View>
 
                 <View style={styles.selectorBlock}>
-                  <Text style={styles.selectorLabel}>{t('roomLobby.hostTools.mergeReal')}</Text>
+                  <AppText style={styles.selectorLabel}>{t('roomLobby.hostTools.mergeReal')}</AppText>
                   <View style={styles.selectorWrap}>
                     {realPlayers
                       .filter((player) => !player.isHost || realPlayers.length > 1)
@@ -717,14 +727,14 @@ function RoomLobbyScreen({ navigation, route }: Props) {
                             pressed && styles.selectorChipPressed,
                           ]}
                         >
-                          <Text
+                          <AppText
                             style={[
                               styles.selectorChipText,
                               selectedRealMergeUid === player.uid && styles.selectorChipTextActive,
                             ]}
                           >
                             {player.displayName}
-                          </Text>
+                          </AppText>
                         </Pressable>
                       ))}
                   </View>
@@ -743,7 +753,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
 
         {notice ? (
           <Card>
-            <Text style={styles.noticeText}>{notice}</Text>
+            <AppText style={styles.noticeText}>{notice}</AppText>
           </Card>
         ) : null}
 
@@ -767,8 +777,8 @@ function RoomLobbyScreen({ navigation, route }: Props) {
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.infoRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value}</Text>
+      <AppText style={styles.infoLabel}>{label}</AppText>
+      <AppText style={styles.infoValue}>{value}</AppText>
     </View>
   );
 }
@@ -776,8 +786,8 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function InviteRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.inviteRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.inviteValue}>{value}</Text>
+      <AppText style={styles.infoLabel}>{label}</AppText>
+      <AppText style={styles.inviteValue}>{value}</AppText>
     </View>
   );
 }

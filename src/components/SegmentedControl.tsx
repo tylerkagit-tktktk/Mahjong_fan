@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, View, ViewStyle } from 'react-native';
+import AppText from './AppText';
 import theme from '../theme/theme';
 
 type SegmentedOption<T extends string | number> = {
@@ -42,7 +43,7 @@ function SegmentedControl<T extends string | number>({
             accessibilityState={{ disabled, selected }}
             hitSlop={HIT_SLOP}
           >
-            <Text style={[styles.text, selected ? styles.textActive : null]}>{option.label}</Text>
+            <AppText style={[styles.text, selected ? styles.textActive : null]}>{option.label}</AppText>
           </Pressable>
         );
       })}

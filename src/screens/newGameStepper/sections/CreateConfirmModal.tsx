@@ -1,4 +1,5 @@
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import AppText from '../../../components/AppText';
 import AppButton from '../../../components/AppButton';
 import theme from '../../../theme/theme';
 import { GRID } from '../constants';
@@ -45,8 +46,8 @@ function CreateConfirmModal({ visible, busy, sections, labels, onClose, onConfir
           disabled={busy}
         />
         <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>{labels.title}</Text>
-          <Text style={styles.modalSubtitle}>{labels.subtitle}</Text>
+          <AppText style={styles.modalTitle}>{labels.title}</AppText>
+          <AppText style={styles.modalSubtitle}>{labels.subtitle}</AppText>
           <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
             {sections ? (
               <>
@@ -76,11 +77,11 @@ type SectionProps = {
 function ModalSection({ title, fields, prefix }: SectionProps) {
   return (
     <View style={styles.modalSection}>
-      <Text style={styles.modalSectionTitle}>{title}</Text>
+      <AppText style={styles.modalSectionTitle}>{title}</AppText>
       {fields.map((field) => (
         <View key={`${prefix}-${field.label}`} style={styles.modalFieldRow}>
-          <Text style={styles.modalFieldLabel}>{field.label}</Text>
-          <Text style={styles.modalFieldValue}>{field.value}</Text>
+          <AppText style={styles.modalFieldLabel}>{field.label}</AppText>
+          <AppText style={styles.modalFieldValue}>{field.value}</AppText>
         </View>
       ))}
     </View>

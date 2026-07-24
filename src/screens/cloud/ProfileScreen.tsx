@@ -1,13 +1,15 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AppTextInput from '../../components/AppTextInput';
+import AppText from '../../components/AppText';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import AppButton from '../../components/AppButton';
 import Card from '../../components/Card';
 import ScreenContainer from '../../components/ScreenContainer';
 import { RootStackParamList } from '../../navigation/types';
 import { typography } from '../../styles/typography';
 import { useAppLanguage } from '../../i18n/useAppLanguage';
-import { getCurrentSession, ensureSession, signInWithProvider, signOut } from '../../services/cloud/authRepo';
+import { getCurrentSession, ensureSession, signOut } from '../../services/cloud/authRepo';
 import { getProfile, getProfileStats, updateProfile } from '../../services/cloud/profileRepo';
 import theme from '../../theme/theme';
 
@@ -66,20 +68,20 @@ function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList
     <ScreenContainer>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.headerBlock}>
-          <Text style={styles.title}>{t('profile.title')}</Text>
-          <Text style={styles.subtitle}>{t('profile.subtitle')}</Text>
+          <AppText style={styles.title}>{t('profile.title')}</AppText>
+          <AppText style={styles.subtitle}>{t('profile.subtitle')}</AppText>
         </View>
 
         <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('profile.account.title')}</Text>
+          <AppText style={styles.sectionTitle}>{t('profile.account.title')}</AppText>
           <InfoRow label={t('profile.account.uid')} value={uid || '-'} />
           <InfoRow label={t('profile.account.provider')} value={provider || '-'} />
         </Card>
 
         <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('profile.form.title')}</Text>
-          <Text style={styles.label}>{t('profile.form.displayName')}</Text>
-          <TextInput
+          <AppText style={styles.sectionTitle}>{t('profile.form.title')}</AppText>
+          <AppText style={styles.label}>{t('profile.form.displayName')}</AppText>
+          <AppTextInput
             style={styles.input}
             value={displayName}
             onChangeText={setDisplayName}
@@ -87,8 +89,8 @@ function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList
             placeholderTextColor={theme.colors.textSecondary}
           />
 
-          <Text style={styles.label}>{t('profile.form.avatarUrl')}</Text>
-          <TextInput
+          <AppText style={styles.label}>{t('profile.form.avatarUrl')}</AppText>
+          <AppTextInput
             style={styles.input}
             value={avatarUrl}
             onChangeText={setAvatarUrl}
@@ -99,26 +101,12 @@ function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList
         </Card>
 
         <Card style={styles.card}>
-          <Text style={styles.sectionTitle}>{t('profile.stats.title')}</Text>
-          <Text style={styles.stats}>{statsLine || t('profile.stats.loading')}</Text>
+          <AppText style={styles.sectionTitle}>{t('profile.stats.title')}</AppText>
+          <AppText style={styles.stats}>{statsLine || t('profile.stats.loading')}</AppText>
         </Card>
 
         <View style={styles.actionStack}>
           <AppButton label={t('profile.actions.save')} onPress={handleSave} />
-          <AppButton
-            label={t('profile.actions.signInApple')}
-            onPress={() => {
-              signInWithProvider('apple').then(load).catch(() => {});
-            }}
-            variant="secondary"
-          />
-          <AppButton
-            label={t('profile.actions.signInGoogle')}
-            onPress={() => {
-              signInWithProvider('google').then(load).catch(() => {});
-            }}
-            variant="secondary"
-          />
           <AppButton label={t('profile.actions.signOut')} onPress={handleSignOut} variant="secondary" />
           <AppButton label={t('profile.actions.backHome')} onPress={() => navigation.navigate('Home')} variant="secondary" />
         </View>
@@ -130,8 +118,8 @@ function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.infoRow}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value}</Text>
+      <AppText style={styles.infoLabel}>{label}</AppText>
+      <AppText style={styles.infoValue}>{value}</AppText>
     </View>
   );
 }

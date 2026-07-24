@@ -1,5 +1,7 @@
 import { RefObject } from 'react';
-import { Alert, LayoutChangeEvent, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import AppTextInput from '../../../components/AppTextInput';
+import AppText from '../../../components/AppText';
+import { Alert, LayoutChangeEvent, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import AppButton from '../../../components/AppButton';
 import Card from '../../../components/Card';
 import SegmentedControl from '../../../components/SegmentedControl';
@@ -137,7 +139,7 @@ function PlayersSection({
     }
     return (
       <View style={styles.syncSeatBadge}>
-        <Text style={styles.syncSeatBadgeText}>{labels.syncSeatAssigned ?? '已同步'}</Text>
+        <AppText style={styles.syncSeatBadgeText}>{labels.syncSeatAssigned ?? '已同步'}</AppText>
       </View>
     );
   };
@@ -146,6 +148,7 @@ function PlayersSection({
 
   const renderManualSeatRow = (label: string, index: number) => {
     const syncedDisplayName = syncedSeatDisplayNames[index];
+    const seatIndex = lockedSeatByRow?.[index] ?? index;
     const syncSeatSelectable = syncEnabled && Boolean(selectedSyncPlayerId) && Boolean(onAssignSyncPlayerToSeat);
     const handleAssignSeat = () => {
       if (!syncSeatSelectable || !onAssignSyncPlayerToSeat) {
@@ -175,35 +178,36 @@ function PlayersSection({
               Alert.alert(
                 labels.seatModeTitle,
                 undefined,
-                seatLabels.map((seatLabel, seatIndex) => ({
+                seatLabels.map((seatLabel, optionIndex) => ({
                   text: seatLabel,
-                  onPress: () => onSelectLockedSeat(index, seatIndex),
+                  onPress: () => onSelectLockedSeat(index, optionIndex),
                 })),
                 { cancelable: true },
               );
             }}
-            style={styles.seatChip}
+            style={[styles.seatChip, seatIndex === 0 && styles.eastSeatChip]}
           >
-            <Text style={styles.seatChipText}>
-              {seatLabels[lockedSeatByRow?.[index] ?? index]}
-            </Text>
+            <AppText style={[styles.seatChipText, seatIndex === 0 && styles.eastSeatChipText]}>
+              {seatLabels[seatIndex]}
+            </AppText>
           </Pressable>
         ) : (
           <View
             style={[
               styles.seatChip,
+              index === 0 && styles.eastSeatChip,
               syncSeatSelectable ? styles.seatChipSelectable : null,
             ]}
           >
-            <Text style={styles.seatChipText}>{label}</Text>
+            <AppText style={[styles.seatChipText, index === 0 && styles.eastSeatChipText]}>{label}</AppText>
           </View>
         )}
         {syncedDisplayName ? (
           <View style={styles.playerReadonlyWrap}>
-            <Text style={styles.playerReadonlyText}>{syncedDisplayName}</Text>
+            <AppText style={styles.playerReadonlyText}>{syncedDisplayName}</AppText>
           </View>
         ) : allowNameEdit ? (
-          <TextInput
+          <AppTextInput
             ref={(ref) => {
               manualPlayerRefs.current[index] = ref;
             }}
@@ -218,25 +222,25 @@ function PlayersSection({
           />
         ) : (
           <View style={styles.playerReadonlyWrap}>
-            <Text style={styles.playerReadonlyText}>
+            <AppText style={styles.playerReadonlyText}>
               {players[index]}
-            </Text>
+            </AppText>
           </View>
         )}
         {renderSyncSeatBadge(index)}
-        {index === 0 ? <Text style={styles.dealerBadge}>{labels.dealerBadge}</Text> : null}
+        {index === 0 ? <AppText style={styles.dealerBadge}>{labels.dealerBadge}</AppText> : null}
       </Pressable>
     );
   };
 
   return (
     <Card style={styles.card}>
-      <Text style={styles.sectionTitle}>{labels.sectionTitle}</Text>
-      {seatMode === 'manual' ? <Text style={styles.captionText}>{labels.manualSeatCaption}</Text> : null}
+      <AppText style={styles.sectionTitle}>{labels.sectionTitle}</AppText>
+      {seatMode === 'manual' ? <AppText style={styles.captionText}>{labels.manualSeatCaption}</AppText> : null}
 
       {allowNameEdit ? (
         <>
-          <Text style={styles.inputLabel}>{labels.seatModeTitle}</Text>
+          <AppText style={styles.inputLabel}>{labels.seatModeTitle}</AppText>
           <SegmentedControl<SeatMode>
             options={[
               { value: 'manual', label: labels.seatModeManual },
@@ -251,29 +255,29 @@ function PlayersSection({
 
       {effectiveSeatMode === 'manual' ? (
         <View style={styles.playersList}>
-          <Text style={styles.helperText}>
+          <AppText style={styles.helperText}>
             {allowNameEdit
               ? `${labels.playerManualHintPrefix}${PLAYER_COUNT}${labels.playerManualHintSuffix}`
               : labels.playerManualHintPrefix}
-          </Text>
+          </AppText>
           {playersError ? (
-            <Text onLayout={onPlayersErrorLayout} style={styles.inlineErrorText}>
+            <AppText onLayout={onPlayersErrorLayout} style={styles.inlineErrorText}>
               {playersError}
-            </Text>
+            </AppText>
           ) : null}
           {seatLabels.map(renderManualSeatRow)}
         </View>
       ) : (
         <View style={styles.playersList}>
-          <Text style={styles.helperText}>
+          <AppText style={styles.helperText}>
             {syncEnabled && selectedSyncPlayerId
               ? '已選同步玩家。請先按「確認抽籤」，再點東南西北安排上枱。'
               : labels.autoFlowHint}
-          </Text>
+          </AppText>
           {playersError ? (
-            <Text onLayout={onPlayersErrorLayout} style={styles.inlineErrorText}>
+            <AppText onLayout={onPlayersErrorLayout} style={styles.inlineErrorText}>
               {playersError}
-            </Text>
+            </AppText>
           ) : null}
           {autoNames.map((value, index) => (
             <Pressable
@@ -291,10 +295,10 @@ function PlayersSection({
                 pressed && syncEnabled && selectedSyncPlayerId && !autoAssigned ? styles.syncSelectableRowPressed : null,
               ]}
             >
-              <View style={styles.seatChip}>
-                <Text style={styles.seatChipText}>{index + 1}</Text>
+                  <View style={[styles.seatChip, index === 0 && styles.eastSeatChip]}>
+                    <AppText style={[styles.seatChipText, index === 0 && styles.eastSeatChipText]}>{index + 1}</AppText>
               </View>
-              <TextInput
+              <AppTextInput
                 ref={(ref) => {
                   autoPlayerRefs.current[index] = ref;
                 }}
@@ -333,9 +337,9 @@ function PlayersSection({
 
           {autoAssigned ? (
             <View style={styles.blockSpacing}>
-              <Text style={styles.inputLabel}>
+              <AppText style={styles.inputLabel}>
                 {startingDealerMode === 'manual' ? labels.autoSeatResultManualTitle : labels.autoSeatResult}
-              </Text>
+              </AppText>
               {seatLabels.map((label, index) => (
                 <Pressable
                   key={`result-${label}`}
@@ -363,29 +367,29 @@ function PlayersSection({
                   }}
                   hitSlop={6}
                 >
-                  <View style={styles.seatChip}>
-                    <Text style={styles.seatChipText}>{label}</Text>
+                  <View style={[styles.seatChip, index === 0 && styles.eastSeatChip]}>
+                    <AppText style={[styles.seatChipText, index === 0 && styles.eastSeatChipText]}>{label}</AppText>
                   </View>
-                  <Text style={styles.resultText}>{syncedSeatDisplayNames[index] ?? autoAssigned[index]}</Text>
+                  <AppText style={styles.resultText}>{syncedSeatDisplayNames[index] ?? autoAssigned[index]}</AppText>
                   {renderSyncSeatBadge(index)}
-                  {startingDealerSourceIndex === index ? <Text style={styles.dealerBadge}>{labels.dealerBadge}</Text> : null}
+                  {startingDealerSourceIndex === index ? <AppText style={styles.dealerBadge}>{labels.dealerBadge}</AppText> : null}
                 </Pressable>
               ))}
-              <Text style={styles.resultHintText}>
+              <AppText style={styles.resultHintText}>
                 {startingDealerMode === 'manual' && !hasDealerResult
                   ? '請點選其中一位做莊，系統會即時排成最終東南西北座位。'
                   : syncedSeatDisplayNames.some(Boolean)
                   ? '抽籤結果已自動同步上枱；如要調整，可以再點玩家同座位覆蓋安排。'
                   : '抽籤結果已按最終東南西北顯示。'}
-              </Text>
+              </AppText>
               {hasDealerResult && !syncedSeatDisplayNames.some(Boolean) ? (
-                <Text style={styles.resultHintText}>
+                <AppText style={styles.resultHintText}>
                   {labels.autoSeatDealerExample
                     .replace('{dealerSeatLabel}', dealerSeatLabel)
                     .replace('{dealerPlayerName}', dealerPlayerName)
                     .replace('{southSeatLabel}', southSeatLabel)
                     .replace('{southPlayerName}', southPlayerName)}
-                </Text>
+                </AppText>
               ) : null}
             </View>
           ) : null}
@@ -394,12 +398,12 @@ function PlayersSection({
 
       {syncEnabled ? (
         <View style={styles.syncBlock}>
-          <Text style={styles.inputLabel}>{labels.syncJoinedPlayersTitle ?? '已加入玩家'}</Text>
-          <Text style={styles.syncHintText}>
+          <AppText style={styles.inputLabel}>{labels.syncJoinedPlayersTitle ?? '已加入玩家'}</AppText>
+          <AppText style={styles.syncHintText}>
             {selectedSyncPlayerName
               ? (labels.syncSelectedPlayerHintWithName ?? '已選 {name}').replace('{name}', selectedSyncPlayerName)
               : labels.syncSelectedPlayerHint ?? '點選一位已加入玩家，再點東南西北其中一格安排上枱。'}
-          </Text>
+          </AppText>
           {joinedSyncPlayers.length > 0 ? (
             <View style={styles.syncPlayerChipList}>
               {joinedSyncPlayers.map((player) => {
@@ -410,26 +414,26 @@ function PlayersSection({
                     onPress={() => onSelectSyncPlayer?.(player.playerId)}
                     style={[styles.syncPlayerChip, selected && styles.syncPlayerChipSelected]}
                   >
-                    <Text style={[styles.syncPlayerChipText, selected && styles.syncPlayerChipTextSelected]}>
+                    <AppText style={[styles.syncPlayerChipText, selected && styles.syncPlayerChipTextSelected]}>
                       {player.displayName}
-                    </Text>
-                    {player.isHost ? <Text style={[styles.syncPlayerMeta, selected && styles.syncPlayerMetaSelected]}>{labels.syncHost ?? '房主'}</Text> : null}
-                    {player.isSelf ? <Text style={[styles.syncPlayerMeta, selected && styles.syncPlayerMetaSelected]}>{labels.syncYou ?? '你'}</Text> : null}
+                    </AppText>
+                    {player.isHost ? <AppText style={[styles.syncPlayerMeta, selected && styles.syncPlayerMetaSelected]}>{labels.syncHost ?? '房主'}</AppText> : null}
+                    {player.isSelf ? <AppText style={[styles.syncPlayerMeta, selected && styles.syncPlayerMetaSelected]}>{labels.syncYou ?? '你'}</AppText> : null}
                   </Pressable>
                 );
               })}
             </View>
           ) : (
-            <Text style={styles.syncHintText}>{labels.syncJoinedPlayersHint ?? '其他玩家加入後，會出現在這裡供你安排到座位或留在後備。'}</Text>
+            <AppText style={styles.syncHintText}>{labels.syncJoinedPlayersHint ?? '其他玩家加入後，會出現在這裡供你安排到座位或留在後備。'}</AppText>
           )}
 
           {benchPlayerNames.length > 0 ? (
             <View style={styles.benchBlock}>
-              <Text style={styles.inputLabel}>{labels.syncBenchTitle ?? '後備區'}</Text>
+              <AppText style={styles.inputLabel}>{labels.syncBenchTitle ?? '後備區'}</AppText>
               <View style={styles.syncPlayerChipList}>
                 {benchPlayerNames.map((playerName) => (
                   <View key={playerName} style={styles.benchChip}>
-                    <Text style={styles.benchChipText}>{playerName}</Text>
+                    <AppText style={styles.benchChipText}>{playerName}</AppText>
                   </View>
                 ))}
               </View>
@@ -517,6 +521,13 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
     color: theme.colors.primary,
+  },
+  eastSeatChip: {
+    backgroundColor: '#E8F0FE',
+    borderColor: '#1A73E8',
+  },
+  eastSeatChipText: {
+    color: '#1A73E8',
   },
   seatChipSelectable: {
     backgroundColor: theme.colors.primaryLight,

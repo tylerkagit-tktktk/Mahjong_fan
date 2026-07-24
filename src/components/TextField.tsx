@@ -1,12 +1,8 @@
 import { Ref } from 'react';
+import AppTextInput from './AppTextInput';
+import AppText from './AppText';
 import {
-  StyleSheet,
-  Text,
-  TextInput,
-  TextInputProps,
-  View,
-  ViewStyle,
-} from 'react-native';
+  StyleSheet, TextInput, TextInputProps, View, ViewStyle } from 'react-native';
 import theme from '../theme/theme';
 
 type TextFieldProps = {
@@ -32,8 +28,8 @@ function TextField({
 }: TextFieldProps) {
   return (
     <View style={[styles.container, style]}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
+      <AppText style={styles.label}>{label}</AppText>
+      <AppTextInput
         ref={inputRef}
         style={styles.input}
         value={value}

@@ -1,0 +1,55 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isRoomMember(roomId) {
+      return exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid));
+    }
+
+    match /profiles/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /profileStats/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /rooms/{roomId} {
+      // Invite validation currently runs on-device, so signed-in guests need to
+      // read a room before their member record exists. Replace this with a
+      // callable function before exposing room IDs outside trusted groups.
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.hostUid == request.auth.uid;
+      allow update: if signedIn() && (resource.data.hostUid == request.auth.uid || isRoomMember(roomId));
+      allow delete: if signedIn() && resource.data.hostUid == request.auth.uid;
+
+      match /members/{uid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.auth.uid == uid;
+        allow update, delete: if signedIn() && (request.auth.uid == uid || get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid);
+      }
+
+      match /tempPlayers/{tempPlayerId} {
+        allow read: if signedIn();
+        allow write: if signedIn() && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid;
+      }
+
+      match /lineups/{lineupId} {
+        allow read: if signedIn();
+        allow write: if signedIn() && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid;
+      }
+
+      match /hands/{handId} {
+        allow read: if signedIn();
+        allow create: if signedIn() && isRoomMember(roomId);
+        allow delete: if signedIn() && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid;
+      }
+    }
+  }
+}

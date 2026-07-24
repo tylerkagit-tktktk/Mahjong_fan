@@ -22,16 +22,18 @@ import { archiveRoomToLocal, loadArchivedGame } from '../../../src/services/clou
 import { ensureSession, signInWithProvider } from '../../../src/services/cloud/authRepo';
 import { submitHand } from '../../../src/services/cloud/handRepo';
 import {
-  cleanupExpiredArchivedRooms,
   createInvite,
   createRoom,
+  deleteArchivedRoomAfterSync,
   endRoom,
+  getArchiveSyncStatus,
   getActiveLineup,
   getRoom,
   joinWithInvite,
+  listMembers,
   startRoom,
 } from '../../../src/services/cloud/roomRepo';
-import { loadSnapshot, saveSessionRaw, saveSnapshot } from '../../../src/services/cloud/storage';
+import { saveSessionRaw, saveSnapshot } from '../../../src/services/cloud/storage';
 
 beforeEach(async () => {
   mockSavedArchives.clear();
@@ -51,8 +53,7 @@ describe('cloud archive flow', () => {
       expect(joined.ok).toBe(true);
     }
 
-    const membersSnapshot = await loadSnapshot();
-    const roomMembers = membersSnapshot.members.filter((entry) => entry.roomId === room.roomId);
+    const roomMembers = await listMembers(room.roomId);
     const started = await startRoom({
       roomId: room.roomId,
       startedByUid: host.uid,
@@ -103,7 +104,7 @@ describe('cloud archive flow', () => {
     }
   });
 
-  it('cleans expired archived room from cloud snapshot while keeping local archive', async () => {
+  it('keeps an archived room available while its local archive remains readable', async () => {
     const host = await ensureSession('google');
     const room = await createRoom({ hostUid: host.uid, title: '過期封存房間', memberCap: 4 });
     const invite = await createInvite(room.roomId);
@@ -116,20 +117,41 @@ describe('cloud archive flow', () => {
     await endRoom(room.roomId, host.uid);
     await archiveRoomToLocal(room.roomId, host.uid);
 
-    const snapshot = await loadSnapshot();
-    const targetRoom = snapshot.rooms.find((entry) => entry.roomId === room.roomId);
-    expect(targetRoom).toBeDefined();
-    if (targetRoom) {
-      targetRoom.expiresAt = Date.now() - 1;
-    }
-    await saveSnapshot(snapshot);
-
-    await cleanupExpiredArchivedRooms();
-
     const cloudRoom = await getRoom(room.roomId);
-    expect(cloudRoom).toBeNull();
+    expect(cloudRoom?.status).toBe('archived');
 
     const localArchive = await loadArchivedGame(room.roomId);
     expect(localArchive?.room.roomId).toBe(room.roomId);
+  });
+
+  it('only lets the host delete cloud data after every real member has saved an archive', async () => {
+    const host = await ensureSession('google');
+    const room = await createRoom({ hostUid: host.uid, title: '清理同步房間', memberCap: 4 });
+    const invite = await createInvite(room.roomId);
+    const guests = [];
+
+    for (let i = 0; i < 3; i += 1) {
+      const session = await signInWithProvider('apple');
+      guests.push(session);
+      await joinWithInvite(room.roomId, invite.token, session.uid);
+    }
+
+    await endRoom(room.roomId, host.uid);
+    await archiveRoomToLocal(room.roomId, host.uid);
+
+    const afterHostArchive = getArchiveSyncStatus(await listMembers(room.roomId), 1);
+    expect(afterHostArchive).toMatchObject({ requiredMemberCount: 4, syncedMemberCount: 1, isReadyForCloudDeletion: false });
+    await expect(deleteArchivedRoomAfterSync(room.roomId, host.uid)).rejects.toThrow('Waiting for');
+
+    for (const guest of guests) {
+      await archiveRoomToLocal(room.roomId, guest.uid);
+    }
+
+    const completedSync = getArchiveSyncStatus(await listMembers(room.roomId), 1);
+    expect(completedSync).toMatchObject({ requiredMemberCount: 4, syncedMemberCount: 4, isReadyForCloudDeletion: true });
+
+    await deleteArchivedRoomAfterSync(room.roomId, host.uid);
+    expect(await getRoom(room.roomId)).toBeNull();
+    expect((await loadArchivedGame(room.roomId))?.room.roomId).toBe(room.roomId);
   });
 });

@@ -2,6 +2,34 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+def releaseSigningKeys = [
+    "MYAPP_UPLOAD_STORE_FILE",
+    "MYAPP_UPLOAD_STORE_PASSWORD",
+    "MYAPP_UPLOAD_KEY_ALIAS",
+    "MYAPP_UPLOAD_KEY_PASSWORD",
+]
+def releaseSigningValues = releaseSigningKeys.collectEntries { key ->
+    [(key): keystoreProperties.getProperty(key) ?: project.findProperty(key)]
+}
+def hasReleaseSigningConfig = releaseSigningValues.values().every { it }
+def releaseSigningMessage =
+    "Missing Android release signing configuration. " +
+    "Copy android/keystore.properties.example to android/keystore.properties, " +
+    "or supply the required Gradle properties outside version control."
+
+gradle.taskGraph.whenReady { graph ->
+    def runsReleaseTask = graph.allTasks.any { task -> task.name.toLowerCase().contains("release") }
+    if (runsReleaseTask && !hasReleaseSigningConfig) {
+        throw new GradleException(releaseSigningMessage)
+    }
+}
+
 def googleServicesFile = file("google-services.json")
 if (!googleServicesFile.exists()) {
     throw new GradleException(
@@ -157,10 +185,12 @@ android {
         }
 
         release {
-            storeFile file(MYAPP_UPLOAD_STORE_FILE)
-            storePassword MYAPP_UPLOAD_STORE_PASSWORD
-            keyAlias MYAPP_UPLOAD_KEY_ALIAS
-            keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+            if (hasReleaseSigningConfig) {
+                storeFile rootProject.file(releaseSigningValues.MYAPP_UPLOAD_STORE_FILE)
+                storePassword releaseSigningValues.MYAPP_UPLOAD_STORE_PASSWORD
+                keyAlias releaseSigningValues.MYAPP_UPLOAD_KEY_ALIAS
+                keyPassword releaseSigningValues.MYAPP_UPLOAD_KEY_PASSWORD
+            }
         }
     }
 

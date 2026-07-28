@@ -50,6 +50,7 @@ yarn-error.log
 .env
 .env.*
 !.env.example
+/android/keystore.properties
 *.pem
 *.p8
 *.p12

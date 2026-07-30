@@ -51,7 +51,7 @@ describe('RoomLobbyScreen deleted room handling', () => {
     mockedEnsureSession.mockResolvedValue({ uid: 'guest-1', provider: 'google' });
   });
 
-  it('alerts once and returns after a previously loaded room is deleted', async () => {
+  async function renderRemovedRoom(canGoBack: boolean) {
     let publishRoomState: Parameters<typeof subscribeRoomState>[2] = () => {};
     mockedSubscribeRoomState.mockImplementation((_roomId, _sessionUid, cb) => {
       publishRoomState = cb;
@@ -59,6 +59,7 @@ describe('RoomLobbyScreen deleted room handling', () => {
     });
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     const navigation = {
+      canGoBack: jest.fn(() => canGoBack),
       goBack: jest.fn(),
       replace: jest.fn(),
     } as any;
@@ -95,6 +96,12 @@ describe('RoomLobbyScreen deleted room handling', () => {
       publishRoomState({ room: null, players: [], lineup: null });
     });
 
+    return { alertSpy, navigation, publishRoomState, tree: tree! };
+  }
+
+  it('alerts once and returns after a previously loaded room is deleted', async () => {
+    const { alertSpy, navigation, publishRoomState, tree } = await renderRemovedRoom(true);
+
     expect(alertSpy).toHaveBeenCalledTimes(1);
     expect(alertSpy).toHaveBeenCalledWith(
       '同步房已關閉',
@@ -110,10 +117,28 @@ describe('RoomLobbyScreen deleted room handling', () => {
     });
 
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
+    expect(navigation.replace).not.toHaveBeenCalled();
     expect(alertSpy).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      tree!.unmount();
+      tree.unmount();
+    });
+    alertSpy.mockRestore();
+  });
+
+  it('replaces the deleted room with Home when opened as the deep-link root', async () => {
+    const { alertSpy, navigation, tree } = await renderRemovedRoom(false);
+    const buttons = alertSpy.mock.calls[0][2];
+
+    act(() => {
+      buttons?.[0]?.onPress?.();
+    });
+
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.replace).toHaveBeenCalledWith('Home');
+
+    await act(async () => {
+      tree.unmount();
     });
     alertSpy.mockRestore();
   });

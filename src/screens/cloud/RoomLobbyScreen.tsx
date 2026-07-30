@@ -57,6 +57,15 @@ function RoomLobbyScreen({ navigation, route }: Props) {
   const hasLoadedRoom = useRef(false);
   const didHandleRemovedRoom = useRef(false);
 
+  const leaveRemovedRoom = useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.replace('Home');
+  }, [navigation]);
+
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
 
@@ -78,7 +87,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
           Alert.alert(
             t('roomLobby.alert.roomRemovedTitle'),
             t('roomLobby.alert.roomRemovedMessage'),
-            [{ text: t('common.ok'), onPress: () => navigation.goBack() }],
+            [{ text: t('common.ok'), onPress: leaveRemovedRoom }],
             { cancelable: false },
           );
         }
@@ -95,7 +104,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
     return () => {
       unsubscribe?.();
     };
-  }, [navigation, roomId, t]);
+  }, [leaveRemovedRoom, navigation, roomId, t]);
 
   useEffect(() => {
     if (room?.status !== 'active' || didEnterActiveTable.current) {

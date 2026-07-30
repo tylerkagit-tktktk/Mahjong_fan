@@ -7,7 +7,8 @@
     "ios": "react-native run-ios --simulator='iPhone 17' --no-packager",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "test:firestore-rules": "npm --prefix firestore-tests install --silent && npm --prefix firestore-tests run test:rules"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^1.24.0",

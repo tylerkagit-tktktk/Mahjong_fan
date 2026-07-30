@@ -87,6 +87,7 @@ ios/mahjong_be_fd/GoogleService-Info.plist
 
 # Local generated previews and intermediate assets
 /tmp/
+firestore-debug.log
 
 # testing
 /coverage

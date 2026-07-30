@@ -1,0 +1,12 @@
+{
+  "name": "mahjong-fan-firestore-tests",
+  "private": true,
+  "scripts": {
+    "test:rules": "FIREBASE_CLI_DISABLE_UPDATE_CHECK=true firebase emulators:exec --config ../firebase.json --only firestore --project demo-mahjong-fan \"node --test firestore.rules.test.cjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "4.0.1",
+    "firebase": "11.10.0",
+    "firebase-tools": "15.25.0"
+  }
+}

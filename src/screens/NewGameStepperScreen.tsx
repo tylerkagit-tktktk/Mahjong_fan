@@ -898,7 +898,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           serializedRules: serializeRules(draftContext.rules),
         },
       });
-      const invite = await createInvite(createdRoom.roomId);
+      const invite = await createInvite(createdRoom.roomId, session.uid);
       setDraftRoom(createdRoom);
       setInviteToken(invite.token);
       setInviteText(

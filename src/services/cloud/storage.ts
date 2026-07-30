@@ -2,7 +2,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CloudSnapshot } from '../../models/cloud';
 
 const CLOUD_SNAPSHOT_KEY = 'cloud_snapshot_v2';
-const SESSION_KEY = 'cloud_session_v2';
 
 const inMemory = new Map<string, string>();
 
@@ -61,28 +60,8 @@ export async function saveSnapshot(snapshot: CloudSnapshot): Promise<void> {
   await setItem(CLOUD_SNAPSHOT_KEY, JSON.stringify(snapshot));
 }
 
-export async function loadSessionRaw(): Promise<string | null> {
-  return getItem(SESSION_KEY);
-}
-
-export async function saveSessionRaw(raw: string | null): Promise<void> {
-  if (raw === null) {
-    await setItem(SESSION_KEY, '');
-    return;
-  }
-  await setItem(SESSION_KEY, raw);
-}
-
 export function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export function hashToken(token: string): string {
-  let hash = 0;
-  for (let i = 0; i < token.length; i += 1) {
-    hash = (hash * 31 + token.charCodeAt(i)) % 2147483647;
-  }
-  return String(hash);
 }
 
 export function now(): number {

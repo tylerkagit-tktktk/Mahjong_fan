@@ -70,8 +70,6 @@ type Props = {
   onSeatModeChange: (nextMode: SeatMode) => void;
   onSetPlayer: (index: number, value: string) => void;
   onSetAutoName: (index: number, value: string) => void;
-  lockedSeatByRow?: number[];
-  onSelectLockedSeat?: (rowIndex: number, seatIndex: number) => void;
   onConfirmAutoSeat: () => void;
   onStartingDealerModeChange: (mode: StartingDealerMode) => void;
   onSelectStartingDealer: (index: number) => void;
@@ -106,8 +104,6 @@ function PlayersSection({
   onSeatModeChange,
   onSetPlayer,
   onSetAutoName,
-  lockedSeatByRow,
-  onSelectLockedSeat,
   onConfirmAutoSeat,
   onStartingDealerModeChange,
   onSelectStartingDealer,
@@ -148,7 +144,6 @@ function PlayersSection({
 
   const renderManualSeatRow = (label: string, index: number) => {
     const syncedDisplayName = syncedSeatDisplayNames[index];
-    const seatIndex = lockedSeatByRow?.[index] ?? index;
     const syncSeatSelectable = syncEnabled && Boolean(selectedSyncPlayerId) && Boolean(onAssignSyncPlayerToSeat);
     const handleAssignSeat = () => {
       if (!syncSeatSelectable || !onAssignSyncPlayerToSeat) {
@@ -168,40 +163,15 @@ function PlayersSection({
           pressed && syncSeatSelectable ? styles.syncSelectableRowPressed : null,
         ]}
       >
-        {!allowNameEdit && onSelectLockedSeat ? (
-          <Pressable
-            testID={`reseat-seat-picker-${index}`}
-            onPress={() => {
-              if (disabled) {
-                return;
-              }
-              Alert.alert(
-                labels.seatModeTitle,
-                undefined,
-                seatLabels.map((seatLabel, optionIndex) => ({
-                  text: seatLabel,
-                  onPress: () => onSelectLockedSeat(index, optionIndex),
-                })),
-                { cancelable: true },
-              );
-            }}
-            style={[styles.seatChip, seatIndex === 0 && styles.eastSeatChip]}
-          >
-            <AppText style={[styles.seatChipText, seatIndex === 0 && styles.eastSeatChipText]}>
-              {seatLabels[seatIndex]}
-            </AppText>
-          </Pressable>
-        ) : (
-          <View
-            style={[
-              styles.seatChip,
-              index === 0 && styles.eastSeatChip,
-              syncSeatSelectable ? styles.seatChipSelectable : null,
-            ]}
-          >
-            <AppText style={[styles.seatChipText, index === 0 && styles.eastSeatChipText]}>{label}</AppText>
-          </View>
-        )}
+        <View
+          style={[
+            styles.seatChip,
+            index === 0 && styles.eastSeatChip,
+            syncSeatSelectable ? styles.seatChipSelectable : null,
+          ]}
+        >
+          <AppText style={[styles.seatChipText, index === 0 && styles.eastSeatChipText]}>{label}</AppText>
+        </View>
         {syncedDisplayName ? (
           <View style={styles.playerReadonlyWrap}>
             <AppText style={styles.playerReadonlyText}>{syncedDisplayName}</AppText>

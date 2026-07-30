@@ -3,13 +3,6 @@ export type Rules = {
   payload?: Record<string, unknown>;
 };
 
-export type Transfer = {
-  fromPlayerId: string;
-  toPlayerId: string;
-  amount: number;
-  reason?: string;
-};
-
 export type Game = {
   id: string;
   title: string;

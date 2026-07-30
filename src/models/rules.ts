@@ -8,7 +8,6 @@ import {
 } from './currency';
 import { isDev } from '../debug/isDev';
 
-export type RulesVersion = 1;
 export type Variant = 'HK' | 'TW' | 'PMA';
 export type GameMode = Variant;
 export type SeatWind = 'E' | 'S' | 'W' | 'N';

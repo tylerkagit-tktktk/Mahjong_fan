@@ -6,49 +6,229 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function roomPath(roomId) {
+      return /databases/$(database)/documents/rooms/$(roomId);
+    }
+
+    function memberPath(roomId, uid) {
+      return /databases/$(database)/documents/rooms/$(roomId)/members/$(uid);
+    }
+
+    function invitePath(token) {
+      return /databases/$(database)/documents/roomInvites/$(token);
+    }
+
+    function ticketPath(roomId, uid) {
+      return /databases/$(database)/documents/rooms/$(roomId)/joinTickets/$(uid);
+    }
+
     function isRoomMember(roomId) {
-      return exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid));
+      return signedIn() && exists(memberPath(roomId, request.auth.uid));
+    }
+
+    function isHost(roomId) {
+      return signedIn() && get(roomPath(roomId)).data.hostUid == request.auth.uid;
+    }
+
+    function isActiveMember(roomId) {
+      return isRoomMember(roomId)
+        && get(memberPath(roomId, request.auth.uid)).data.membershipStatus == 'active';
+    }
+
+    function isSeatPlayer(roomId, uid) {
+      let room = get(roomPath(roomId)).data;
+      let lineup = get(/databases/$(database)/documents/rooms/$(roomId)/lineups/$(room.activeLineupVersion)).data;
+      return lineup.seats['0'] == uid
+        || lineup.seats['1'] == uid
+        || lineup.seats['2'] == uid
+        || lineup.seats['3'] == uid;
+    }
+
+    function hasOnlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    function isValidInvite(roomId, token) {
+      return token is string
+        && token.size() >= 20
+        && exists(invitePath(token))
+        && get(invitePath(token)).data.roomId == roomId
+        && get(invitePath(token)).data.expiresAt > request.time
+        && get(/databases/$(database)/documents/rooms/$(roomId)/hostConfig/current).data.activeInviteToken == token
+        && get(roomPath(roomId)).data.status == 'open';
+    }
+
+    function hasValidJoinTicket(roomId) {
+      return !isRoomMember(roomId)
+        && exists(ticketPath(roomId, request.auth.uid))
+        && isValidInvite(roomId, get(ticketPath(roomId, request.auth.uid)).data.token);
+    }
+
+    function isJoinRoomUpdate(roomId) {
+      return hasValidJoinTicket(roomId)
+        && hasOnlyChanges(['memberCount', 'updatedAt'])
+        && request.resource.data.memberCount == resource.data.memberCount + 1
+        && request.resource.data.memberCount <= resource.data.memberCap;
+    }
+
+    function canCreateJoinedMember(roomId, uid) {
+      let currentRoom = get(roomPath(roomId)).data;
+      let nextRoom = getAfter(roomPath(roomId)).data;
+      return hasValidJoinTicket(roomId)
+        && request.auth.uid == uid
+        && nextRoom.memberCount == currentRoom.memberCount + 1
+        && nextRoom.memberCount <= currentRoom.memberCap;
+    }
+
+    function isHandAdvance(roomId) {
+      let nextHandId = request.resource.data.currentHandIndex;
+      let nextHand = getAfter(/databases/$(database)/documents/rooms/$(roomId)/hands/$(nextHandId)).data;
+      return isActiveMember(roomId)
+        && isSeatPlayer(roomId, request.auth.uid)
+        && hasOnlyChanges(['currentVersion', 'currentHandIndex', 'status', 'updatedAt'])
+        && request.resource.data.currentVersion == resource.data.currentVersion + 1
+        && request.resource.data.currentHandIndex == resource.data.currentHandIndex + 1
+        && request.resource.data.status == 'active'
+        && nextHand.submittedByUid == request.auth.uid
+        && nextHand.baseVersion == resource.data.currentVersion
+        && nextHand.serverVersion == request.resource.data.currentVersion
+        && nextHand.handIndex == request.resource.data.currentHandIndex;
+    }
+
+    function isMemberEnd(roomId) {
+      return isActiveMember(roomId)
+        && resource.data.status == 'active'
+        && request.resource.data.status == 'ended'
+        && hasOnlyChanges(['status', 'archiveReadyAt', 'archiveVersion', 'updatedAt'])
+        && request.resource.data.archiveVersion == (resource.data.archiveVersion == null ? 1 : resource.data.archiveVersion + 1);
+    }
+
+    function isMemberArchive(roomId) {
+      return isActiveMember(roomId)
+        && resource.data.status == 'ended'
+        && request.resource.data.status == 'archived'
+        && hasOnlyChanges(['status', 'archiveReadyAt', 'archiveVersion', 'expiresAt', 'updatedAt']);
+    }
+
+    function isHostRoomUpdate(roomId) {
+      return isHost(roomId)
+        && hasOnlyChanges([
+          'activeLineupVersion', 'currentVersion', 'status', 'updatedAt',
+          'archiveReadyAt', 'archiveVersion', 'expiresAt', 'memberCount'
+        ]);
     }
 
     match /profiles/{uid} {
-      allow read: if signedIn();
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
       allow create, update: if signedIn() && request.auth.uid == uid;
     }
 
     match /profileStats/{uid} {
-      allow read: if signedIn();
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
       allow create, update: if signedIn() && request.auth.uid == uid;
+
+      match /appliedArchives/{archiveId} {
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow list: if false;
+        allow create: if signedIn() && request.auth.uid == uid;
+      }
+    }
+
+    // An invite ID is a high-entropy bearer token. Direct get is required for a
+    // shared link; listing invite IDs is always denied.
+    match /roomInvites/{token} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.createdByUid == request.auth.uid
+        && isHost(request.resource.data.roomId);
+      allow delete: if signedIn() && isHost(resource.data.roomId);
     }
 
     match /rooms/{roomId} {
-      // Invite validation currently runs on-device, so signed-in guests need to
-      // read a room before their member record exists. Replace this with a
-      // callable function before exposing room IDs outside trusted groups.
-      allow read: if signedIn();
-      allow create: if signedIn() && request.resource.data.hostUid == request.auth.uid;
-      allow update: if signedIn() && (resource.data.hostUid == request.auth.uid || isRoomMember(roomId));
-      allow delete: if signedIn() && resource.data.hostUid == request.auth.uid;
+      allow get: if isRoomMember(roomId);
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.status == 'open'
+        && request.resource.data.memberCount == 1;
+      allow update: if isHostRoomUpdate(roomId)
+        || isJoinRoomUpdate(roomId)
+        || isHandAdvance(roomId)
+        || isMemberEnd(roomId)
+        || isMemberArchive(roomId);
+      allow delete: if isHost(roomId);
+
+      match /hostConfig/{configId} {
+        allow get: if isHost(roomId);
+        allow list: if false;
+        allow create: if signedIn()
+          && configId == 'current'
+          && getAfter(roomPath(roomId)).data.hostUid == request.auth.uid;
+        allow update, delete: if isHost(roomId);
+      }
+
+      // Tickets are private, short-lived join credentials. The member-creation
+      // batch consumes them, so no invite token is retained in room data.
+      match /joinTickets/{uid} {
+        allow get: if signedIn() && request.auth.uid == uid;
+        allow list: if false;
+        allow create, update: if signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.uid == uid
+          && isValidInvite(roomId, request.resource.data.token);
+        allow delete: if signedIn() && request.auth.uid == uid;
+      }
 
       match /members/{uid} {
-        allow read: if signedIn();
-        allow create: if signedIn() && request.auth.uid == uid;
-        allow update, delete: if signedIn() && (request.auth.uid == uid || get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid);
+        allow get: if signedIn() && (request.auth.uid == uid || isRoomMember(roomId));
+        allow list: if isRoomMember(roomId);
+        allow create: if signedIn() && request.auth.uid == uid
+          && request.resource.data.uid == uid
+          && request.resource.data.roomId == roomId
+          && request.resource.data.membershipStatus == 'active'
+          && (
+            (request.resource.data.role == 'host'
+              && getAfter(roomPath(roomId)).data.hostUid == uid
+              && getAfter(roomPath(roomId)).data.memberCount == 1)
+            || (request.resource.data.role == 'player' && canCreateJoinedMember(roomId, uid))
+          );
+        allow update: if signedIn() && request.auth.uid == uid
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.roomId == resource.data.roomId
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.membershipStatus == resource.data.membershipStatus
+          && hasOnlyChanges(['displayName', 'avatarUrl', 'archiveSyncedAt', 'archiveSyncedVersion']);
+        allow delete: if isHost(roomId);
       }
 
       match /tempPlayers/{tempPlayerId} {
-        allow read: if signedIn();
-        allow write: if signedIn() && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid;
+        allow get, list: if isRoomMember(roomId);
+        allow write: if isHost(roomId);
       }
 
       match /lineups/{lineupId} {
-        allow read: if signedIn();
-        allow write: if signedIn() && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid;
+        allow get, list: if isRoomMember(roomId);
+        allow write: if isHost(roomId);
       }
 
       match /hands/{handId} {
-        allow read: if signedIn();
-        allow create: if signedIn() && isRoomMember(roomId);
-        allow delete: if signedIn() && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid;
+        allow get, list: if isRoomMember(roomId);
+        allow create: if isActiveMember(roomId)
+          && isSeatPlayer(roomId, request.auth.uid)
+          && request.resource.data.roomId == roomId
+          && request.resource.data.submittedByUid == request.auth.uid
+          && request.resource.data.baseVersion == get(roomPath(roomId)).data.currentVersion
+          && request.resource.data.serverVersion == get(roomPath(roomId)).data.currentVersion + 1
+          && request.resource.data.handIndex == get(roomPath(roomId)).data.currentHandIndex + 1
+          && request.resource.data.lineupVersion == get(roomPath(roomId)).data.activeLineupVersion
+          && request.resource.data.type in ['zimo', 'discard', 'draw']
+          && getAfter(roomPath(roomId)).data.currentVersion == request.resource.data.serverVersion
+          && getAfter(roomPath(roomId)).data.currentHandIndex == request.resource.data.handIndex;
+        allow update: if isHost(roomId);
+        allow delete: if isHost(roomId);
       }
     }
   }

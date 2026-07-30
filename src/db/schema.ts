@@ -52,6 +52,8 @@ const TABLES = [
     archiveVersion INTEGER NOT NULL DEFAULT 1,
     memberCount INTEGER NOT NULL DEFAULT 0,
     handCount INTEGER NOT NULL DEFAULT 0,
+    statsAppliedArchiveVersion INTEGER NULL,
+    statsAppliedUid TEXT NULL,
     payloadJson TEXT NOT NULL
   );`,
 ];
@@ -96,6 +98,8 @@ export async function initializeSchema(db: SQLiteDatabase): Promise<void> {
   await ensureColumn(db, 'cloud_archives', 'archiveVersion', 'INTEGER NOT NULL DEFAULT 1');
   await ensureColumn(db, 'cloud_archives', 'memberCount', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'cloud_archives', 'handCount', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'cloud_archives', 'statsAppliedArchiveVersion', 'INTEGER NULL');
+  await ensureColumn(db, 'cloud_archives', 'statsAppliedUid', 'TEXT NULL');
   await ensureColumn(db, 'cloud_archives', 'payloadJson', 'TEXT NOT NULL DEFAULT "{}"');
   await ensureBackfillDefaults(db);
 

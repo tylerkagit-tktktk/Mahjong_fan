@@ -2,6 +2,7 @@ import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 import { Alert } from 'react-native';
 import AppButton from '../../src/components/AppButton';
+import AppText from '../../src/components/AppText';
 import ReseatFlow from '../../src/screens/gameTable/ReseatFlow';
 import { getEffectivePlayersBySeat } from '../../src/models/seatRotation';
 import { Player } from '../../src/models/db';
@@ -22,7 +23,6 @@ jest.mock('../../src/screens/newGameStepper/sections/PlayersSection', () => {
         <NativeText>mock-players-section</NativeText>
         <NativeText testID="allow-name-edit-flag">{String(props.allowNameEdit)}</NativeText>
         <NativeText testID="players-prop">{(props.players ?? []).join(',')}</NativeText>
-        <NativeText testID="locked-seats-prop">{(props.lockedSeatByRow ?? []).join(',')}</NativeText>
         <NativePressable
           testID="rotate-seat-order"
           onPress={() => {
@@ -33,16 +33,6 @@ jest.mock('../../src/screens/newGameStepper/sections/PlayersSection', () => {
           }}
         >
           <NativeText>rotate</NativeText>
-        </NativePressable>
-        <NativePressable
-          testID="switch-seat-order"
-          onPress={() => {
-            if (props.onSelectLockedSeat) {
-              props.onSelectLockedSeat(0, 2);
-            }
-          }}
-        >
-          <NativeText>switch</NativeText>
         </NativePressable>
       </View>
     );
@@ -68,6 +58,12 @@ describe('ReseatFlow', () => {
     onDismiss: jest.fn(),
     onApplyReseat: jest.fn().mockResolvedValue(undefined),
   };
+
+  const rowText = (node: renderer.ReactTestInstance) =>
+    node
+      .findAllByType(AppText)
+      .map((textNode) => String(textNode.props.children ?? ''))
+      .join(' ');
 
   it('triggers wrap prompt once per visible session', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -185,7 +181,7 @@ describe('ReseatFlow', () => {
     });
   });
 
-  it('keeps rows sorted by E/S/W/N after locked reseat seat switch', async () => {
+  it('keeps rows fixed by seat and applies a two-player swap', async () => {
     const onDismiss = jest.fn();
     const onApplyReseat = jest.fn().mockResolvedValue(undefined);
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
@@ -207,16 +203,255 @@ describe('ReseatFlow', () => {
       await Promise.resolve();
     });
 
-    expect(tree!.root.findByProps({ testID: 'locked-seats-prop' }).props.children).toBe('0,1,2,3');
-    expect(tree!.root.findByProps({ testID: 'players-prop' }).props.children).toBe('A,B,C,D');
+    const confirmButton = tree!.root
+      .findAllByType(AppButton)
+      .find((button) => button.props.label === 'gameTable.reseat.confirmNewSeats');
+    expect(confirmButton?.props.disabled).toBe(true);
 
-    const switchButton = tree!.root.findByProps({ testID: 'switch-seat-order' });
     await act(async () => {
-      switchButton.props.onPress();
+      tree!.root.findByProps({ testID: 'reseat-player-row-0' }).props.onPress();
+    });
+    expect(tree!.root.findByProps({ testID: 'reseat-player-row-0' }).props.accessibilityState.selected).toBe(true);
+    expect(confirmButton?.props.disabled).toBe(true);
+
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'reseat-player-row-2' }).props.onPress();
     });
 
-    expect(tree!.root.findByProps({ testID: 'locked-seats-prop' }).props.children).toBe('0,1,2,3');
-    expect(tree!.root.findByProps({ testID: 'players-prop' }).props.children).toBe('C,B,A,D');
+    expect(rowText(tree!.root.findByProps({ testID: 'reseat-player-row-0' }))).toContain('C');
+    expect(rowText(tree!.root.findByProps({ testID: 'reseat-player-row-2' }))).toContain('A');
+    expect(confirmButton?.props.disabled).toBe(false);
+
+    await act(async () => {
+      await confirmButton?.props.onPress();
+    });
+
+    expect(onApplyReseat).toHaveBeenCalledWith({
+      seatByPlayerId: {
+        p2: 0,
+        p1: 1,
+        p0: 2,
+        p3: 3,
+      },
+    });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('cancels a selection and disables confirm after restoring the original seats', async () => {
+    const onApplyReseat = jest.fn().mockResolvedValue(undefined);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<ReseatFlow {...baseProps} allowNameEdit={false} onApplyReseat={onApplyReseat} />);
+      await Promise.resolve();
+    });
+    const [, , buttons] = alertSpy.mock.calls[0];
+    const open = (buttons as Array<{ text: string; onPress?: () => void }>).find(
+      (item) => item.text === 'gameTable.reseat.action.open',
+    );
+    await act(async () => {
+      open?.onPress?.();
+      await Promise.resolve();
+    });
+
+    const confirmButton = tree!.root
+      .findAllByType(AppButton)
+      .find((button) => button.props.label === 'gameTable.reseat.confirmNewSeats');
+    const eastRow = () => tree!.root.findByProps({ testID: 'reseat-player-row-0' });
+    const westRow = () => tree!.root.findByProps({ testID: 'reseat-player-row-2' });
+
+    await act(async () => {
+      eastRow().props.onPress();
+    });
+    await act(async () => {
+      eastRow().props.onPress();
+    });
+    expect(eastRow().props.accessibilityState.selected).toBe(false);
+    expect(confirmButton?.props.disabled).toBe(true);
+
+    await act(async () => {
+      eastRow().props.onPress();
+    });
+    await act(async () => {
+      westRow().props.onPress();
+    });
+    expect(confirmButton?.props.disabled).toBe(false);
+
+    await act(async () => {
+      eastRow().props.onPress();
+    });
+    await act(async () => {
+      westRow().props.onPress();
+    });
+    expect(rowText(eastRow())).toContain('A');
+    expect(rowText(westRow())).toContain('C');
+    expect(confirmButton?.props.disabled).toBe(true);
+
+    await act(async () => {
+      await confirmButton?.props.onPress();
+    });
+    expect(onApplyReseat).not.toHaveBeenCalled();
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('submits only the final mapping after multiple swaps', async () => {
+    const onApplyReseat = jest.fn().mockResolvedValue(undefined);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<ReseatFlow {...baseProps} allowNameEdit={false} onApplyReseat={onApplyReseat} />);
+      await Promise.resolve();
+    });
+    const [, , buttons] = alertSpy.mock.calls[0];
+    const open = (buttons as Array<{ text: string; onPress?: () => void }>).find(
+      (item) => item.text === 'gameTable.reseat.action.open',
+    );
+    await act(async () => {
+      open?.onPress?.();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'reseat-player-row-0' }).props.onPress();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'reseat-player-row-2' }).props.onPress();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'reseat-player-row-1' }).props.onPress();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'reseat-player-row-3' }).props.onPress();
+    });
+
+    const confirmButton = tree!.root
+      .findAllByType(AppButton)
+      .find((button) => button.props.label === 'gameTable.reseat.confirmNewSeats');
+    await act(async () => {
+      await confirmButton?.props.onPress();
+    });
+
+    expect(onApplyReseat).toHaveBeenCalledTimes(1);
+    expect(onApplyReseat).toHaveBeenCalledWith({
+      seatByPlayerId: {
+        p2: 0,
+        p3: 1,
+        p0: 2,
+        p1: 3,
+      },
+    });
+
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('dismisses without applying a previewed swap', async () => {
+    const onDismiss = jest.fn();
+    const onApplyReseat = jest.fn().mockResolvedValue(undefined);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <ReseatFlow
+          {...baseProps}
+          allowNameEdit={false}
+          onDismiss={onDismiss}
+          onApplyReseat={onApplyReseat}
+        />,
+      );
+      await Promise.resolve();
+    });
+    const [, , buttons] = alertSpy.mock.calls[0];
+    const open = (buttons as Array<{ text: string; onPress?: () => void }>).find(
+      (item) => item.text === 'gameTable.reseat.action.open',
+    );
+    await act(async () => {
+      open?.onPress?.();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'reseat-player-row-0' }).props.onPress();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'reseat-player-row-2' }).props.onPress();
+    });
+
+    const cancelButton = tree!.root
+      .findAllByType(AppButton)
+      .find((button) => button.props.label === 'gameTable.reseat.action.cancel');
+    await act(async () => {
+      cancelButton?.props.onPress();
+    });
+
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onApplyReseat).not.toHaveBeenCalled();
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('keeps the modal open and shows an inline error when applying fails', async () => {
+    const onDismiss = jest.fn();
+    const onApplyReseat = jest.fn().mockRejectedValue(new Error('save failed'));
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <ReseatFlow
+          {...baseProps}
+          allowNameEdit={false}
+          onDismiss={onDismiss}
+          onApplyReseat={onApplyReseat}
+        />,
+      );
+      await Promise.resolve();
+    });
+    const [, , buttons] = alertSpy.mock.calls[0];
+    const open = (buttons as Array<{ text: string; onPress?: () => void }>).find(
+      (item) => item.text === 'gameTable.reseat.action.open',
+    );
+    await act(async () => {
+      open?.onPress?.();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'reseat-player-row-0' }).props.onPress();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'reseat-player-row-2' }).props.onPress();
+    });
+
+    const confirmButton = tree!.root
+      .findAllByType(AppButton)
+      .find((button) => button.props.label === 'gameTable.reseat.confirmNewSeats');
+    await act(async () => {
+      await confirmButton?.props.onPress();
+    });
+
+    expect(onApplyReseat).toHaveBeenCalledTimes(1);
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(
+      tree!.root.findAllByType(AppText).some((textNode) => textNode.props.children === 'save failed'),
+    ).toBe(true);
+    expect(tree!.root.findAllByProps({ testID: 'reseat-player-row-0' }).length).toBeGreaterThan(0);
 
     alertSpy.mockRestore();
     await act(async () => {

@@ -85,6 +85,9 @@ ios/mahjong_be_fd/GoogleService-Info.plist
 # Temporary files created by Metro to check the health of the file watcher
 .metro-health-check*
 
+# Local generated previews and intermediate assets
+/tmp/
+
 # testing
 /coverage
 

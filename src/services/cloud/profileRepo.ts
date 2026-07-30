@@ -1,5 +1,4 @@
-import firestore from '@react-native-firebase/firestore';
-import { CloudProvider, CloudUserProfile, ProfileStats } from '../../models/cloud';
+import { CloudArchivePayload, CloudProvider, CloudUserProfile, ProfileStats, ProfileStatsContribution, RoomLineup } from '../../models/cloud';
 import { getFirestore } from '../firebase/firebase';
 
 const profiles = () => getFirestore().collection('profiles');
@@ -83,25 +82,53 @@ export async function getProfileStats(uid: string): Promise<ProfileStats> {
   return created;
 }
 
-export async function applyHandStats(
-  uidsOnTable: string[],
-  input: { type: 'zimo' | 'discard' | 'draw'; winnerPlayerId?: string | null; discarderPlayerId?: string | null },
-): Promise<void> {
-  const batch = getFirestore().batch();
-  const timestamp = Date.now();
-  for (const uid of new Set(uidsOnTable)) {
-    const update: Record<string, unknown> = {
-      uid,
-      handsParticipated: firestore.FieldValue.increment(1),
-      updatedAt: timestamp,
-    };
-    if (input.type === 'draw') update.drawCount = firestore.FieldValue.increment(1);
-    if (input.winnerPlayerId === uid) {
-      update.wins = firestore.FieldValue.increment(1);
-      if (input.type === 'zimo') update.zimoCount = firestore.FieldValue.increment(1);
+function isPlayerSeated(uid: string, lineup: RoomLineup | undefined): boolean {
+  if (!lineup) return false;
+  return Object.values(lineup.seats).includes(uid);
+}
+
+export function getArchiveStatsContribution(payload: CloudArchivePayload, uid: string): ProfileStatsContribution {
+  const lineups = new Map(payload.lineups.map((lineup) => [lineup.lineupVersion, lineup]));
+  return payload.hands.reduce<ProfileStatsContribution>((totals, hand) => {
+    if (!isPlayerSeated(uid, lineups.get(hand.lineupVersion))) return totals;
+    totals.handsParticipated += 1;
+    if (hand.type === 'draw') totals.drawCount += 1;
+    if (hand.winnerPlayerId === uid) {
+      totals.wins += 1;
+      if (hand.type === 'zimo') totals.zimoCount += 1;
     }
-    if (input.discarderPlayerId === uid) update.discardCount = firestore.FieldValue.increment(1);
-    batch.set(stats().doc(uid), { ...defaultStats(uid), ...update }, { merge: true });
-  }
-  await batch.commit();
+    if (hand.discarderPlayerId === uid) totals.discardCount += 1;
+    return totals;
+  }, { handsParticipated: 0, wins: 0, zimoCount: 0, discardCount: 0, drawCount: 0 });
+}
+
+export async function applyArchiveStats(uid: string, payload: CloudArchivePayload): Promise<void> {
+  if (!payload.members.some((member) => member.uid === uid)) return;
+  const contribution = getArchiveStatsContribution(payload, uid);
+  const archiveId = `${payload.room.roomId}_${payload.archiveVersion}`;
+  const statsRef = stats().doc(uid);
+  const markerRef = statsRef.collection('appliedArchives').doc(archiveId);
+
+  await getFirestore().runTransaction(async (transaction) => {
+    const marker = await transaction.get(markerRef);
+    if (marker.exists()) return;
+
+    const currentSnapshot = await transaction.get(statsRef);
+    const current = currentSnapshot.exists() ? currentSnapshot.data() as ProfileStats : defaultStats(uid);
+    transaction.set(statsRef, {
+      ...current,
+      uid,
+      handsParticipated: current.handsParticipated + contribution.handsParticipated,
+      wins: current.wins + contribution.wins,
+      zimoCount: current.zimoCount + contribution.zimoCount,
+      discardCount: current.discardCount + contribution.discardCount,
+      drawCount: current.drawCount + contribution.drawCount,
+      updatedAt: Date.now(),
+    });
+    transaction.set(markerRef, {
+      roomId: payload.room.roomId,
+      archiveVersion: payload.archiveVersion,
+      appliedAt: Date.now(),
+    });
+  });
 }

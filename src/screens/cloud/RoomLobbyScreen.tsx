@@ -16,17 +16,13 @@ import {
   addTemporaryPlayer,
   createInvite,
   deleteRoomAndFallbackToLocal,
-  getActiveLineup,
   getBenchPlayers,
   getDefaultStartSeats,
-  getRoom,
   listRoomPlayers,
   mergeTemporaryPlayerIntoRealPlayer,
   proposeLineupChange,
   startRoom,
-  subscribeActiveLineup,
-  subscribeRoom,
-  subscribeRoomPlayers,
+  subscribeRoomState,
 } from '../../services/cloud/roomRepo';
 import { ensureSession } from '../../services/cloud/authRepo';
 import theme from '../../theme/theme';
@@ -59,21 +55,8 @@ function RoomLobbyScreen({ navigation, route }: Props) {
   const [mergingPlayers, setMergingPlayers] = useState(false);
   const didEnterActiveTable = useRef(false);
 
-  const refresh = useCallback(async (nextRoomId: string, nextSessionUid = sessionUid) => {
-    const [nextRoom, nextPlayers, nextLineup] = await Promise.all([
-      getRoom(nextRoomId),
-      listRoomPlayers(nextRoomId, nextSessionUid),
-      getActiveLineup(nextRoomId),
-    ]);
-    setRoom(nextRoom);
-    setPlayers(nextPlayers);
-    setLineup(nextLineup);
-  }, [sessionUid]);
-
   useEffect(() => {
-    let unSubRoom: (() => void) | null = null;
-    let unSubPlayers: (() => void) | null = null;
-    let unSubLineup: (() => void) | null = null;
+    let unsubscribe: (() => void) | null = null;
 
     const loadPromise = (async () => {
       const session = await ensureSession('google');
@@ -85,10 +68,11 @@ function RoomLobbyScreen({ navigation, route }: Props) {
         return;
       }
 
-      await refresh(roomId, session.uid);
-      unSubRoom = subscribeRoom(roomId, setRoom);
-      unSubPlayers = subscribeRoomPlayers(roomId, session.uid, setPlayers);
-      unSubLineup = subscribeActiveLineup(roomId, setLineup);
+      unsubscribe = subscribeRoomState(roomId, session.uid, (state) => {
+        setRoom(state.room);
+        setPlayers(state.players);
+        setLineup(state.lineup);
+      });
     })();
 
     loadPromise.catch((error) => {
@@ -96,11 +80,9 @@ function RoomLobbyScreen({ navigation, route }: Props) {
     });
 
     return () => {
-      unSubRoom?.();
-      unSubPlayers?.();
-      unSubLineup?.();
+      unsubscribe?.();
     };
-  }, [navigation, refresh, roomId, t]);
+  }, [navigation, roomId, t]);
 
   useEffect(() => {
     if (room?.status !== 'active' || didEnterActiveTable.current) {
@@ -197,7 +179,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
     }
     setInviteBusy(true);
     try {
-      const invite = await createInvite(room.roomId);
+      const invite = await createInvite(room.roomId, sessionUid);
       const nextInviteText = [
         room.title,
         `${t('roomLobby.hostTools.roomCode')}: ${invite.roomId}`,
@@ -209,7 +191,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
     } finally {
       setInviteBusy(false);
     }
-  }, [room, t]);
+  }, [room, sessionUid, t]);
 
   const handleShareInvite = useCallback(async () => {
     if (!inviteText || !room) {
@@ -247,13 +229,12 @@ function RoomLobbyScreen({ navigation, route }: Props) {
       }
       setSelectedBenchId('');
       setNotice(t('roomLobby.notice.swapSaved'));
-      await refresh(room.roomId);
     } catch (error) {
       Alert.alert(t('roomLobby.alert.swapFailedTitle'), String(error));
     } finally {
       setSavingSwap(false);
     }
-  }, [lineup, refresh, room, selectedBenchId, selectedSeat, sessionUid, t]);
+  }, [lineup, room, selectedBenchId, selectedSeat, sessionUid, t]);
 
   const handleAddTemporaryPlayer = useCallback(async () => {
     if (!room || !tempPlayerName.trim()) {
@@ -268,13 +249,12 @@ function RoomLobbyScreen({ navigation, route }: Props) {
       });
       setTempPlayerName('');
       setNotice(t('roomLobby.notice.tempAdded'));
-      await refresh(room.roomId);
     } catch (error) {
       Alert.alert(t('roomLobby.alert.tempPlayerFailedTitle'), String(error));
     } finally {
       setAddingTempPlayer(false);
     }
-  }, [refresh, room, sessionUid, t, tempPlayerName]);
+  }, [room, sessionUid, t, tempPlayerName]);
 
   const handleMergePlayers = useCallback(() => {
     if (!room || !selectedTempMergeId || !selectedRealMergeUid) {
@@ -301,7 +281,6 @@ function RoomLobbyScreen({ navigation, route }: Props) {
                 }
                 setNotice(t('roomLobby.notice.tempAdded'));
                 setSelectedTempMergeId('');
-                await refresh(room.roomId);
               })
               .catch((error) => {
                 Alert.alert(t('roomLobby.alert.mergeFailedTitle'), String(error));
@@ -313,7 +292,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
         },
       ],
     );
-  }, [refresh, room, selectedRealMergeUid, selectedTempMergeId, sessionUid, t]);
+  }, [room, selectedRealMergeUid, selectedTempMergeId, sessionUid, t]);
 
   const executeStartRoom = useCallback(async () => {
     if (!room) {
@@ -338,7 +317,6 @@ function RoomLobbyScreen({ navigation, route }: Props) {
         return;
       }
       setNotice(t('roomLobby.notice.started'));
-      await refresh(room.roomId);
       navigation.replace('MultiplayerGameTable', { roomId: room.roomId });
     } catch (error) {
       Alert.alert(t('roomLobby.alert.startFailedTitle'), String(error));
@@ -347,7 +325,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
       setStartSetupVisible(false);
       setStartTempNames([]);
     }
-  }, [navigation, refresh, room, sessionUid, t]);
+  }, [navigation, room, sessionUid, t]);
 
   const handleConfirmSingleRealFallback = useCallback(() => {
     if (!room) {

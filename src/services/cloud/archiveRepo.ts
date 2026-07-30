@@ -1,7 +1,13 @@
-import { saveCloudArchive, loadCloudArchive } from '../../db/cloudArchiveRepo';
+import {
+  listCloudArchivesPendingStats,
+  loadCloudArchive,
+  markCloudArchiveStatsApplied,
+  saveCloudArchive,
+} from '../../db/cloudArchiveRepo';
 import { CloudArchivePayload } from '../../models/cloud';
 import { getRoom, listLineups, listMembers, listTemporaryPlayers, markArchiveSynced, markRoomArchived } from './roomRepo';
 import { listHands } from './handRepo';
+import { applyArchiveStats } from './profileRepo';
 
 export async function buildArchivePayload(roomId: string): Promise<CloudArchivePayload> {
   const room = await getRoom(roomId);
@@ -39,15 +45,25 @@ export async function archiveRoomToLocal(roomId: string, actorUid: string) {
     room: archivedRoom ?? payload.room,
   } satisfies CloudArchivePayload;
   const summary = await saveCloudArchive(persistedPayload);
+  try {
+    await applyArchiveStats(actorUid, persistedPayload);
+    await markCloudArchiveStatsApplied(roomId, persistedPayload.archiveVersion, actorUid);
+  } catch {
+    // The local archive remains the source for a later retry from Profile.
+  }
   await markArchiveSynced(roomId, actorUid, payload.archiveVersion);
   return summary;
 }
 
-export async function loadArchivedGame(roomId: string): Promise<CloudArchivePayload | null> {
-  return loadCloudArchive(roomId);
+export async function syncPendingArchiveStats(uid: string): Promise<void> {
+  const archives = await listCloudArchivesPendingStats(uid);
+  for (const payload of archives) {
+    if (!payload.members.some((member) => member.uid === uid)) continue;
+    await applyArchiveStats(uid, payload);
+    await markCloudArchiveStatsApplied(payload.room.roomId, payload.archiveVersion, uid);
+  }
 }
 
-export async function isRoomArchived(roomId: string): Promise<boolean> {
-  const room = await getRoom(roomId);
-  return room?.status === 'archived';
+export async function loadArchivedGame(roomId: string): Promise<CloudArchivePayload | null> {
+  return loadCloudArchive(roomId);
 }

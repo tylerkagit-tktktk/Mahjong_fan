@@ -11,6 +11,7 @@ import { typography } from '../../styles/typography';
 import { useAppLanguage } from '../../i18n/useAppLanguage';
 import { getCurrentSession, ensureSession, signOut } from '../../services/cloud/authRepo';
 import { getProfile, getProfileStats, updateProfile } from '../../services/cloud/profileRepo';
+import { syncPendingArchiveStats } from '../../services/cloud/archiveRepo';
 import theme from '../../theme/theme';
 
 function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Profile'>) {
@@ -25,6 +26,7 @@ function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList
     const session = await ensureSession('google');
     setUid(session.uid);
     setProvider(session.provider);
+    await syncPendingArchiveStats(session.uid).catch(() => {});
     const profile = await getProfile(session.uid);
     const stats = await getProfileStats(session.uid);
     if (profile) {

@@ -113,6 +113,44 @@ export async function loadCloudArchive(roomId: string): Promise<CloudArchivePayl
   }
 }
 
+export async function listCloudArchivesPendingStats(uid: string): Promise<CloudArchivePayload[]> {
+  try {
+    const result = await executeSql(
+      `SELECT payloadJson FROM cloud_archives
+       WHERE statsAppliedArchiveVersion IS NULL
+          OR statsAppliedArchiveVersion != archiveVersion
+          OR statsAppliedUid IS NULL
+          OR statsAppliedUid != ?
+       ORDER BY createdAt DESC;`,
+      [uid],
+    );
+    return rowsToArray<{ payloadJson?: string | null }>(result.rows)
+      .flatMap((row) => {
+        if (!row.payloadJson) return [];
+        try {
+          return [JSON.parse(row.payloadJson) as CloudArchivePayload];
+        } catch {
+          return [];
+        }
+      });
+  } catch (error) {
+    throw normalizeError(error, 'listCloudArchivesPendingStats failed');
+  }
+}
+
+export async function markCloudArchiveStatsApplied(roomId: string, archiveVersion: number, uid: string): Promise<void> {
+  try {
+    await executeSql(
+      `UPDATE cloud_archives
+       SET statsAppliedArchiveVersion = ?, statsAppliedUid = ?
+       WHERE roomId = ? AND archiveVersion = ?;`,
+      [archiveVersion, uid, roomId, archiveVersion],
+    );
+  } catch (error) {
+    throw normalizeError(error, 'markCloudArchiveStatsApplied failed');
+  }
+}
+
 export async function deleteCloudArchive(roomId: string): Promise<void> {
   try {
     await executeSql('DELETE FROM cloud_archives WHERE roomId = ?;', [roomId]);

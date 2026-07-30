@@ -10,7 +10,7 @@ function matchesPrefix(path, prefix) {
 
 function snapshot(path) {
   const value = documents.get(path);
-  return { exists: () => value !== undefined, data: () => clone(value) };
+  return { exists: () => value !== undefined, data: () => clone(value), ref: doc(path) };
 }
 
 function apply(path, value, merge) {
@@ -92,4 +92,5 @@ function firestore() {
 }
 
 firestore.FieldValue = { increment: (amount) => ({ __increment: amount }) };
+firestore.Timestamp = { fromMillis: (milliseconds) => ({ milliseconds }) };
 module.exports = firestore;

@@ -12,8 +12,9 @@ import {
   SubmitResult,
 } from '../../models/cloud';
 import { getProfile } from './profileRepo';
-import { createToken, hashToken, makeId } from './storage';
+import { createToken, makeId } from './storage';
 import { getFirestore } from '../firebase/firebase';
+import firestore from '@react-native-firebase/firestore';
 
 export type InvitePayload = { roomId: string; token: string; expiresAt: number; deepLink: string };
 
@@ -23,10 +24,34 @@ const DELETE_BATCH_SIZE = 450;
 const SEAT_KEYS: SeatKey[] = ['0', '1', '2', '3'];
 const rooms = () => getFirestore().collection('rooms');
 const roomRef = (roomId: string) => rooms().doc(roomId);
+const inviteRef = (token: string) => getFirestore().collection('roomInvites').doc(token);
 const membersRef = (roomId: string) => roomRef(roomId).collection('members');
 const temporaryPlayersRef = (roomId: string) => roomRef(roomId).collection('tempPlayers');
 const lineupsRef = (roomId: string) => roomRef(roomId).collection('lineups');
 const handsRef = (roomId: string) => roomRef(roomId).collection('hands');
+const joinTicketsRef = (roomId: string) => roomRef(roomId).collection('joinTickets');
+const hostConfigRef = (roomId: string) => roomRef(roomId).collection('hostConfig').doc('current');
+
+type RoomInvite = {
+  roomId: string;
+  createdByUid: string;
+  createdAt: number;
+  expiresAt: { toMillis?: () => number; milliseconds?: number } | number;
+};
+
+type HostConfig = {
+  activeInviteToken: string | null;
+  updatedAt: number;
+};
+
+function inviteHasExpired(invite: RoomInvite): boolean {
+  const expiresAt = typeof invite.expiresAt === 'number'
+    ? invite.expiresAt
+    : typeof invite.expiresAt.toMillis === 'function'
+      ? invite.expiresAt.toMillis()
+      : invite.expiresAt.milliseconds ?? 0;
+  return expiresAt <= Date.now();
+}
 
 export function isTemporaryPlayerId(playerId: string | null | undefined): playerId is string {
   return typeof playerId === 'string' && playerId.startsWith('temp_');
@@ -67,8 +92,8 @@ export async function createRoom(input: { hostUid: string; title: string; rulesS
   const roomId = makeId('room');
   const room: Room = {
     roomId, title: input.title.trim() || '未命名牌局', hostUid: input.hostUid, status: 'open', maxSeats: 4,
-    memberCap: Math.max(4, Math.min(input.memberCap ?? MEMBER_CAP, MEMBER_CAP)), currentVersion: 1, currentHandIndex: 0,
-    activeLineupVersion: 0, inviteTokenHash: '', inviteExpiresAt: timestamp, rulesSnapshot: input.rulesSnapshot ?? {},
+    memberCap: Math.max(4, Math.min(input.memberCap ?? MEMBER_CAP, MEMBER_CAP)), memberCount: 1,
+    currentVersion: 1, currentHandIndex: 0, activeLineupVersion: 0, rulesSnapshot: input.rulesSnapshot ?? {},
     archiveReadyAt: null, expiresAt: null, archiveVersion: null, createdAt: timestamp, updatedAt: timestamp,
   };
   const profile = await getProfile(input.hostUid);
@@ -80,42 +105,78 @@ export async function createRoom(input: { hostUid: string; title: string; rulesS
   const batch = getFirestore().batch();
   batch.set(roomRef(roomId), room);
   batch.set(membersRef(roomId).doc(member.uid), member);
+  batch.set(hostConfigRef(roomId), { activeInviteToken: null, updatedAt: timestamp } satisfies HostConfig);
   await batch.commit();
   return room;
 }
 
-export async function createInvite(roomId: string): Promise<InvitePayload> {
-  const ref = roomRef(roomId);
-  const snapshot = await ref.get();
+export async function createInvite(roomId: string, hostUid: string): Promise<InvitePayload> {
+  const [snapshot, configSnapshot] = await Promise.all([roomRef(roomId).get(), hostConfigRef(roomId).get()]);
   if (!snapshot.exists()) throw new Error('Room not found');
+  const room = snapshot.data() as Room;
+  if (room.hostUid !== hostUid) throw new Error('Only host can create an invite');
   const token = createToken();
   const expiresAt = Date.now() + 2 * 60 * 60 * 1000;
-  await ref.update({ inviteTokenHash: hashToken(token), inviteExpiresAt: expiresAt, updatedAt: Date.now() });
+  const previousToken = (configSnapshot.data() as HostConfig | undefined)?.activeInviteToken;
+  const batch = getFirestore().batch();
+  batch.set(inviteRef(token), {
+    roomId,
+    createdByUid: hostUid,
+    createdAt: Date.now(),
+    expiresAt: firestore.Timestamp.fromMillis(expiresAt),
+  } satisfies RoomInvite);
+  batch.set(hostConfigRef(roomId), { activeInviteToken: token, updatedAt: Date.now() } satisfies HostConfig);
+  if (previousToken) {
+    batch.delete(inviteRef(previousToken));
+  }
+  await batch.commit();
   return { roomId, token, expiresAt, deepLink: `mahjongfan://join?roomId=${encodeURIComponent(roomId)}&token=${encodeURIComponent(token)}` };
 }
 
 export async function joinWithInvite(roomId: string, token: string, uid: string): Promise<SubmitResult> {
-  const ref = roomRef(roomId);
-  const result = await getFirestore().runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(ref);
-    if (!snapshot.exists()) return { ok: false, code: 'INVITE_EXPIRED', message: 'Room not found' } as SubmitResult;
-    const room = snapshot.data() as Room;
-    if (room.status === 'ended' || room.status === 'archived') return { ok: false, code: 'ROOM_ENDED', message: 'Room already ended' } as SubmitResult;
-    if (!token || hashToken(token) !== room.inviteTokenHash || Date.now() > room.inviteExpiresAt) return { ok: false, code: 'INVITE_EXPIRED', message: 'Invite expired or invalid' } as SubmitResult;
-    const memberRef = membersRef(roomId).doc(uid);
-    const member = await transaction.get(memberRef);
-    if (member.exists()) return { ok: true, nextVersion: room.currentVersion, nextHandIndex: room.currentHandIndex } as SubmitResult;
-    const [members, temporary] = await Promise.all([membersRef(roomId).get(), temporaryPlayersRef(roomId).get()]);
-    if (members.docs.filter((doc) => (doc.data() as RoomMember).membershipStatus === 'active').length + temporary.size >= room.memberCap) return { ok: false, code: 'ROOM_FULL', message: 'Room member cap reached' } as SubmitResult;
+  if (!token) return { ok: false, code: 'INVITE_EXPIRED', message: 'Invite expired or invalid' };
+
+  const inviteSnapshot = await inviteRef(token).get();
+  if (!inviteSnapshot.exists()) return { ok: false, code: 'INVITE_EXPIRED', message: 'Invite expired or invalid' };
+  const invite = inviteSnapshot.data() as RoomInvite;
+  if (invite.roomId !== roomId || inviteHasExpired(invite)) {
+    return { ok: false, code: 'INVITE_EXPIRED', message: 'Invite expired or invalid' };
+  }
+
+  const memberRef = membersRef(roomId).doc(uid);
+  const existingMember = await memberRef.get();
+  if (!existingMember.exists()) {
     const profile = await getProfile(uid);
-    transaction.set(memberRef, {
-      uid, roomId, role: 'player', membershipStatus: 'active', joinedAt: Date.now(),
+    const timestamp = Date.now();
+    const batch = getFirestore().batch();
+    // The ticket is private to this user and is atomically consumed with membership creation.
+    // It lets Firestore rules validate the bearer token without storing it on the member document.
+    const ticketRef = joinTicketsRef(roomId).doc(uid);
+    await ticketRef.set({ uid, token, createdAt: timestamp });
+    batch.set(memberRef, {
+      uid, roomId, role: 'player', membershipStatus: 'active', joinedAt: timestamp,
       displayName: profile?.displayName ?? `Player-${uid.slice(-4)}`, avatarUrl: profile?.avatarUrl ?? null,
       archiveSyncedAt: null, archiveSyncedVersion: null,
     } satisfies RoomMember);
-    return { ok: true, nextVersion: room.currentVersion, nextHandIndex: room.currentHandIndex } as SubmitResult;
-  });
-  return result;
+    batch.update(roomRef(roomId), {
+      memberCount: firestore.FieldValue.increment(1),
+      updatedAt: timestamp,
+    });
+    batch.delete(ticketRef);
+    try {
+      await batch.commit();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/permission|full|expired|not-found/i.test(message)) {
+        return { ok: false, code: 'INVITE_EXPIRED', message: 'Invite expired, invalid, or room is full' };
+      }
+      throw error;
+    }
+  }
+
+  const room = await getRoom(roomId);
+  if (!room) return { ok: false, code: 'ROOM_NOT_FOUND', message: 'Room not found' };
+  return { ok: true, nextVersion: room.currentVersion, nextHandIndex: room.currentHandIndex };
 }
 
 export async function getRoom(roomId: string): Promise<Room | null> {
@@ -232,18 +293,25 @@ export async function deleteRoomAndFallbackToLocal(roomId: string, actorUid: str
     if (room) throw new Error('Only host can remove room');
     return;
   }
-  const [members, temporaryPlayers, lineups, hands] = await Promise.all([
+  const [members, temporaryPlayers, lineups, hands, joinTickets, hostConfig] = await Promise.all([
     membersRef(roomId).get(),
     temporaryPlayersRef(roomId).get(),
     lineupsRef(roomId).get(),
     handsRef(roomId).get(),
+    joinTicketsRef(roomId).get(),
+    hostConfigRef(roomId).get(),
   ]);
-  const documents = [...members.docs, ...temporaryPlayers.docs, ...lineups.docs, ...hands.docs];
+  const documents = [...members.docs, ...temporaryPlayers.docs, ...lineups.docs, ...hands.docs, ...joinTickets.docs];
   for (let index = 0; index < documents.length; index += DELETE_BATCH_SIZE) {
     const batch = getFirestore().batch();
     documents.slice(index, index + DELETE_BATCH_SIZE).forEach((doc) => batch.delete(doc.ref));
     await batch.commit();
   }
+  const activeInviteToken = (hostConfig.data() as HostConfig | undefined)?.activeInviteToken;
+  const finalBatch = getFirestore().batch();
+  if (hostConfig.exists()) finalBatch.delete(hostConfig.ref);
+  if (activeInviteToken) finalBatch.delete(inviteRef(activeInviteToken));
+  await finalBatch.commit();
   await roomRef(roomId).delete();
 }
 
@@ -309,22 +377,92 @@ export async function deleteArchivedRoomAfterSync(roomId: string, actorUid: stri
   }
   await deleteRoomAndFallbackToLocal(roomId, actorUid);
 }
-export async function cleanupExpiredArchivedRooms(): Promise<void> {}
 
 export function subscribeMembers(roomId: string, cb: (members: RoomMember[]) => void): () => void {
   return membersRef(roomId).orderBy('joinedAt').onSnapshot((snapshot) => cb(snapshot.docs.map((doc) => doc.data() as RoomMember).filter((member) => member.membershipStatus === 'active')), () => cb([]));
 }
 
-export function subscribeRoom(roomId: string, cb: (room: Room | null) => void): () => void {
-  return roomRef(roomId).onSnapshot((snapshot) => cb(snapshot.exists() ? (snapshot.data() as Room) : null), () => cb(null));
-}
+export type RoomLiveState = {
+  room: Room | null;
+  players: ResolvedRoomPlayer[];
+  lineup: RoomLineup | null;
+};
 
-export function subscribeActiveLineup(roomId: string, cb: (lineup: RoomLineup | null) => void): () => void {
-  return roomRef(roomId).onSnapshot((roomSnapshot) => {
-    const room = roomSnapshot.exists() ? (roomSnapshot.data() as Room) : null;
-    if (!room?.activeLineupVersion) { cb(null); return; }
-    lineupsRef(roomId).doc(String(room.activeLineupVersion)).get().then((snapshot) => cb(snapshot.exists() ? normalizeLineup(snapshot.data() as RoomLineup) : null)).catch(() => cb(null));
-  }, () => cb(null));
+export function subscribeRoomState(
+  roomId: string,
+  sessionUid: string,
+  cb: (state: RoomLiveState) => void,
+): () => void {
+  let room: Room | null = null;
+  let members: RoomMember[] = [];
+  let temporary: RoomTemporaryPlayer[] = [];
+  let lineup: RoomLineup | null = null;
+  let activeLineupVersion = 0;
+  let unsubscribeLineup: (() => void) | null = null;
+
+  const publish = () => {
+    cb({
+      room,
+      players: room ? resolveRoomPlayers(room, members, temporary, sessionUid) : [],
+      lineup,
+    });
+  };
+
+  const subscribeToLineup = (nextVersion: number) => {
+    unsubscribeLineup?.();
+    activeLineupVersion = nextVersion;
+    lineup = null;
+    if (!nextVersion) {
+      publish();
+      return;
+    }
+    unsubscribeLineup = lineupsRef(roomId).doc(String(nextVersion)).onSnapshot((snapshot) => {
+      if (activeLineupVersion !== nextVersion) return;
+      lineup = snapshot.exists() ? normalizeLineup(snapshot.data() as RoomLineup) : null;
+      publish();
+    }, () => {
+      if (activeLineupVersion !== nextVersion) return;
+      lineup = null;
+      publish();
+    });
+  };
+
+  const unsubscribeRoom = roomRef(roomId).onSnapshot((snapshot) => {
+    const nextRoom = snapshot.exists() ? (snapshot.data() as Room) : null;
+    room = nextRoom;
+    const nextLineupVersion = nextRoom?.activeLineupVersion ?? 0;
+    if (nextLineupVersion !== activeLineupVersion) {
+      subscribeToLineup(nextLineupVersion);
+      return;
+    }
+    publish();
+  }, () => {
+    room = null;
+    members = [];
+    temporary = [];
+    subscribeToLineup(0);
+  });
+  const unsubscribeMembers = membersRef(roomId).onSnapshot((snapshot) => {
+    members = snapshot.docs.map((doc) => doc.data() as RoomMember).filter((member) => member.membershipStatus === 'active');
+    publish();
+  }, () => {
+    members = [];
+    publish();
+  });
+  const unsubscribeTemporary = temporaryPlayersRef(roomId).onSnapshot((snapshot) => {
+    temporary = snapshot.docs.map((doc) => doc.data() as RoomTemporaryPlayer);
+    publish();
+  }, () => {
+    temporary = [];
+    publish();
+  });
+
+  return () => {
+    unsubscribeRoom();
+    unsubscribeMembers();
+    unsubscribeTemporary();
+    unsubscribeLineup?.();
+  };
 }
 
 export function subscribeRoomPlayers(roomId: string, sessionUid: string, cb: (players: ResolvedRoomPlayer[]) => void): () => void {

@@ -64,11 +64,10 @@ function createArchivePayload() {
       status: 'archived',
       maxSeats: 4,
       memberCap: 4,
+      memberCount: 4,
       currentVersion: 3,
       currentHandIndex: 1,
       activeLineupVersion: 1,
-      inviteTokenHash: '',
-      inviteExpiresAt: 0,
       rulesSnapshot: {
         serializedRules: JSON.stringify({
           version: 1,

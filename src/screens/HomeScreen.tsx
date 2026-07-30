@@ -1,9 +1,8 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import AppText from '../components/AppText';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
-import { Image, Modal, Platform, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Image, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { endGame, listGames } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
@@ -15,112 +14,17 @@ import { typography } from '../styles/typography';
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 const ONBOARDING_SEEN_KEY = 'home_onboarding_seen_v1';
 
-const DICE_SIZE = 64;
-const PIP_SIZE = 6;
-const PIP_OFFSET = 11;
-const PIP_MID = (DICE_SIZE - PIP_SIZE) / 2;
-
-const LIGHT_SOURCE = 'top-left';
-const SHADOW_OFFSET_BASE = LIGHT_SOURCE === 'top-left' ? { width: 0, height: 8 } : { width: 0, height: 8 };
-
-const TILE_SHADOW = {
-  shadowColor: '#000',
-  shadowOpacity: 0.18,
-  shadowRadius: 14,
-  shadowOffset: SHADOW_OFFSET_BASE,
-  elevation: 12,
-} as const;
-
 const CTA_SHADOW = {
   shadowColor: '#000',
   shadowOpacity: 0.16,
   shadowRadius: 10,
-  shadowOffset: { width: SHADOW_OFFSET_BASE.width, height: 6 },
+  shadowOffset: { width: 0, height: 6 },
   elevation: 10,
 } as const;
 
-const DICE_SHADOW = {
-  shadowColor: '#000',
-  shadowOpacity: 0.2,
-  shadowRadius: 14,
-  shadowOffset: SHADOW_OFFSET_BASE,
-  elevation: 12,
-} as const;
-
-const HERO_HALO_SURFACE = Platform.select({
-  ios: 'rgba(255,255,255,0.14)',
-  android: 'rgba(255,255,255,0.06)',
-  default: 'rgba(255,255,255,0.12)',
-});
-
-const HERO_HALO_SHADOW = Platform.select({
-  ios: {
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 1,
-  },
-  android: {
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 0,
-  },
-  default: {
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 0,
-  },
-});
-
 const DEPTH_BACKGROUND = 0;
 const DEPTH_ELEMENT = 2;
-const DEPTH_FLOATING = 6;
 const DEPTH_FOCUS = 12;
-
-const OPACITY_BACKGROUND = 0.05;
-const OPACITY_SECONDARY_ELEMENT = 0.62;
-const OPACITY_FOCUS_ELEMENT = 0.76;
-
-type PipPosition = 'TL' | 'TR' | 'BL' | 'BR' | 'C' | 'ML' | 'MR';
-
-const DICE_PIPS: Record<number, PipPosition[]> = {
-  1: ['C'],
-  2: ['TL', 'BR'],
-  3: ['TL', 'C', 'BR'],
-  4: ['TL', 'TR', 'BL', 'BR'],
-  5: ['TL', 'TR', 'C', 'BL', 'BR'],
-  6: ['TL', 'ML', 'BL', 'TR', 'MR', 'BR'],
-};
-
-function pipPositionStyle(position: PipPosition) {
-  switch (position) {
-    case 'TL':
-      return { top: PIP_OFFSET, left: PIP_OFFSET };
-    case 'TR':
-      return { top: PIP_OFFSET, right: PIP_OFFSET };
-    case 'BL':
-      return { bottom: PIP_OFFSET, left: PIP_OFFSET };
-    case 'BR':
-      return { bottom: PIP_OFFSET, right: PIP_OFFSET };
-    case 'C':
-      return { top: PIP_MID, left: PIP_MID };
-    case 'ML':
-      return { top: PIP_MID, left: PIP_OFFSET };
-    case 'MR':
-      return { top: PIP_MID, right: PIP_OFFSET };
-    default:
-      return {};
-  }
-}
-
-function clampNumber(v: number, min: number, max: number): number {
-  return Math.min(Math.max(v, min), max);
-}
 
 function translateWithFallback(
   t: (key: TranslationKey) => string,
@@ -162,7 +66,6 @@ async function fetchLatestActiveGame(): Promise<Game | null> {
 }
 
 function HomeScreen({ navigation }: Props) {
-  const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const { t } = useAppLanguage();
   const [activeGamePromptVisible, setActiveGamePromptVisible] = useState(false);
@@ -173,15 +76,6 @@ function HomeScreen({ navigation }: Props) {
   const ctaWidth = Math.min(width - 96, 320);
   const heroCardMaxWidth = width * 0.88;
   const heroCardMaxHeight = height * 0.38;
-  const heroCardWidth = Math.min(heroCardMaxWidth, 560);
-  const heroCardHeight = Math.min(heroCardMaxHeight, 248);
-  const heroSafeTop = clampNumber(height * 0.22, insets.top + 130, insets.top + 210);
-  const heroSafeBottom = clampNumber(height * 0.80, height * 0.74, height * 0.84);
-  const tileRedTop = clampNumber(insets.top + 104, insets.top + 88, heroSafeTop - 30);
-  const diceTop = clampNumber(insets.top + 78, insets.top + 66, heroSafeTop - 18);
-  const tileGreenBottom = clampNumber(height * 0.08, 72, Math.max(92, height - heroSafeBottom - 28));
-  const tileBambooBottom = clampNumber(height * 0.10, 94, Math.max(120, height - heroSafeBottom - 2));
-  const depthBottom = -height * 0.28;
 
   const copy = {
     tagline: translateWithFallback(t, 'home.taglineHero', '計錢．分析．對局紀錄'),
@@ -277,167 +171,48 @@ function HomeScreen({ navigation }: Props) {
     }
   }
 
-  function renderPips(faceValue: number) {
-    const positions = DICE_PIPS[faceValue] ?? DICE_PIPS[1];
-    return positions.map((position) => (
-      <View key={position} style={[styles.diceDot, pipPositionStyle(position)]} />
-    ));
-  }
-
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.illustrationLayer} pointerEvents="none">
-        <View
-          style={[
-            styles.topGlowOuter,
-            {
-              top: -height * 0.22,
-              left: -width * 0.15,
-              width: width * 1.3,
-              height: height * 0.55,
-            },
-          ]}
-        />
-        <View
-          style={[
-            styles.topGlowInner,
-            {
-              top: -height * 0.18,
-              left: -width * 0.05,
-              width: width * 1.1,
-              height: height * 0.45,
-            },
-          ]}
-        />
-        <View
-          style={[
-            styles.bottomVignetteOuter,
-            {
-              bottom: -height * 0.36,
-              left: -width * 0.18,
-              width: width * 1.45,
-              height: height * 0.72,
-            },
-          ]}
-        />
-        <View
-          style={[
-            styles.bottomVignetteInner,
-            {
-              bottom: -height * 0.30,
-              left: -width * 0.12,
-              width: width * 1.28,
-              height: height * 0.62,
-            },
-          ]}
-        />
-        <View style={styles.depthCircleTop} />
-        <View style={[styles.depthCircleBottom, { bottom: depthBottom }]} />
+    <View style={styles.container}>
+      <Image
+        source={require('../assets/home/home-3d-background-v1.png')}
+        style={styles.generatedBackground}
+        resizeMode="cover"
+      />
 
-        <View
-          style={[
-            styles.tile,
-            styles.tileRed,
-            {
-              top: tileRedTop,
-            },
-          ]}
-        >
-          <View style={styles.tileHighlight} />
-          <View style={styles.tileRim} />
-          <AppText style={[styles.tileGlyph, styles.tileGlyphRed]}>中</AppText>
-        </View>
+      <SafeAreaView style={styles.safeContent} edges={['top', 'bottom']}>
+        <View style={styles.heroContainer}>
+          <View
+            style={[
+              styles.heroCard,
+              {
+                maxWidth: heroCardMaxWidth,
+                maxHeight: heroCardMaxHeight,
+              },
+            ]}
+          >
+            <View style={styles.heroGroup}>
+              <Text style={styles.appTitle}>{t('home.brandTitle')}</Text>
+              <Text style={styles.tagline}>{copy.tagline}</Text>
 
-        <View
-          style={[
-            styles.tile,
-            styles.tileGreen,
-            {
-              bottom: tileGreenBottom - 10,
-            },
-          ]}
-        >
-          <View style={styles.tileHighlight} />
-          <View style={styles.tileRim} />
-          <AppText style={[styles.tileGlyph, styles.tileGlyphGreen]}>發</AppText>
-        </View>
+              <Pressable
+                onPress={handleNewGamePress}
+                style={({ pressed }) => [styles.primaryPressable, { width: ctaWidth }, pressed && styles.primaryPressed]}
+              >
+                <View style={styles.primaryButton}>
+                    <Text style={styles.primaryButtonText}>{copy.newGame}</Text>
+                </View>
+              </Pressable>
 
-        <View
-          style={[
-            styles.tile,
-            styles.tileBambooOne,
-            {
-              bottom: tileBambooBottom - 8,
-            },
-          ]}
-        >
-          <View style={styles.tileHighlight} />
-          <View style={styles.tileRim} />
-          <Image source={require('../assets/tiles/bamboo1.png')} style={styles.bambooImage} resizeMode="contain" />
-        </View>
-
-        <View
-          style={[
-            styles.diceWrap,
-            {
-              top: diceTop,
-            },
-          ]}
-        >
-          <View style={styles.diceContactShadow} />
-          <View style={styles.diceFace}>
-            <View style={styles.diceHighlight} />
-            <View style={styles.diceShade} />
-            {renderPips(5)}
+              <Pressable
+                onPress={() => navigation.navigate('History')}
+                style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryPressed]}
+              >
+                <Text style={styles.secondaryButtonText}>{copy.historyAll}</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
-
-      </View>
-
-      <View style={styles.heroContainer}>
-        <View
-          style={[
-            styles.heroFocusGlow,
-            {
-              width: heroCardWidth,
-              height: heroCardHeight,
-              maxHeight: heroCardMaxHeight,
-            },
-          ]}
-          pointerEvents="none"
-        />
-        <View
-          style={[
-            styles.heroCard,
-            {
-              maxWidth: heroCardMaxWidth,
-              maxHeight: heroCardMaxHeight,
-            },
-          ]}
-        >
-          <View style={styles.heroGroup}>
-            <AppText style={styles.appTitle}>{t('home.brandTitle')}</AppText>
-            <AppText style={styles.tagline}>{copy.tagline}</AppText>
-
-            <Pressable
-              onPress={handleNewGamePress}
-              style={({ pressed }) => [styles.primaryPressable, { width: ctaWidth }, pressed && styles.primaryPressed]}
-            >
-              <View style={styles.primaryButton}>
-                  <AppText style={styles.primaryButtonText}>{copy.newGame}</AppText>
-              </View>
-            </Pressable>
-
-            <Pressable
-              onPress={() => navigation.navigate('History')}
-              style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryPressed]}
-            >
-              <AppText style={styles.secondaryButtonText}>{copy.historyAll}</AppText>
-            </Pressable>
-
-          </View>
-        </View>
-      </View>
+      </SafeAreaView>
 
       <Modal
         transparent
@@ -459,11 +234,11 @@ function HomeScreen({ navigation }: Props) {
             }}
           />
           <View style={styles.promptCard}>
-            <AppText style={styles.promptTitle}>{copy.promptTitle}</AppText>
-            <AppText style={styles.promptMessage}>{copy.promptMessage}</AppText>
-            <AppText style={styles.promptGameTitle}>{blockingGame?.title ?? copy.unnamedGame}</AppText>
-            <AppText style={styles.promptDuration}>{blockingGameDuration}</AppText>
-            <AppText style={styles.promptHint}>{copy.promptHint}</AppText>
+            <Text style={styles.promptTitle}>{copy.promptTitle}</Text>
+            <Text style={styles.promptMessage}>{copy.promptMessage}</Text>
+            <Text style={styles.promptGameTitle}>{blockingGame?.title ?? copy.unnamedGame}</Text>
+            <Text style={styles.promptDuration}>{blockingGameDuration}</Text>
+            <Text style={styles.promptHint}>{copy.promptHint}</Text>
 
             <Pressable
               style={({ pressed }) => [
@@ -474,7 +249,7 @@ function HomeScreen({ navigation }: Props) {
               disabled={endingBlockingGame}
               onPress={handleContinueBlockingGame}
             >
-              <AppText style={styles.promptPrimaryText}>{copy.continue}</AppText>
+              <Text style={styles.promptPrimaryText}>{copy.continue}</Text>
             </Pressable>
 
             <Pressable
@@ -490,11 +265,11 @@ function HomeScreen({ navigation }: Props) {
                 });
               }}
             >
-              <AppText style={styles.promptSecondaryText}>{copy.endThenStart}</AppText>
+              <Text style={styles.promptSecondaryText}>{copy.endThenStart}</Text>
             </Pressable>
 
             <View style={styles.promptDisabledButton}>
-              <AppText style={styles.promptDisabledText}>{copy.abandonSoon}</AppText>
+              <Text style={styles.promptDisabledText}>{copy.abandonSoon}</Text>
             </View>
 
             <Pressable
@@ -502,7 +277,7 @@ function HomeScreen({ navigation }: Props) {
               disabled={endingBlockingGame}
               style={({ pressed }) => [styles.promptCancelButton, pressed && styles.promptCancelPressed]}
             >
-              <AppText style={styles.promptCancelText}>{copy.cancel}</AppText>
+              <Text style={styles.promptCancelText}>{copy.cancel}</Text>
             </Pressable>
           </View>
         </View>
@@ -527,11 +302,11 @@ function HomeScreen({ navigation }: Props) {
             }}
           />
           <View style={styles.promptCard}>
-            <AppText style={styles.promptTitle}>{onboardingCopy.title}</AppText>
-            <AppText style={styles.promptMessage}>{onboardingCopy.subtitle}</AppText>
-            <AppText style={styles.onboardingStep}>{onboardingCopy.stepCreate}</AppText>
-            <AppText style={styles.onboardingStep}>{onboardingCopy.stepHands}</AppText>
-            <AppText style={styles.onboardingStep}>{onboardingCopy.stepSummary}</AppText>
+            <Text style={styles.promptTitle}>{onboardingCopy.title}</Text>
+            <Text style={styles.promptMessage}>{onboardingCopy.subtitle}</Text>
+            <Text style={styles.onboardingStep}>{onboardingCopy.stepCreate}</Text>
+            <Text style={styles.onboardingStep}>{onboardingCopy.stepHands}</Text>
+            <Text style={styles.onboardingStep}>{onboardingCopy.stepSummary}</Text>
 
             <Pressable
               style={({ pressed }) => [styles.promptPrimaryButton, pressed && styles.promptPrimaryPressed]}
@@ -541,7 +316,7 @@ function HomeScreen({ navigation }: Props) {
                 });
               }}
             >
-              <AppText style={styles.promptPrimaryText}>{onboardingCopy.continue}</AppText>
+              <Text style={styles.promptPrimaryText}>{onboardingCopy.continue}</Text>
             </Pressable>
 
             <Pressable
@@ -556,7 +331,7 @@ function HomeScreen({ navigation }: Props) {
                   });
               }}
             >
-              <AppText style={styles.promptSecondaryText}>{onboardingCopy.startNow}</AppText>
+              <Text style={styles.promptSecondaryText}>{onboardingCopy.startNow}</Text>
             </Pressable>
 
             <Pressable
@@ -567,12 +342,12 @@ function HomeScreen({ navigation }: Props) {
               }}
               style={({ pressed }) => [styles.promptCancelButton, pressed && styles.promptCancelPressed]}
             >
-              <AppText style={styles.promptCancelText}>{onboardingCopy.skip}</AppText>
+              <Text style={styles.promptCancelText}>{onboardingCopy.skip}</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -581,6 +356,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
+  generatedBackground: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+    zIndex: DEPTH_BACKGROUND,
+  },
+  safeContent: {
+    flex: 1,
+  },
   heroContainer: {
     flex: 1,
     width: '100%',
@@ -588,14 +372,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 24,
     zIndex: DEPTH_FOCUS,
-  },
-  heroFocusGlow: {
-    position: 'absolute',
-    height: 260,
-    borderRadius: 999,
-    backgroundColor: HERO_HALO_SURFACE,
-    ...(HERO_HALO_SHADOW ?? {}),
-    zIndex: DEPTH_BACKGROUND + 1,
   },
   heroCard: {
     width: '88%',
@@ -661,202 +437,6 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontWeight: '500',
   },
-  illustrationLayer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: DEPTH_BACKGROUND,
-    pointerEvents: 'none',
-  },
-  topGlowOuter: {
-    position: 'absolute',
-    borderRadius: 999,
-    aspectRatio: 1,
-    backgroundColor: 'rgba(255,255,255,0.048)',
-    zIndex: DEPTH_BACKGROUND,
-  },
-  topGlowInner: {
-    position: 'absolute',
-    borderRadius: 999,
-    aspectRatio: 1,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    zIndex: DEPTH_BACKGROUND,
-  },
-  bottomVignetteOuter: {
-    position: 'absolute',
-    borderRadius: 999,
-    aspectRatio: 1,
-    backgroundColor: 'rgba(0,0,0,0.011)',
-    zIndex: DEPTH_BACKGROUND,
-  },
-  bottomVignetteInner: {
-    position: 'absolute',
-    borderRadius: 999,
-    aspectRatio: 1,
-    backgroundColor: 'rgba(0,0,0,0.006)',
-    zIndex: DEPTH_BACKGROUND,
-  },
-  depthCircleBottom: {
-    position: 'absolute',
-    width: '78%',
-    aspectRatio: 1,
-    borderRadius: 999,
-    left: '-48%',
-    backgroundColor: `rgba(53, 92, 86, ${OPACITY_BACKGROUND})`,
-    zIndex: DEPTH_BACKGROUND + 1,
-  },
-  depthCircleTop: {
-    position: 'absolute',
-    width: '86%',
-    aspectRatio: 1,
-    borderRadius: 999,
-    top: '-24%',
-    right: '-14%',
-    backgroundColor: 'rgba(53, 92, 86, 0.06)',
-    zIndex: DEPTH_BACKGROUND + 1,
-  },
-  tile: {
-    position: 'absolute',
-    width: 100,
-    height: 136,
-    borderRadius: 22,
-    backgroundColor: '#F8F8F6',
-    borderWidth: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...TILE_SHADOW,
-    overflow: 'visible',
-  },
-  tileHighlight: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '55%',
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    opacity: 0.25,
-  },
-  tileRim: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.06)',
-  },
-  tileRed: {
-    left: -52,
-    width: 108,
-    height: 154,
-    opacity: 0.8,
-    zIndex: DEPTH_ELEMENT,
-    transform: [{ perspective: 1000 }, { rotateX: '1deg' }, { rotateZ: '-8deg' }],
-  },
-  tileGreen: {
-    right: -46,
-    width: 132,
-    height: 176,
-    opacity: OPACITY_SECONDARY_ELEMENT,
-    zIndex: DEPTH_BACKGROUND + 1,
-    transform: [{ perspective: 1000 }, { rotateX: '1deg' }, { rotateZ: '8deg' }],
-  },
-  tileBambooOne: {
-    left: -8,
-    width: 108,
-    height: 150,
-    opacity: OPACITY_FOCUS_ELEMENT,
-    zIndex: DEPTH_FLOATING,
-    transform: [{ perspective: 1000 }, { rotateX: '1deg' }, { rotateZ: '-6deg' }],
-  },
-  bambooImage: {
-    width: 68,
-    height: 98,
-  },
-  tileGlyph: {
-    ...typography.title,
-    fontSize: 46,
-    lineHeight: 52,
-    fontWeight: '800',
-  },
-  tileGlyphRed: {
-    color: '#D94141',
-  },
-  tileGlyphGreen: {
-    color: '#2E8B57',
-  },
-  diceWrap: {
-    position: 'absolute',
-    right: 24,
-    zIndex: DEPTH_FLOATING - 1,
-    transform: [{ perspective: 900 }, { rotateX: '6deg' }, { rotateY: '-6deg' }, { rotateZ: '6deg' }],
-    opacity: 1,
-    ...DICE_SHADOW,
-  },
-  diceContactShadow: {
-    position: 'absolute',
-    bottom: -5,
-    left: 10,
-    right: 6,
-    height: 11,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0,0,0,0.10)',
-    transform: [{ translateX: 2 }, { scaleX: 0.91 }, { scaleY: 0.82 }],
-    zIndex: 0,
-  },
-  diceFace: {
-    width: DICE_SIZE,
-    height: DICE_SIZE,
-    zIndex: 1,
-    borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.06)',
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.28,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 18,
-  },
-  diceHighlight: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: '50%',
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    borderBottomLeftRadius: 10,
-    borderBottomRightRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    opacity: 0.14,
-  },
-  diceShade: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '44%',
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
-    borderTopLeftRadius: 9,
-    borderTopRightRadius: 9,
-    backgroundColor: 'rgba(0,0,0,0.06)',
-    opacity: 0.09,
-  },
-  diceDot: {
-    position: 'absolute',
-    width: PIP_SIZE,
-    height: PIP_SIZE,
-    borderRadius: PIP_SIZE / 2,
-    backgroundColor: '#2A2A2A',
-    opacity: 0.9,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 1.5,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
   promptBackdrop: {
     flex: 1,
     justifyContent: 'center',
@@ -906,12 +486,6 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.sm,
     ...typography.body,
     color: theme.colors.textSecondary,
-  },
-  promptOptionHint: {
-    marginTop: theme.spacing.xs,
-    ...typography.caption,
-    color: theme.colors.textSecondary,
-    lineHeight: 18,
   },
   promptPrimaryButton: {
     marginTop: theme.spacing.md,

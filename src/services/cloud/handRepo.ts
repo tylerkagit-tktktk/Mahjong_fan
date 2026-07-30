@@ -1,6 +1,5 @@
 import { HandLog, RoomPlayerId, SubmitHandInput, SubmitResult } from '../../models/cloud';
-import { applyHandStats } from './profileRepo';
-import { getActiveLineup, getRoom, isTemporaryPlayerId } from './roomRepo';
+import { getRoom } from './roomRepo';
 import { getFirestore } from '../firebase/firebase';
 
 const roomRef = (roomId: string) => getFirestore().collection('rooms').doc(roomId);
@@ -43,13 +42,6 @@ export async function submitHand(input: SubmitHandInput): Promise<SubmitResult> 
     transaction.update(roomRef(input.roomId), { currentVersion: nextVersion, currentHandIndex: nextHandIndex, status: 'active', updatedAt: Date.now() });
     return { ok: true, nextVersion, nextHandIndex } as SubmitResult;
   });
-  if (result.ok) {
-    const lineup = await getActiveLineup(input.roomId);
-    if (lineup) {
-      // Room progression must not be blocked by optional profile statistics.
-      await applyHandStats(seatIds(lineup.seats).filter((id) => !isTemporaryPlayerId(id)), input).catch(() => {});
-    }
-  }
   return result;
 }
 

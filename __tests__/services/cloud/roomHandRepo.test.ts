@@ -1,18 +1,34 @@
 import { ensureSession, signInWithProvider } from '../../../src/services/cloud/authRepo';
 import { listHands, submitHand } from '../../../src/services/cloud/handRepo';
 import { createInvite, createRoom, getActiveLineup, joinWithInvite, proposeLineupChange, startRoom } from '../../../src/services/cloud/roomRepo';
-import { saveSessionRaw, saveSnapshot } from '../../../src/services/cloud/storage';
+import { saveSnapshot } from '../../../src/services/cloud/storage';
 
 beforeEach(async () => {
   await saveSnapshot({ rooms: [], members: [], tempPlayers: [], lineups: [], hands: [], profiles: [], stats: [], archiveSyncs: [] });
-  await saveSessionRaw(null);
 });
 
 describe('cloud room + hand flow', () => {
+  it('only lets the host issue an invite and invalidates a replaced invite', async () => {
+    const host = await ensureSession('google');
+    const guest = await signInWithProvider('apple');
+    const room = await createRoom({ hostUid: host.uid, title: '邀請權限測試', memberCap: 4 });
+
+    await expect(createInvite(room.roomId, guest.uid)).rejects.toThrow('Only host');
+
+    const originalInvite = await createInvite(room.roomId, host.uid);
+    const replacementInvite = await createInvite(room.roomId, host.uid);
+    expect(replacementInvite.token).not.toBe(originalInvite.token);
+
+    const oldInviteResult = await joinWithInvite(room.roomId, originalInvite.token, guest.uid);
+    expect(oldInviteResult).toMatchObject({ ok: false, code: 'INVITE_EXPIRED' });
+    const newInviteResult = await joinWithInvite(room.roomId, replacementInvite.token, guest.uid);
+    expect(newInviteResult.ok).toBe(true);
+  });
+
   it('allows 5th player join as bench and lineup change applies next hand', async () => {
     const host = await ensureSession('google');
     const room = await createRoom({ hostUid: host.uid, title: '測試多人房', memberCap: 8 });
-    const invite = await createInvite(room.roomId);
+    const invite = await createInvite(room.roomId, host.uid);
 
     const players = [host];
     for (let i = 0; i < 4; i += 1) {
@@ -66,7 +82,7 @@ describe('cloud room + hand flow', () => {
   it('rejects submit from bench member', async () => {
     const host = await ensureSession('google');
     const room = await createRoom({ hostUid: host.uid, title: '測試後備房', memberCap: 8 });
-    const invite = await createInvite(room.roomId);
+    const invite = await createInvite(room.roomId, host.uid);
 
     const members = [host];
     for (let i = 0; i < 4; i += 1) {
@@ -104,7 +120,7 @@ describe('cloud room + hand flow', () => {
   it('stores draw dealer action for pass/stick dealer decisions', async () => {
     const host = await ensureSession('google');
     const room = await createRoom({ hostUid: host.uid, title: '流局過莊測試', memberCap: 8 });
-    const invite = await createInvite(room.roomId);
+    const invite = await createInvite(room.roomId, host.uid);
 
     const members = [host];
     for (let i = 0; i < 3; i += 1) {

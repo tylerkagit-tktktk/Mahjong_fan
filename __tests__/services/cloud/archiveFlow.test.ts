@@ -16,6 +16,8 @@ jest.mock('../../../src/db/cloudArchiveRepo', () => ({
     };
   }),
   loadCloudArchive: jest.fn(async (roomId: string) => mockSavedArchives.get(roomId) ?? null),
+  listCloudArchivesPendingStats: jest.fn(async () => []),
+  markCloudArchiveStatsApplied: jest.fn(async () => {}),
 }));
 
 import { archiveRoomToLocal, loadArchivedGame } from '../../../src/services/cloud/archiveRepo';
@@ -33,19 +35,18 @@ import {
   listMembers,
   startRoom,
 } from '../../../src/services/cloud/roomRepo';
-import { saveSessionRaw, saveSnapshot } from '../../../src/services/cloud/storage';
+import { saveSnapshot } from '../../../src/services/cloud/storage';
 
 beforeEach(async () => {
   mockSavedArchives.clear();
   await saveSnapshot({ rooms: [], members: [], tempPlayers: [], lineups: [], hands: [], profiles: [], stats: [], archiveSyncs: [] });
-  await saveSessionRaw(null);
 });
 
 describe('cloud archive flow', () => {
   it('archives ended room locally and blocks new submits', async () => {
     const host = await ensureSession('google');
     const room = await createRoom({ hostUid: host.uid, title: '測試封存房間', memberCap: 8 });
-    const invite = await createInvite(room.roomId);
+    const invite = await createInvite(room.roomId, host.uid);
 
     for (let i = 0; i < 3; i += 1) {
       const session = await signInWithProvider('google');
@@ -107,7 +108,7 @@ describe('cloud archive flow', () => {
   it('keeps an archived room available while its local archive remains readable', async () => {
     const host = await ensureSession('google');
     const room = await createRoom({ hostUid: host.uid, title: '過期封存房間', memberCap: 4 });
-    const invite = await createInvite(room.roomId);
+    const invite = await createInvite(room.roomId, host.uid);
 
     for (let i = 0; i < 3; i += 1) {
       const session = await signInWithProvider('apple');
@@ -127,7 +128,7 @@ describe('cloud archive flow', () => {
   it('only lets the host delete cloud data after every real member has saved an archive', async () => {
     const host = await ensureSession('google');
     const room = await createRoom({ hostUid: host.uid, title: '清理同步房間', memberCap: 4 });
-    const invite = await createInvite(room.roomId);
+    const invite = await createInvite(room.roomId, host.uid);
     const guests = [];
 
     for (let i = 0; i < 3; i += 1) {

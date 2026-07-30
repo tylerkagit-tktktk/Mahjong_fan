@@ -19,6 +19,8 @@ export type ProfileStats = {
   updatedAt: number;
 };
 
+export type ProfileStatsContribution = Omit<ProfileStats, 'uid' | 'updatedAt'>;
+
 export type RoomStatus = 'open' | 'active' | 'ended' | 'archived';
 export type MembershipStatus = 'active' | 'left';
 export type RoomPlayerId = string;
@@ -31,11 +33,10 @@ export type Room = {
   status: RoomStatus;
   maxSeats: 4;
   memberCap: number;
+  memberCount: number;
   currentVersion: number;
   currentHandIndex: number;
   activeLineupVersion: number;
-  inviteTokenHash: string;
-  inviteExpiresAt: number;
   rulesSnapshot: Record<string, unknown>;
   archiveReadyAt?: number | null;
   expiresAt?: number | null;

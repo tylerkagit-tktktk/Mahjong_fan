@@ -24,9 +24,7 @@ import {
   endRoom,
   getRoom,
   listLineups,
-  subscribeActiveLineup,
-  subscribeRoom,
-  subscribeRoomPlayers,
+  subscribeRoomState,
 } from '../../services/cloud/roomRepo';
 import theme from '../../theme/theme';
 
@@ -112,30 +110,25 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
   }, [roomId]);
 
   useEffect(() => {
-    let unSubPlayers: (() => void) | null = null;
-    let unSubLineup: (() => void) | null = null;
-    let unSubRoom: (() => void) | null = null;
+    let unsubscribe: (() => void) | null = null;
 
     const loadPromise = (async () => {
       const session = await ensureSession('google');
       setUid(session.uid);
-      unSubPlayers = subscribeRoomPlayers(roomId, session.uid, setPlayers);
-      unSubLineup = subscribeActiveLineup(roomId, setLineup);
-      unSubRoom = subscribeRoom(roomId, (nextRoom) => {
-        setRoom(nextRoom);
-        setRoomVersion(nextRoom?.currentVersion ?? 1);
+      unsubscribe = subscribeRoomState(roomId, session.uid, (state) => {
+        setPlayers(state.players);
+        setLineup(state.lineup);
+        setRoom(state.room);
+        setRoomVersion(state.room?.currentVersion ?? 1);
       });
-      await refreshHands();
     })();
 
     loadPromise.catch(() => {});
 
     return () => {
-      unSubPlayers?.();
-      unSubLineup?.();
-      unSubRoom?.();
+      unsubscribe?.();
     };
-  }, [refreshHands, roomId]);
+  }, [roomId]);
 
   useEffect(() => {
     if (!uid || !room || archiving || endingRoomRef.current === room.roomId) {
@@ -565,7 +558,6 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
         }),
       );
       setRecordModalVisible(false);
-      await refreshHands();
     },
     [currentFanInput, refreshHands, roomId, roomVersion, selectedDiscarderId, selectedWinnerId, t, uid],
   );
@@ -723,9 +715,6 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
                         seatIndex={seatIndex}
                         seatLabel={seat.seatLabel}
                         displayName={seat.displayName}
-                        _isHost={seat.isHost}
-                        _isSelf={seat.isSelf}
-                        _isTemporary={seat.isTemporary}
                         isDealer={seat.isDealer}
                         amount={seat.amount}
                         currencyCode={currencyCode}
@@ -866,9 +855,6 @@ function CloudPlayerPanel({
   seatIndex,
   seatLabel,
   displayName,
-  _isHost,
-  _isSelf,
-  _isTemporary,
   isDealer,
   amount,
   currencyCode,
@@ -880,9 +866,6 @@ function CloudPlayerPanel({
   seatIndex: number;
   seatLabel: string;
   displayName: string;
-  _isHost: boolean;
-  _isSelf: boolean;
-  _isTemporary: boolean;
   isDealer: boolean;
   amount: number;
   currencyCode: CurrencyCode;

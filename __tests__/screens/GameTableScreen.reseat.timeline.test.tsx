@@ -30,8 +30,17 @@ const I18N_MAP: Record<string, string> = {
   'gameTable.reseat.action.open': '要，重新執位',
   'gameTable.reseat.action.confirm': '套用執位',
   'gameTable.reseat.action.cancel': '取消',
+  'gameTable.reseat.applying': '套用中...',
+  'gameTable.reseat.confirmNewSeats': '確認新座位',
   'gameTable.reseat.modalTitle': '重新執位',
   'gameTable.reseat.modalSubtitle': '調整東南西北座位',
+  'gameTable.reseat.selectFirstHint': '請先點選第一位玩家。',
+  'gameTable.reseat.selectedPlayer': '已選：{name}（{seat}）',
+  'gameTable.reseat.selectSecondHint': '再點另一位玩家，兩人會即時交換位置。',
+  'gameTable.reseat.stepFirst': '選第一位',
+  'gameTable.reseat.stepSecond': '選另一位',
+  'gameTable.reseat.swapReady': '座位已更新，可以繼續交換或確認。',
+  'gameTable.reseat.swapSubtitle': '點選兩位玩家交換座位',
   'gameTable.reseat.unsupported': '暫不支援此執位方式',
   'gameTable.handCount.started': '已打 {count} 鋪',
   'newGame.dealerBadge': '莊',
@@ -86,18 +95,7 @@ jest.mock('../../src/screens/newGameStepper/sections/PlayersSection', () => {
           >
             <NativeText>rename</NativeText>
           </NativePressable>
-        ) : (
-          <NativePressable
-            testID="reseat-reassign-seats"
-            onPress={() => {
-              props.onSelectLockedSeat(3, 0);
-              props.onSelectLockedSeat(3, 1);
-              props.onSelectLockedSeat(3, 2);
-            }}
-          >
-            <NativeText>reassign</NativeText>
-          </NativePressable>
-        )}
+        ) : null}
       </View>
     );
   };
@@ -343,16 +341,22 @@ describe('GameTableScreen reseat timeline integration', () => {
       await Promise.resolve();
     });
 
-    const allowEditFlag = tree!.root.findByProps({ testID: 'allow-name-edit-flag' });
-    expect(allowEditFlag.props.children).toBe('false');
+    expect(tree!.root.findAllByProps({ testID: 'allow-name-edit-flag' })).toHaveLength(0);
+    const pressSeatRow = async (seatIndex: number) => {
+      await act(async () => {
+        tree!.root.findByProps({ testID: `reseat-player-row-${seatIndex}` }).props.onPress();
+      });
+    };
+    await pressSeatRow(0);
+    await pressSeatRow(3);
+    await pressSeatRow(1);
+    await pressSeatRow(3);
+    await pressSeatRow(2);
+    await pressSeatRow(3);
 
-    const reassignButton = tree!.root.findByProps({ testID: 'reseat-reassign-seats' });
-    await act(async () => {
-      reassignButton.props.onPress();
-    });
     const confirmReseatButton = tree!.root
       .findAllByType(AppButton)
-      .find((button) => button.props.label === '套用執位');
+      .find((button) => button.props.label === '確認新座位');
     expect(confirmReseatButton).toBeTruthy();
     await act(async () => {
       await confirmReseatButton!.props.onPress();

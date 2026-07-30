@@ -10,9 +10,7 @@ import {
   endRoom,
   getRoom,
   listLineups,
-  subscribeActiveLineup,
-  subscribeRoom,
-  subscribeRoomPlayers,
+  subscribeRoomState,
 } from '../../src/services/cloud/roomRepo';
 
 jest.mock('../../src/services/cloud/archiveRepo', () => ({
@@ -32,9 +30,7 @@ jest.mock('../../src/services/cloud/roomRepo', () => ({
   endRoom: jest.fn(),
   getRoom: jest.fn(),
   listLineups: jest.fn(),
-  subscribeActiveLineup: jest.fn(),
-  subscribeRoom: jest.fn(),
-  subscribeRoomPlayers: jest.fn(),
+  subscribeRoomState: jest.fn(),
 }));
 
 jest.mock('../../src/i18n/useAppLanguage', () => ({
@@ -74,9 +70,7 @@ const mockedSubmitHand = submitHand as jest.MockedFunction<typeof submitHand>;
 const mockedEndRoom = endRoom as jest.MockedFunction<typeof endRoom>;
 const mockedGetRoom = getRoom as jest.MockedFunction<typeof getRoom>;
 const mockedListLineups = listLineups as jest.MockedFunction<typeof listLineups>;
-const mockedSubscribeActiveLineup = subscribeActiveLineup as jest.MockedFunction<typeof subscribeActiveLineup>;
-const mockedSubscribeRoom = subscribeRoom as jest.MockedFunction<typeof subscribeRoom>;
-const mockedSubscribeRoomPlayers = subscribeRoomPlayers as jest.MockedFunction<typeof subscribeRoomPlayers>;
+const mockedSubscribeRoomState = subscribeRoomState as jest.MockedFunction<typeof subscribeRoomState>;
 
 function createRoom() {
   return {
@@ -86,11 +80,10 @@ function createRoom() {
     status: 'active',
     maxSeats: 4,
     memberCap: 8,
+    memberCount: 4,
     currentVersion: 2,
     currentHandIndex: 1,
     activeLineupVersion: 1,
-    inviteTokenHash: '',
-    inviteExpiresAt: 0,
     rulesSnapshot: {
       serializedRules: JSON.stringify({
         version: 1,
@@ -195,16 +188,8 @@ describe('MultiplayerGameTableScreen end game flow', () => {
       memberCount: 4,
       handCount: 1,
     });
-    mockedSubscribeRoomPlayers.mockImplementation((_roomId, _uid, cb) => {
-      cb(createPlayers());
-      return jest.fn();
-    });
-    mockedSubscribeActiveLineup.mockImplementation((_roomId, cb) => {
-      cb(createLineup());
-      return jest.fn();
-    });
-    mockedSubscribeRoom.mockImplementation((_roomId, cb) => {
-      cb(createRoom());
+    mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb) => {
+      cb({ room: createRoom(), players: createPlayers(), lineup: createLineup() });
       return jest.fn();
     });
   });
@@ -243,9 +228,9 @@ describe('MultiplayerGameTableScreen end game flow', () => {
 
   it('archives and opens the summary when another player ends the room', async () => {
     let emitRoom: ((room: ReturnType<typeof createRoom>) => void) | null = null;
-    mockedSubscribeRoom.mockImplementation((_roomId, cb) => {
-      emitRoom = cb;
-      cb(createRoom());
+    mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb) => {
+      emitRoom = (room) => cb({ room, players: createPlayers(), lineup: createLineup() });
+      cb({ room: createRoom(), players: createPlayers(), lineup: createLineup() });
       return jest.fn();
     });
     const { tree, navigation } = await renderScreen();

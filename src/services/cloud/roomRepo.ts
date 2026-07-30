@@ -328,11 +328,36 @@ export async function endRoom(roomId: string, endedByUid: string): Promise<Submi
 }
 
 export async function markRoomArchived(roomId: string, archiveVersion: number): Promise<Room | null> {
-  const room = await getRoom(roomId);
-  if (!room) return null;
-  const next = { ...room, status: 'archived' as const, archiveReadyAt: room.archiveReadyAt ?? Date.now(), archiveVersion, expiresAt: room.expiresAt ?? Date.now() + ARCHIVE_RETENTION_MS, updatedAt: Date.now() };
-  await roomRef(roomId).set(next);
-  return next;
+  return getFirestore().runTransaction(async (transaction) => {
+    const reference = roomRef(roomId);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) return null;
+
+    const room = snapshot.data() as Room;
+    if ((room.archiveVersion ?? 1) !== archiveVersion) {
+      throw new Error('Archive version is no longer current');
+    }
+    if (room.status === 'archived') return room;
+    if (room.status !== 'ended') throw new Error('Room is not ready to archive');
+
+    const timestamp = Date.now();
+    const next: Room = {
+      ...room,
+      status: 'archived',
+      archiveReadyAt: room.archiveReadyAt ?? timestamp,
+      archiveVersion,
+      expiresAt: room.expiresAt ?? timestamp + ARCHIVE_RETENTION_MS,
+      updatedAt: timestamp,
+    };
+    transaction.update(reference, {
+      status: next.status,
+      archiveReadyAt: next.archiveReadyAt,
+      archiveVersion: next.archiveVersion,
+      expiresAt: next.expiresAt,
+      updatedAt: next.updatedAt,
+    });
+    return next;
+  });
 }
 
 export async function markArchiveSynced(roomId: string, actorUid: string, archiveVersion: number): Promise<void> {

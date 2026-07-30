@@ -21,6 +21,7 @@ jest.mock('../../../src/db/cloudArchiveRepo', () => ({
 }));
 
 import { archiveRoomToLocal, loadArchivedGame } from '../../../src/services/cloud/archiveRepo';
+import { saveCloudArchive } from '../../../src/db/cloudArchiveRepo';
 import { ensureSession, signInWithProvider } from '../../../src/services/cloud/authRepo';
 import { submitHand } from '../../../src/services/cloud/handRepo';
 import {
@@ -33,6 +34,7 @@ import {
   getRoom,
   joinWithInvite,
   listMembers,
+  markRoomArchived,
   startRoom,
 } from '../../../src/services/cloud/roomRepo';
 import { saveSnapshot } from '../../../src/services/cloud/storage';
@@ -43,6 +45,41 @@ beforeEach(async () => {
 });
 
 describe('cloud archive flow', () => {
+  it('treats an already archived room as success without rewriting it', async () => {
+    const host = await ensureSession('google');
+    const room = await createRoom({ hostUid: host.uid, title: '重複封存房間', memberCap: 4 });
+    await endRoom(room.roomId, host.uid);
+
+    const first = await markRoomArchived(room.roomId, 1);
+    expect(first?.status).toBe('archived');
+
+    const firstUpdatedAt = first!.updatedAt;
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(firstUpdatedAt + 10_000);
+    try {
+      const repeated = await markRoomArchived(room.roomId, 1);
+      expect(repeated).toEqual(first);
+      expect((await getRoom(room.roomId))?.updatedAt).toBe(firstUpdatedAt);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('can retry local persistence after the cloud room was archived', async () => {
+    const host = await ensureSession('google');
+    const room = await createRoom({ hostUid: host.uid, title: '封存重試房間', memberCap: 4 });
+    await endRoom(room.roomId, host.uid);
+
+    const mockedSaveCloudArchive = saveCloudArchive as jest.MockedFunction<typeof saveCloudArchive>;
+    mockedSaveCloudArchive.mockRejectedValueOnce(new Error('Local write failed'));
+
+    await expect(archiveRoomToLocal(room.roomId, host.uid)).rejects.toThrow('Local write failed');
+    expect((await getRoom(room.roomId))?.status).toBe('archived');
+
+    const retry = await archiveRoomToLocal(room.roomId, host.uid);
+    expect(retry.roomId).toBe(room.roomId);
+    expect((await getRoom(room.roomId))?.status).toBe('archived');
+  });
+
   it('archives ended room locally and blocks new submits', async () => {
     const host = await ensureSession('google');
     const room = await createRoom({ hostUid: host.uid, title: '測試封存房間', memberCap: 8 });

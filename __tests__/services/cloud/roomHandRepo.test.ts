@@ -17,6 +17,8 @@ describe('cloud room + hand flow', () => {
 
     const originalInvite = await createInvite(room.roomId, host.uid);
     const replacementInvite = await createInvite(room.roomId, host.uid);
+    expect(originalInvite.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(originalInvite.deepLink).toContain(`token=${originalInvite.token}`);
     expect(replacementInvite.token).not.toBe(originalInvite.token);
 
     const oldInviteResult = await joinWithInvite(room.roomId, originalInvite.token, guest.uid);

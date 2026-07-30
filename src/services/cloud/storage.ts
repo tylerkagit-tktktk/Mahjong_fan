@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CloudSnapshot } from '../../models/cloud';
+import { createSecureToken } from './secureRandom';
 
 const CLOUD_SNAPSHOT_KEY = 'cloud_snapshot_v2';
 
@@ -69,5 +70,5 @@ export function now(): number {
 }
 
 export function createToken(): string {
-  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  return createSecureToken();
 }

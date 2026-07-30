@@ -30,6 +30,10 @@ declare module 'react-native-sqlite-storage' {
   export default SQLite;
 }
 
+declare module 'fast-base64-decode' {
+  export default function base64Decode(source: string, target: Uint8Array): void;
+}
+
 interface CryptoLike {
   randomUUID?: () => string;
 }

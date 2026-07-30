@@ -420,6 +420,8 @@ export type TranslationKey =
   | 'roomLobby.alert.missingRoomTitle'
   | 'roomLobby.alert.missingRoomMessage'
   | 'roomLobby.alert.initFailedTitle'
+  | 'roomLobby.alert.roomRemovedTitle'
+  | 'roomLobby.alert.roomRemovedMessage'
   | 'roomLobby.alert.createInviteFailedTitle'
   | 'roomLobby.alert.shareInviteFailedTitle'
   | 'roomLobby.alert.swapFailedTitle'

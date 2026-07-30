@@ -1,4 +1,5 @@
 import { NewHandInput, Hand } from '../models/db';
+import { getRoundLabel } from '../models/dealer';
 import { aggregatePlayerTotalsQByTimeline } from '../models/seatRotation';
 import {
   __testOnly_applySeatRotationOffsetWithTx,
@@ -443,5 +444,107 @@ describe('repo lifecycle with reseat decision', () => {
 
     expect(state.game.seatRotationOffset).toBe(2);
     expect(state.seatOffsetUpdateCount).toBe(0);
+  });
+
+  it('keeps a 200-hand mixed session zero-sum and advances every round safely', async () => {
+    const state = createState('lifecycle-200-hands');
+    const executeTx = buildExecuteTx(state);
+    let dealerSeatIndex = 0;
+    let dealerAdvanceCount = 0;
+    let drawStickCount = 0;
+    let drawPassCount = 0;
+    let discardCount = 0;
+
+    for (let index = 0; index < 200; index += 1) {
+      const cycleIndex = index % 10;
+      const isDraw = cycleIndex === 0 || cycleIndex === 1;
+      const dealerAction = cycleIndex === 0 ? 'stick' : cycleIndex === 1 ? 'pass' : null;
+      const dealerWins = !isDraw && cycleIndex === 2;
+      const winnerSeatIndex = isDraw
+        ? null
+        : dealerWins
+          ? dealerSeatIndex
+          : (dealerSeatIndex + 1) % 4;
+      const discarderSeatIndex = isDraw ? null : (winnerSeatIndex! + 1) % 4;
+      const deltas = [0, 0, 0, 0];
+      if (winnerSeatIndex != null) {
+        deltas.fill(-8);
+        deltas[winnerSeatIndex] = 24;
+      }
+
+      const inserted = await __testOnly_insertHandWithTx(
+        {
+          ...createHandInput({
+            gameId: state.game.id,
+            id: `stress-hand-${index}`,
+            dealerSeatIndex,
+            winnerSeatIndex,
+            discarderSeatIndex,
+            isDraw,
+            type: isDraw ? 'draw' : 'discard',
+            computedJson: JSON.stringify(dealerAction ? { dealerAction } : { source: 'stress' }),
+            deltasJson: JSON.stringify(deltas),
+          }),
+          createdAt: 1_700_100_000_000 + index,
+        },
+        executeTx,
+      );
+
+      expect(inserted.handIndex).toBe(index);
+      expect(inserted.dealerSeatIndex).toBe(dealerSeatIndex);
+      expect(deltas.reduce((sum, value) => sum + value, 0)).toBe(0);
+
+      if (dealerAction === 'stick') {
+        drawStickCount += 1;
+      } else if (dealerAction === 'pass') {
+        drawPassCount += 1;
+        dealerAdvanceCount += 1;
+        dealerSeatIndex = (dealerSeatIndex + 1) % 4;
+      } else {
+        discardCount += 1;
+        if (!dealerWins) {
+          dealerAdvanceCount += 1;
+          dealerSeatIndex = (dealerSeatIndex + 1) % 4;
+        }
+      }
+    }
+
+    expect(state.hands).toHaveLength(200);
+    expect(state.game.handsCount).toBe(200);
+    expect(drawStickCount).toBe(20);
+    expect(drawPassCount).toBe(20);
+    expect(discardCount).toBe(160);
+    expect(dealerAdvanceCount).toBeGreaterThan(100);
+
+    const labels = new Set(state.hands.map((hand) => hand.nextRoundLabelZh?.slice(0, 1)));
+    expect(labels).toEqual(new Set(['東', '南', '西', '北']));
+    expect(state.game.currentRoundLabelZh).toBe(getRoundLabel(0, state.hands).labelZh);
+
+    const totals = aggregatePlayerTotalsQByTimeline(
+      state.players,
+      state.hands.map((hand) => ({
+        nextRoundLabelZh: hand.nextRoundLabelZh,
+        deltasQ: hand.deltasJson ? (JSON.parse(hand.deltasJson) as number[]) : null,
+      })),
+      '東風東局',
+      0,
+    );
+    expect(Array.from(totals.values()).reduce((sum, value) => sum + value, 0)).toBe(0);
+
+    await __testOnly_endGameWithTx(state.game.id, 1_700_100_001_000, executeTx);
+    expect(state.game.gameState).toBe('ended');
+    expect(state.game.resultStatus).toBe('none');
+    await expect(
+      __testOnly_insertHandWithTx(
+        createHandInput({
+          gameId: state.game.id,
+          id: 'stress-hand-after-end',
+          dealerSeatIndex,
+          winnerSeatIndex: dealerSeatIndex,
+          discarderSeatIndex: (dealerSeatIndex + 1) % 4,
+        }),
+        executeTx,
+      ),
+    ).rejects.toThrow('Cannot mutate ended or abandoned game');
   });
 });

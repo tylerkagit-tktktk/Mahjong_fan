@@ -356,6 +356,8 @@
   "roomLobby.alert.missingRoomTitle": "未找到房間",
   "roomLobby.alert.missingRoomMessage": "請先由建立流程進入房間。",
   "roomLobby.alert.initFailedTitle": "初始化失敗",
+  "roomLobby.alert.roomRemovedTitle": "同步房已關閉",
+  "roomLobby.alert.roomRemovedMessage": "房主已刪除此同步房，將返回上一頁。",
   "roomLobby.alert.createInviteFailedTitle": "建立邀請失敗",
   "roomLobby.alert.shareInviteFailedTitle": "分享邀請失敗",
   "roomLobby.alert.swapFailedTitle": "換人失敗",

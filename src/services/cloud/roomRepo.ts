@@ -166,6 +166,7 @@ export async function joinWithInvite(roomId: string, token: string, uid: string)
     try {
       await batch.commit();
     } catch (error) {
+      await ticketRef.delete().catch(() => {});
       const message = error instanceof Error ? error.message : String(error);
       if (/permission|full|expired|not-found/i.test(message)) {
         return { ok: false, code: 'INVITE_EXPIRED', message: 'Invite expired, invalid, or room is full' };
@@ -293,18 +294,23 @@ export async function deleteRoomAndFallbackToLocal(roomId: string, actorUid: str
     if (room) throw new Error('Only host can remove room');
     return;
   }
-  const [members, temporaryPlayers, lineups, hands, joinTickets, hostConfig] = await Promise.all([
+  const [members, temporaryPlayers, lineups, hands, hostConfig] = await Promise.all([
     membersRef(roomId).get(),
     temporaryPlayersRef(roomId).get(),
     lineupsRef(roomId).get(),
     handsRef(roomId).get(),
-    joinTicketsRef(roomId).get(),
     hostConfigRef(roomId).get(),
   ]);
-  const documents = [...members.docs, ...temporaryPlayers.docs, ...lineups.docs, ...hands.docs, ...joinTickets.docs];
-  for (let index = 0; index < documents.length; index += DELETE_BATCH_SIZE) {
+  const documentRefs = [
+    ...members.docs.map((doc) => doc.ref),
+    ...temporaryPlayers.docs.map((doc) => doc.ref),
+    ...lineups.docs.map((doc) => doc.ref),
+    ...hands.docs.map((doc) => doc.ref),
+    ...members.docs.map((doc) => joinTicketsRef(roomId).doc(doc.id)),
+  ];
+  for (let index = 0; index < documentRefs.length; index += DELETE_BATCH_SIZE) {
     const batch = getFirestore().batch();
-    documents.slice(index, index + DELETE_BATCH_SIZE).forEach((doc) => batch.delete(doc.ref));
+    documentRefs.slice(index, index + DELETE_BATCH_SIZE).forEach((ref) => batch.delete(ref));
     await batch.commit();
   }
   const activeInviteToken = (hostConfig.data() as HostConfig | undefined)?.activeInviteToken;
@@ -404,7 +410,7 @@ export async function deleteArchivedRoomAfterSync(roomId: string, actorUid: stri
 }
 
 export function subscribeMembers(roomId: string, cb: (members: RoomMember[]) => void): () => void {
-  return membersRef(roomId).orderBy('joinedAt').onSnapshot((snapshot) => cb(snapshot.docs.map((doc) => doc.data() as RoomMember).filter((member) => member.membershipStatus === 'active')), () => cb([]));
+  return membersRef(roomId).orderBy('joinedAt').onSnapshot((snapshot) => cb((snapshot?.docs ?? []).map((doc) => doc.data() as RoomMember).filter((member) => member.membershipStatus === 'active')), () => cb([]));
 }
 
 export type RoomLiveState = {
@@ -443,7 +449,7 @@ export function subscribeRoomState(
     }
     unsubscribeLineup = lineupsRef(roomId).doc(String(nextVersion)).onSnapshot((snapshot) => {
       if (activeLineupVersion !== nextVersion) return;
-      lineup = snapshot.exists() ? normalizeLineup(snapshot.data() as RoomLineup) : null;
+      lineup = snapshot?.exists() ? normalizeLineup(snapshot.data() as RoomLineup) : null;
       publish();
     }, () => {
       if (activeLineupVersion !== nextVersion) return;
@@ -453,7 +459,7 @@ export function subscribeRoomState(
   };
 
   const unsubscribeRoom = roomRef(roomId).onSnapshot((snapshot) => {
-    const nextRoom = snapshot.exists() ? (snapshot.data() as Room) : null;
+    const nextRoom = snapshot?.exists() ? (snapshot.data() as Room) : null;
     room = nextRoom;
     const nextLineupVersion = nextRoom?.activeLineupVersion ?? 0;
     if (nextLineupVersion !== activeLineupVersion) {
@@ -468,14 +474,14 @@ export function subscribeRoomState(
     subscribeToLineup(0);
   });
   const unsubscribeMembers = membersRef(roomId).onSnapshot((snapshot) => {
-    members = snapshot.docs.map((doc) => doc.data() as RoomMember).filter((member) => member.membershipStatus === 'active');
+    members = (snapshot?.docs ?? []).map((doc) => doc.data() as RoomMember).filter((member) => member.membershipStatus === 'active');
     publish();
   }, () => {
     members = [];
     publish();
   });
   const unsubscribeTemporary = temporaryPlayersRef(roomId).onSnapshot((snapshot) => {
-    temporary = snapshot.docs.map((doc) => doc.data() as RoomTemporaryPlayer);
+    temporary = (snapshot?.docs ?? []).map((doc) => doc.data() as RoomTemporaryPlayer);
     publish();
   }, () => {
     temporary = [];
@@ -496,9 +502,9 @@ export function subscribeRoomPlayers(roomId: string, sessionUid: string, cb: (pl
   let temporary: RoomTemporaryPlayer[] = [];
   const publish = () => cb(room ? resolveRoomPlayers(room, members, temporary, sessionUid) : []);
   const unsubscribers = [
-    roomRef(roomId).onSnapshot((snapshot) => { room = snapshot.exists() ? (snapshot.data() as Room) : null; publish(); }),
-    membersRef(roomId).onSnapshot((snapshot) => { members = snapshot.docs.map((doc) => doc.data() as RoomMember).filter((member) => member.membershipStatus === 'active'); publish(); }),
-    temporaryPlayersRef(roomId).onSnapshot((snapshot) => { temporary = snapshot.docs.map((doc) => doc.data() as RoomTemporaryPlayer); publish(); }),
+    roomRef(roomId).onSnapshot((snapshot) => { room = snapshot?.exists() ? (snapshot.data() as Room) : null; publish(); }, () => { room = null; publish(); }),
+    membersRef(roomId).onSnapshot((snapshot) => { members = (snapshot?.docs ?? []).map((doc) => doc.data() as RoomMember).filter((member) => member.membershipStatus === 'active'); publish(); }, () => { members = []; publish(); }),
+    temporaryPlayersRef(roomId).onSnapshot((snapshot) => { temporary = (snapshot?.docs ?? []).map((doc) => doc.data() as RoomTemporaryPlayer); publish(); }, () => { temporary = []; publish(); }),
   ];
   return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
 }

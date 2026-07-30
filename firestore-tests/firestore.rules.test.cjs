@@ -71,6 +71,22 @@ async function seedRoom(status = 'ended') {
   });
 }
 
+async function seedJoinTickets() {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    const database = context.firestore();
+    await Promise.all([
+      setDoc(doc(database, 'rooms', ROOM_ID, 'joinTickets', GUEST_UID), {
+        uid: GUEST_UID,
+        roomId: ROOM_ID,
+      }),
+      setDoc(doc(database, 'rooms', ROOM_ID, 'joinTickets', SECOND_GUEST_UID), {
+        uid: SECOND_GUEST_UID,
+        roomId: ROOM_ID,
+      }),
+    ]);
+  });
+}
+
 function authenticatedDatabase(uid) {
   return testEnvironment.authenticatedContext(uid).firestore();
 }
@@ -148,5 +164,17 @@ describe('room archive rules', () => {
     await assertFails(deleteDoc(doc(guestDatabase, 'rooms', ROOM_ID)));
     await assertSucceeds(deleteDoc(doc(hostDatabase, 'rooms', ROOM_ID, 'members', SECOND_GUEST_UID)));
     await assertSucceeds(deleteDoc(doc(hostDatabase, 'rooms', ROOM_ID)));
+  });
+
+  test('host can clear guest join tickets while members can only delete their own', async () => {
+    await seedRoom('open');
+    await seedJoinTickets();
+    const guestDatabase = authenticatedDatabase(GUEST_UID);
+    const secondGuestDatabase = authenticatedDatabase(SECOND_GUEST_UID);
+    const hostDatabase = authenticatedDatabase(HOST_UID);
+
+    await assertFails(deleteDoc(doc(secondGuestDatabase, 'rooms', ROOM_ID, 'joinTickets', GUEST_UID)));
+    await assertSucceeds(deleteDoc(doc(guestDatabase, 'rooms', ROOM_ID, 'joinTickets', GUEST_UID)));
+    await assertSucceeds(deleteDoc(doc(hostDatabase, 'rooms', ROOM_ID, 'joinTickets', SECOND_GUEST_UID)));
   });
 });

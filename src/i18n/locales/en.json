@@ -356,6 +356,8 @@
   "roomLobby.alert.missingRoomTitle": "Room not found",
   "roomLobby.alert.missingRoomMessage": "Enter this screen from the official room creation flow first.",
   "roomLobby.alert.initFailedTitle": "Initialization failed",
+  "roomLobby.alert.roomRemovedTitle": "Sync room closed",
+  "roomLobby.alert.roomRemovedMessage": "The host deleted this sync room. You will return to the previous screen.",
   "roomLobby.alert.createInviteFailedTitle": "Failed to create invite",
   "roomLobby.alert.shareInviteFailedTitle": "Failed to share invite",
   "roomLobby.alert.swapFailedTitle": "Failed to swap lineup",

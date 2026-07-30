@@ -54,6 +54,8 @@ function RoomLobbyScreen({ navigation, route }: Props) {
   const [selectedRealMergeUid, setSelectedRealMergeUid] = useState('');
   const [mergingPlayers, setMergingPlayers] = useState(false);
   const didEnterActiveTable = useRef(false);
+  const hasLoadedRoom = useRef(false);
+  const didHandleRemovedRoom = useRef(false);
 
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
@@ -69,6 +71,17 @@ function RoomLobbyScreen({ navigation, route }: Props) {
       }
 
       unsubscribe = subscribeRoomState(roomId, session.uid, (state) => {
+        if (state.room) {
+          hasLoadedRoom.current = true;
+        } else if (hasLoadedRoom.current && !didHandleRemovedRoom.current) {
+          didHandleRemovedRoom.current = true;
+          Alert.alert(
+            t('roomLobby.alert.roomRemovedTitle'),
+            t('roomLobby.alert.roomRemovedMessage'),
+            [{ text: t('common.ok'), onPress: () => navigation.goBack() }],
+            { cancelable: false },
+          );
+        }
         setRoom(state.room);
         setPlayers(state.players);
         setLineup(state.lineup);
@@ -408,8 +421,8 @@ function RoomLobbyScreen({ navigation, route }: Props) {
   }, [executeStartRoom, room, sessionUid, startTempNames, t]);
 
   return (
-    <ScreenContainer>
-      <ScrollView contentContainerStyle={styles.container}>
+    <ScreenContainer style={styles.screen} includeTopInset={false} horizontalPadding={0}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.container}>
         <View style={styles.headerBlock}>
           <View style={styles.pillRow}>
             <AppText style={styles.statusPill}>{roomStatusLabel}</AppText>
@@ -784,7 +797,15 @@ function getRoomStatusLabel(t: (...args: any[]) => string, status: RoomStatus): 
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    backgroundColor: theme.colors.background,
+  },
+  scrollView: {
+    backgroundColor: theme.colors.background,
+  },
   container: {
+    paddingHorizontal: theme.spacing.md,
+    paddingTop: theme.spacing.md,
     paddingBottom: theme.spacing.xl,
     gap: theme.spacing.md,
   },

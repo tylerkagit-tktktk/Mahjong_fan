@@ -15,4 +15,5 @@
 - [ ] DEV 備份/還原：新增幾手後還原最近備份，資料可回復。
 
 ## Optional deterministic sim
-- 使用 tx-mock 跑 50 手 deterministic integration test，確認 zero-sum 與局風推進一致。
+- [x] 使用 tx-mock 跑 200 手 deterministic integration test，混合自摸／出銃／流局番莊／流局過莊，確認 zero-sum、四圈循環、完場鎖定與局風推進一致。
+- 測試位置：`src/db/repo.lifecycle.reseat.test.ts`。

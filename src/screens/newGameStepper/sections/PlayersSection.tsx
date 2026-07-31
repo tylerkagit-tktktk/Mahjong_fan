@@ -75,6 +75,7 @@ type Props = {
   onSelectStartingDealer: (index: number) => void;
   syncEnabled?: boolean;
   syncBusy?: boolean;
+  syncEnableDisabled?: boolean;
   syncedSeatDisplayNames?: Array<string | null>;
   joinedSyncPlayers?: SyncPlayerChip[];
   selectedSyncPlayerId?: string;
@@ -109,6 +110,7 @@ function PlayersSection({
   onSelectStartingDealer,
   syncEnabled = false,
   syncBusy = false,
+  syncEnableDisabled = false,
   syncedSeatDisplayNames = [],
   joinedSyncPlayers = [],
   selectedSyncPlayerId,
@@ -155,8 +157,13 @@ function PlayersSection({
     return (
       <Pressable
         key={label}
+        testID={`new-game-sync-seat-${index}`}
         onPress={handleAssignSeat}
         disabled={!syncSeatSelectable}
+        accessible={syncSeatSelectable}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}${labels.playerNameBySeatSuffix}${syncedDisplayName ? ` ${syncedDisplayName}` : ''}${index === 0 ? ` ${labels.dealerBadge}` : ''}`}
+        accessibilityState={{ disabled: !syncSeatSelectable }}
         style={({ pressed }) => [
           styles.playerRowCard,
           syncSeatSelectable ? styles.syncSelectableRow : null,
@@ -181,12 +188,13 @@ function PlayersSection({
             ref={(ref) => {
               manualPlayerRefs.current[index] = ref;
             }}
+            pointerEvents={syncSeatSelectable ? 'none' : 'auto'}
             style={styles.playerInput}
             value={players[index]}
             onChangeText={(value) => onSetPlayer(index, value.slice(0, MAX_PLAYER_NAME_LENGTH))}
             placeholder={`${label}${labels.playerNameBySeatSuffix}`}
             placeholderTextColor={theme.colors.textSecondary}
-            editable={!disabled}
+            editable={!disabled && !syncSeatSelectable}
             maxLength={MAX_PLAYER_NAME_LENGTH}
             returnKeyType={index === 3 ? 'done' : 'next'}
           />
@@ -381,7 +389,12 @@ function PlayersSection({
                 return (
                   <Pressable
                     key={player.playerId}
+                    testID={`new-game-sync-player-${player.playerId}`}
                     onPress={() => onSelectSyncPlayer?.(player.playerId)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${player.displayName}${player.isHost ? ` ${labels.syncHost ?? '房主'}` : ''}${player.isSelf ? ` ${labels.syncYou ?? '你'}` : ''}`}
+                    accessibilityState={{ selected, disabled }}
+                    disabled={disabled}
                     style={[styles.syncPlayerChip, selected && styles.syncPlayerChipSelected]}
                   >
                     <AppText style={[styles.syncPlayerChipText, selected && styles.syncPlayerChipTextSelected]}>
@@ -424,7 +437,7 @@ function PlayersSection({
           <AppButton
             label={syncBusy ? labels.syncEnableBusy ?? '建立同步房中...' : labels.syncEnable ?? '加入同步玩家'}
             onPress={() => onEnableSync?.()}
-            disabled={disabled || syncBusy}
+            disabled={disabled || syncBusy || syncEnableDisabled}
             variant="secondary"
           />
         </View>

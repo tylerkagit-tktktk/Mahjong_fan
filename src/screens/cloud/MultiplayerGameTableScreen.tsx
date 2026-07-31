@@ -17,15 +17,34 @@ import { typography } from '../../styles/typography';
 import { useAppLanguage } from '../../i18n/useAppLanguage';
 import { archiveRoomToLocal } from '../../services/cloud/archiveRepo';
 import { ensureSession } from '../../services/cloud/authRepo';
+import { classifyCloudError, CloudFailure } from '../../services/cloud/cloudError';
+import {
+  abandonSyncAndCreateLocalGame,
+  LocalTakeoverError,
+} from '../../services/cloud/localTakeoverRepo';
 import { listHands, submitHand } from '../../services/cloud/handRepo';
 import { computeHkSettlement, toAmountFromQ } from '../../domain/hk/settlement';
+import ReseatFlow from '../gameTable/ReseatFlow';
 import { formatSeatLabel } from '../gameTable/seatMapping';
+import {
+  buildWrapToken,
+  isWrapEvent,
+  loadPersistedWrapToken,
+  persistWrapToken,
+  shouldPromptReseat,
+} from '../gameTable/wrap';
 import {
   endRoom,
   getRoom,
   listLineups,
+  proposeLineupChange,
   subscribeRoomState,
 } from '../../services/cloud/roomRepo';
+import {
+  clearActiveRoomRecoverySnapshot,
+  loadActiveRoomRecoverySnapshot,
+  mergeActiveRoomRecoverySnapshot,
+} from '../../services/cloud/storage';
 import theme from '../../theme/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MultiplayerGameTable'>;
@@ -34,11 +53,18 @@ const SEAT_KEYS: SeatKey[] = ['0', '1', '2', '3'];
 const SEAT_INDEX_ORDER = [2, 1, 0, 3] as const;
 const SEAT_GLYPHS = ['東', '南', '西', '北'] as const;
 const SEAT_COLORS = ['#1A73E8', '#D93025', '#188038', '#5F6368'] as const;
+const SYNC_RETRY_COOLDOWN_MS = 30000;
 type DrawDealerAction = 'stick' | 'pass';
 type CloudRoundState = {
   dealerSeatIndex: number;
   dealerAdvanceCount: number;
   handCount: number;
+};
+type WrapCandidate = {
+  handIndex: number;
+  handLineupVersion: number;
+  previousRoundLabelZh: string;
+  nextRoundLabelZh: string;
 };
 
 function formatMessage(template: string, values: Record<string, string | number>): string {
@@ -96,10 +122,40 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
     dealerAdvanceCount: 0,
     handCount: 0,
   });
+  const [wrapCandidate, setWrapCandidate] = useState<WrapCandidate | null>(null);
+  const [reseatVisible, setReseatVisible] = useState(false);
   const [tableLayout, setTableLayout] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [elapsedNow, setElapsedNow] = useState(Date.now());
+  const [cloudFailure, setCloudFailure] = useState<CloudFailure | null>(null);
+  const [retryAvailableAt, setRetryAvailableAt] = useState(0);
+  const [retryClock, setRetryClock] = useState(Date.now());
+  const [retryGeneration, setRetryGeneration] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [takingOverLocally, setTakingOverLocally] = useState(false);
   const archivedRoomRef = useRef<string | null>(null);
+  const archiveAttemptedRoomRef = useRef<string | null>(null);
   const endingRoomRef = useRef<string | null>(null);
+  const submittingRef = useRef(false);
+  const liveStateReceivedRef = useRef(false);
+  const wrapTokenLoadedRef = useRef(false);
+  const wrapTokenLoadPromiseRef = useRef<Promise<void> | null>(null);
+  const lastPromptedWrapTokenRef = useRef<string | null>(null);
+  const activeReseatWrapTokenRef = useRef<string | null>(null);
+
+  const pauseCloudSync = useCallback((error: unknown) => {
+    const now = Date.now();
+    setCloudFailure(classifyCloudError(error));
+    setRetryAvailableAt(now + SYNC_RETRY_COOLDOWN_MS);
+    setRetryClock(now);
+    setRetrying(false);
+  }, []);
+
+  const resumeCloudSync = useCallback(() => {
+    setCloudFailure(null);
+    setRetryAvailableAt(0);
+    setRetrying(false);
+  }, []);
 
   const refreshHands = useCallback(async () => {
     const nextRoom = await getRoom(roomId);
@@ -109,26 +165,101 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
     }
   }, [roomId]);
 
+  const ensureWrapTokenLoaded = useCallback(async () => {
+    if (wrapTokenLoadedRef.current) {
+      return;
+    }
+    if (wrapTokenLoadPromiseRef.current) {
+      await wrapTokenLoadPromiseRef.current;
+      return;
+    }
+    wrapTokenLoadPromiseRef.current = (async () => {
+      try {
+        lastPromptedWrapTokenRef.current = await loadPersistedWrapToken(roomId);
+      } catch {
+        lastPromptedWrapTokenRef.current = null;
+      } finally {
+        wrapTokenLoadedRef.current = true;
+      }
+    })();
+    await wrapTokenLoadPromiseRef.current;
+  }, [roomId]);
+
+  useEffect(() => {
+    wrapTokenLoadedRef.current = false;
+    wrapTokenLoadPromiseRef.current = null;
+    lastPromptedWrapTokenRef.current = null;
+    activeReseatWrapTokenRef.current = null;
+    setWrapCandidate(null);
+    setReseatVisible(false);
+    ensureWrapTokenLoaded().catch(() => {});
+  }, [ensureWrapTokenLoaded]);
+
+  useEffect(() => {
+    let alive = true;
+    liveStateReceivedRef.current = false;
+    loadActiveRoomRecoverySnapshot(roomId)
+      .then((snapshot) => {
+        if (!alive || !snapshot || liveStateReceivedRef.current) return;
+        if (snapshot.room !== undefined) setRoom(snapshot.room);
+        if (snapshot.room) setRoomVersion(snapshot.room.currentVersion);
+        if (snapshot.players) setPlayers(snapshot.players);
+        if (snapshot.lineup !== undefined) setLineup(snapshot.lineup);
+        if (snapshot.totalsQByPlayerId) setTotalsQByPlayerId(snapshot.totalsQByPlayerId);
+        if (typeof snapshot.dealerSeatIndex === 'number') setDealerSeatIndex(snapshot.dealerSeatIndex);
+        if (snapshot.roundState) setRoundState(snapshot.roundState);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [roomId]);
+
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
+    let alive = true;
+    let subscriptionFailed = false;
 
     const loadPromise = (async () => {
       const session = await ensureSession('google');
+      if (!alive) return;
       setUid(session.uid);
       unsubscribe = subscribeRoomState(roomId, session.uid, (state) => {
+        if (!alive) return;
+        liveStateReceivedRef.current = true;
         setPlayers(state.players);
         setLineup(state.lineup);
         setRoom(state.room);
         setRoomVersion(state.room?.currentVersion ?? 1);
+        if (!subscriptionFailed) resumeCloudSync();
+        mergeActiveRoomRecoverySnapshot(roomId, {
+          room: state.room,
+          players: state.players,
+          lineup: state.lineup,
+        }).catch(() => {});
+      }, (error) => {
+        if (alive) {
+          subscriptionFailed = true;
+          pauseCloudSync(error);
+        }
       });
     })();
 
-    loadPromise.catch(() => {});
+    loadPromise.catch((error) => {
+      if (alive) pauseCloudSync(error);
+    });
 
     return () => {
+      alive = false;
       unsubscribe?.();
     };
-  }, [roomId]);
+  }, [pauseCloudSync, resumeCloudSync, retryGeneration, roomId]);
+
+  useEffect(() => {
+    if (!cloudFailure) return;
+    const timer = setInterval(() => setRetryClock(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [cloudFailure]);
 
   useEffect(() => {
     if (!uid || !room || archiving || endingRoomRef.current === room.roomId) {
@@ -140,11 +271,16 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
     if (archivedRoomRef.current === room.roomId) {
       return;
     }
+    if (archiveAttemptedRoomRef.current === room.roomId) {
+      return;
+    }
 
+    archiveAttemptedRoomRef.current = room.roomId;
     setArchiving(true);
     archiveRoomToLocal(room.roomId, uid)
       .then((summary) => {
         archivedRoomRef.current = room.roomId;
+        clearActiveRoomRecoverySnapshot(room.roomId).catch(() => {});
         setNotice(
           formatMessage(t('multiplayer.notice.archiveReady'), {
             handCount: summary.handCount,
@@ -153,12 +289,13 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
         navigation.replace('CloudArchiveDetail', { roomId: room.roomId });
       })
       .catch((error) => {
+        pauseCloudSync(error);
         setNotice(t('multiplayer.notice.archiveFailed', { message: String(error) }));
       })
       .finally(() => {
         setArchiving(false);
       });
-  }, [archiving, navigation, room, t, uid]);
+  }, [archiving, navigation, pauseCloudSync, room, t, uid]);
 
   const playerById = useMemo(() => {
     const next = new Map<string, ResolvedRoomPlayer>();
@@ -197,6 +334,8 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
     }
     return SEAT_KEYS.some((seatKey) => lineup.seats[seatKey] === uid);
   }, [lineup, room?.status, uid]);
+  const reseatDecisionPending = reseatVisible && room?.hostUid === uid;
+  const writesPaused = Boolean(cloudFailure) || retrying || submitting || reseatDecisionPending;
 
   const seatLabels = useMemo(
     () => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')],
@@ -231,6 +370,15 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
   const panelHeight = 92;
   const roundIndex = Math.floor(roundState.dealerAdvanceCount / 4) + 1;
   const roundLabel = getCloudRoundLabel(roundIndex, roundState.dealerSeatIndex);
+  const currentPlayersBySeat = useMemo(
+    () =>
+      SEAT_KEYS.map((seatKey) => {
+        const playerId = lineup?.seats[seatKey] ?? null;
+        const player = playerId ? playerById.get(playerId) ?? null : null;
+        return player ? { id: player.playerId, name: player.displayName } : null;
+      }).filter((player): player is { id: string; name: string } => Boolean(player)),
+    [lineup, playerById],
+  );
   const handCountLabel =
     roundState.handCount > 0
       ? t('gameTable.handCount.started').replace('{count}', String(roundState.handCount))
@@ -361,15 +509,32 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
       const nextTotals: Record<string, number> = {};
       let nextDealerSeatIndex = 0;
       let dealerAdvanceCount = 0;
+      let nextWrapCandidate: WrapCandidate | null = null;
 
-      for (const hand of hands) {
+      for (const [handPosition, hand] of hands.entries()) {
         const handLineup = lineupByVersion.get(hand.lineupVersion) ?? null;
+        const previousRoundLabelZh = getCloudRoundLabel(
+          Math.floor(dealerAdvanceCount / 4) + 1,
+          nextDealerSeatIndex,
+        );
         if (hand.type === 'draw') {
           const nextDealer = getDealerSeatIndexAfterHand(nextDealerSeatIndex, hand, handLineup);
           if (nextDealer !== nextDealerSeatIndex) {
             dealerAdvanceCount += 1;
           }
           nextDealerSeatIndex = nextDealer;
+          const nextRoundLabelZh = getCloudRoundLabel(
+            Math.floor(dealerAdvanceCount / 4) + 1,
+            nextDealerSeatIndex,
+          );
+          if (handPosition === hands.length - 1 && isWrapEvent(previousRoundLabelZh, nextRoundLabelZh)) {
+            nextWrapCandidate = {
+              handIndex: hand.handIndex,
+              handLineupVersion: hand.lineupVersion,
+              previousRoundLabelZh,
+              nextRoundLabelZh,
+            };
+          }
           continue;
         }
 
@@ -408,35 +573,97 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
           dealerAdvanceCount += 1;
         }
         nextDealerSeatIndex = nextDealer;
+        const nextRoundLabelZh = getCloudRoundLabel(
+          Math.floor(dealerAdvanceCount / 4) + 1,
+          nextDealerSeatIndex,
+        );
+        if (handPosition === hands.length - 1 && isWrapEvent(previousRoundLabelZh, nextRoundLabelZh)) {
+          nextWrapCandidate = {
+            handIndex: hand.handIndex,
+            handLineupVersion: hand.lineupVersion,
+            previousRoundLabelZh,
+            nextRoundLabelZh,
+          };
+        }
       }
 
       if (alive) {
         setTotalsQByPlayerId(nextTotals);
         setDealerSeatIndex(nextDealerSeatIndex);
-        setRoundState({
+        const nextRoundState = {
           dealerSeatIndex: nextDealerSeatIndex,
           dealerAdvanceCount,
           handCount: hands.length,
-        });
+        };
+        setRoundState(nextRoundState);
+        setWrapCandidate(nextWrapCandidate);
+        mergeActiveRoomRecoverySnapshot(roomId, {
+          hands,
+          lineups,
+          totalsQByPlayerId: nextTotals,
+          dealerSeatIndex: nextDealerSeatIndex,
+          roundState: nextRoundState,
+        }).catch(() => {});
       }
     };
 
-    loadTotals().catch(() => {
+    loadTotals().catch((error) => {
       if (alive) {
-        setTotalsQByPlayerId({});
-        setDealerSeatIndex(0);
-        setRoundState({
-          dealerSeatIndex: 0,
-          dealerAdvanceCount: 0,
-          handCount: 0,
-        });
+        pauseCloudSync(error);
       }
     });
 
     return () => {
       alive = false;
     };
-  }, [minFanInput, roomId, roomRules, roomVersion]);
+  }, [minFanInput, pauseCloudSync, retryGeneration, roomId, roomRules, roomVersion]);
+
+  useEffect(() => {
+    if (!wrapCandidate || !room || !uid || room.hostUid !== uid || room.status !== 'active') {
+      return;
+    }
+    const lineupAlreadyChanged = Boolean(
+      lineup &&
+      lineup.lineupVersion > wrapCandidate.handLineupVersion &&
+      lineup.effectiveFromHandIndex === wrapCandidate.handIndex + 1,
+    );
+    if (lineupAlreadyChanged) {
+      setReseatVisible(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      await ensureWrapTokenLoaded();
+      const token = buildWrapToken({
+        gameId: roomId,
+        handIndex: wrapCandidate.handIndex,
+        nextRoundLabelZh: wrapCandidate.nextRoundLabelZh,
+      });
+      if (cancelled || !shouldPromptReseat(lastPromptedWrapTokenRef.current, token)) {
+        return;
+      }
+      lastPromptedWrapTokenRef.current = token;
+      activeReseatWrapTokenRef.current = token;
+      if (!cancelled) {
+        setReseatVisible(true);
+      }
+    })().catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ensureWrapTokenLoaded, lineup, room, roomId, uid, wrapCandidate]);
+
+  const dismissReseat = useCallback(() => {
+    const token = activeReseatWrapTokenRef.current;
+    setReseatVisible(false);
+    if (!token) {
+      return;
+    }
+    activeReseatWrapTokenRef.current = null;
+    persistWrapToken(roomId, token).catch(() => {});
+  }, [roomId]);
 
   const panelStyleBySeat = useMemo(() => {
     if (!tableLayout) {
@@ -497,7 +724,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
 
   const openRecordModal = useCallback(
     (seatIndex: number) => {
-      if (!canSubmit || room?.status === 'ended' || room?.status === 'archived') {
+      if (!canSubmit || writesPaused || room?.status === 'ended' || room?.status === 'archived') {
         return;
       }
       const targetPlayer = seatPanels[seatIndex]?.player;
@@ -513,12 +740,12 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
       setSettlementType('discard');
       setRecordModalVisible(true);
     },
-    [activePlayers, canSubmit, minFanInput, room?.status, seatPanels, selectedDiscarderId],
+    [activePlayers, canSubmit, minFanInput, room?.status, seatPanels, selectedDiscarderId, writesPaused],
   );
 
   const submit = useCallback(
     async (type: 'zimo' | 'discard' | 'draw', dealerAction?: DrawDealerAction) => {
-      if (!uid) {
+      if (!uid || cloudFailure || retrying || reseatDecisionPending || submittingRef.current) {
         return;
       }
       if (type !== 'draw' && !selectedWinnerId) {
@@ -534,36 +761,86 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
         return;
       }
 
-      const result = await submitHand({
+      submittingRef.current = true;
+      setSubmitting(true);
+      try {
+        const result = await submitHand({
+          roomId,
+          submittedByUid: uid,
+          type,
+          baseVersion: roomVersion,
+          winnerPlayerId: type === 'draw' ? null : selectedWinnerId,
+          discarderPlayerId: type === 'discard' ? selectedDiscarderId : null,
+          dealerAction: type === 'draw' ? dealerAction ?? 'stick' : null,
+          fan: type === 'draw' ? undefined : currentFanInput,
+        });
+        if (!result.ok) {
+          setNotice(t('multiplayer.notice.submitFailed', { code: result.code, message: result.message }));
+          if (result.code === 'VERSION_CONFLICT') {
+            await refreshHands();
+          }
+          return;
+        }
+        setNotice(
+          formatMessage(t('multiplayer.notice.submitSuccess'), {
+            handIndex: result.nextHandIndex,
+            version: result.nextVersion,
+          }),
+        );
+        setRecordModalVisible(false);
+      } catch (error) {
+        pauseCloudSync(error);
+        setNotice(t('multiplayer.notice.submitFailed', {
+          code: classifyCloudError(error).code,
+          message: String(error),
+        }));
+      } finally {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
+    },
+    [cloudFailure, currentFanInput, pauseCloudSync, refreshHands, reseatDecisionPending, retrying, roomId, roomVersion, selectedDiscarderId, selectedWinnerId, t, uid],
+  );
+
+  const handleApplyReseat = useCallback(
+    async ({ seatByPlayerId }: { seatByPlayerId: Record<string, number> }) => {
+      if (!uid || !room || !lineup || room.hostUid !== uid || currentPlayersBySeat.length !== 4) {
+        throw new Error(t('gameTable.reseat.unsupported'));
+      }
+
+      const nextSeats = {} as Record<SeatKey, string>;
+      const usedSeatIndexes = new Set<number>();
+      for (const player of currentPlayersBySeat) {
+        const seatIndex = seatByPlayerId[player.id];
+        if (!Number.isInteger(seatIndex) || seatIndex < 0 || seatIndex >= SEAT_KEYS.length || usedSeatIndexes.has(seatIndex)) {
+          throw new Error(t('gameTable.reseat.unsupported'));
+        }
+        usedSeatIndexes.add(seatIndex);
+        nextSeats[SEAT_KEYS[seatIndex]] = player.id;
+      }
+      if (usedSeatIndexes.size !== SEAT_KEYS.length) {
+        throw new Error(t('gameTable.reseat.unsupported'));
+      }
+
+      const result = await proposeLineupChange({
         roomId,
-        submittedByUid: uid,
-        type,
+        createdByUid: uid,
         baseVersion: roomVersion,
-        winnerPlayerId: type === 'draw' ? null : selectedWinnerId,
-        discarderPlayerId: type === 'discard' ? selectedDiscarderId : null,
-        dealerAction: type === 'draw' ? dealerAction ?? 'stick' : null,
-        fan: type === 'draw' ? undefined : currentFanInput,
+        nextSeats,
       });
       if (!result.ok) {
-        setNotice(t('multiplayer.notice.submitFailed', { code: result.code, message: result.message }));
         if (result.code === 'VERSION_CONFLICT') {
           await refreshHands();
         }
-        return;
+        throw new Error(result.message);
       }
-      setNotice(
-        formatMessage(t('multiplayer.notice.submitSuccess'), {
-          handIndex: result.nextHandIndex,
-          version: result.nextVersion,
-        }),
-      );
-      setRecordModalVisible(false);
+      setRoomVersion(result.nextVersion);
     },
-    [currentFanInput, refreshHands, roomId, roomVersion, selectedDiscarderId, selectedWinnerId, t, uid],
+    [currentPlayersBySeat, lineup, refreshHands, room, roomId, roomVersion, t, uid],
   );
 
   const endAndArchive = useCallback(() => {
-    if (!uid || !room || endingRoomRef.current === roomId) {
+    if (!uid || !room || writesPaused || endingRoomRef.current === roomId) {
       return;
     }
 
@@ -590,6 +867,8 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
 
             const summary = await archiveRoomToLocal(roomId, uid);
             archivedRoomRef.current = roomId;
+            archiveAttemptedRoomRef.current = roomId;
+            clearActiveRoomRecoverySnapshot(roomId).catch(() => {});
             setNotice(
               formatMessage(t('multiplayer.notice.archiveReady'), {
                 handCount: summary.handCount,
@@ -597,6 +876,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
             );
             navigation.replace('CloudArchiveDetail', { roomId });
           } catch (error) {
+            pauseCloudSync(error);
             setNotice(t('multiplayer.notice.archiveFailed', { message: String(error) }));
           } finally {
             endingRoomRef.current = null;
@@ -606,10 +886,10 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
         },
       },
     ]);
-  }, [navigation, room, roomId, t, uid]);
+  }, [navigation, pauseCloudSync, room, roomId, t, uid, writesPaused]);
 
   const handleDrawActionPress = useCallback(() => {
-    if (!canSubmit || room?.status === 'ended' || room?.status === 'archived') {
+    if (!canSubmit || writesPaused || room?.status === 'ended' || room?.status === 'archived') {
       return;
     }
     Alert.alert(t('gameTable.draw.title'), t('gameTable.draw.message'), [
@@ -617,17 +897,17 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
       {
         text: t('gameTable.draw.stick'),
         onPress: () => {
-          submit('draw', 'stick').catch(() => {});
+          submit('draw', 'stick');
         },
       },
       {
         text: t('gameTable.draw.pass'),
         onPress: () => {
-          submit('draw', 'pass').catch(() => {});
+          submit('draw', 'pass');
         },
       },
     ]);
-  }, [canSubmit, room?.status, submit, t]);
+  }, [canSubmit, room?.status, submit, t, writesPaused]);
 
   const currentWinner = activePlayers.find((player) => player.playerId === selectedWinnerId) ?? null;
   const discarderOptions = useMemo(
@@ -645,6 +925,80 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
   );
   const currentWinnerSeatIndex =
     seatPanels.find((seat) => seat.player?.playerId === currentWinner?.playerId)?.seatIndex ?? null;
+  const retrySeconds = Math.max(0, Math.ceil((retryAvailableAt - retryClock) / 1000));
+  const cloudFailureMessage = cloudFailure?.kind === 'quota'
+    ? t('multiplayer.syncPaused.quota')
+    : cloudFailure?.kind === 'offline'
+      ? t('multiplayer.syncPaused.offline')
+      : cloudFailure?.kind === 'permission'
+        ? t('multiplayer.syncPaused.permission')
+        : t('multiplayer.syncPaused.unknown');
+
+  const handleRetrySync = useCallback(async () => {
+    const now = Date.now();
+    if (!cloudFailure || retrying || now < retryAvailableAt) return;
+
+    setRetrying(true);
+    setRetryAvailableAt(now + SYNC_RETRY_COOLDOWN_MS);
+    setRetryClock(now);
+
+    if (uid && room && (room.status === 'ended' || room.status === 'archived')) {
+      try {
+        const summary = await archiveRoomToLocal(roomId, uid);
+        archivedRoomRef.current = roomId;
+        archiveAttemptedRoomRef.current = roomId;
+        await clearActiveRoomRecoverySnapshot(roomId);
+        resumeCloudSync();
+        setNotice(formatMessage(t('multiplayer.notice.archiveReady'), { handCount: summary.handCount }));
+        navigation.replace('CloudArchiveDetail', { roomId });
+      } catch (error) {
+        pauseCloudSync(error);
+        setNotice(t('multiplayer.notice.archiveFailed', { message: String(error) }));
+      } finally {
+        setRetrying(false);
+      }
+      return;
+    }
+
+    setRetryGeneration((value) => value + 1);
+  }, [cloudFailure, navigation, pauseCloudSync, resumeCloudSync, retryAvailableAt, retrying, room, roomId, t, uid]);
+
+  const handleLocalTakeover = useCallback(() => {
+    if (!uid || !room || room.hostUid !== uid || takingOverLocally) return;
+
+    Alert.alert(
+      t('multiplayer.localTakeover.confirmTitle'),
+      t('multiplayer.localTakeover.confirmBody'),
+      [
+        { text: t('multiplayer.localTakeover.cancel'), style: 'cancel' },
+        {
+          text: t('multiplayer.localTakeover.confirm'),
+          style: 'destructive',
+          onPress: async () => {
+            if (takingOverLocally) return;
+            setTakingOverLocally(true);
+            try {
+              const gameId = await abandonSyncAndCreateLocalGame(roomId, uid);
+              navigation.replace('GameTable', { gameId });
+            } catch (error) {
+              const message = error instanceof LocalTakeoverError
+                ? error.code === 'PLAYER_SET_CHANGED'
+                  ? t('multiplayer.localTakeover.playerSetChanged')
+                  : error.code === 'INVALID_RULES'
+                    ? t('multiplayer.localTakeover.invalidRules')
+                    : error.code === 'NOT_HOST'
+                      ? t('multiplayer.localTakeover.notHost')
+                      : t('multiplayer.localTakeover.snapshotIncomplete')
+                : t('multiplayer.localTakeover.failed');
+              Alert.alert(t('multiplayer.localTakeover.failedTitle'), message);
+            } finally {
+              setTakingOverLocally(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [navigation, room, roomId, t, takingOverLocally, uid]);
 
   return (
     <ScreenContainer style={styles.tableScreen} includeTopInset={false} includeBottomInset={false} horizontalPadding={0}>
@@ -657,6 +1011,60 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
             </AppText>
             <View style={styles.roundDivider} />
           </View>
+
+          {cloudFailure ? (
+            <View style={styles.syncPausedBand} testID="multiplayer-sync-paused">
+              <View style={styles.syncPausedCopy}>
+                <AppText style={styles.syncPausedTitle}>{t('multiplayer.syncPaused.title')}</AppText>
+                <AppText style={styles.syncPausedBody}>{cloudFailureMessage}</AppText>
+                <AppText style={styles.syncPausedCached}>{t('multiplayer.syncPaused.cached')}</AppText>
+              </View>
+              <View style={styles.syncPausedActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: retrying || retrySeconds > 0 }}
+                  disabled={retrying || retrySeconds > 0}
+                  onPress={() => {
+                    handleRetrySync();
+                  }}
+                  style={({ pressed }) => [
+                    styles.syncRetryButton,
+                    retrying || retrySeconds > 0 ? styles.syncRetryButtonDisabled : null,
+                    pressed ? styles.syncRetryButtonPressed : null,
+                  ]}
+                  testID="multiplayer-sync-retry"
+                >
+                  <AppText style={styles.syncRetryButtonText}>
+                    {retrying
+                      ? t('multiplayer.syncPaused.retrying')
+                      : retrySeconds > 0
+                        ? t('multiplayer.syncPaused.retryIn', { seconds: retrySeconds })
+                        : t('multiplayer.syncPaused.retry')}
+                  </AppText>
+                </Pressable>
+                {room?.hostUid === uid ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: takingOverLocally }}
+                    disabled={takingOverLocally}
+                    onPress={handleLocalTakeover}
+                    style={({ pressed }) => [
+                      styles.localTakeoverButton,
+                      takingOverLocally ? styles.syncRetryButtonDisabled : null,
+                      pressed ? styles.syncRetryButtonPressed : null,
+                    ]}
+                    testID="multiplayer-local-takeover"
+                  >
+                    <AppText style={styles.localTakeoverButtonText}>
+                      {takingOverLocally
+                        ? t('multiplayer.localTakeover.converting')
+                        : t('multiplayer.localTakeover.action')}
+                    </AppText>
+                  </Pressable>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
 
           {rulesSummaryTags ? (
             <View style={styles.rulesSummaryCard}>
@@ -720,7 +1128,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
                         currencyCode={currencyCode}
                         occupied={seat.occupied}
                         onPress={() => openRecordModal(seatIndex)}
-                        disabled={!canSubmit || !seat.occupied}
+                        disabled={!canSubmit || writesPaused || !seat.occupied}
                         style={panelStyleBySeat[seatIndex]}
                       />
                     );
@@ -737,7 +1145,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
             <AppButton
               label={t('gameTable.action.draw')}
               onPress={handleDrawActionPress}
-              disabled={!canSubmit}
+              disabled={!canSubmit || writesPaused}
               variant="secondary"
               style={styles.footerButton}
             />
@@ -746,7 +1154,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
               onPress={() => {
                 endAndArchive();
               }}
-              disabled={room?.status === 'ended' || room?.status === 'archived' || archiving || endingGame}
+              disabled={writesPaused || room?.status === 'ended' || room?.status === 'archived' || archiving || endingGame}
               style={styles.footerButton}
             />
           </View>
@@ -837,16 +1245,30 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
                 style={styles.secondaryButton}
               />
               <AppButton
-                label={t('addHand.save')}
+                label={submitting ? t('multiplayer.actions.submitting') : t('addHand.save')}
                 onPress={() => {
-                  submit(settlementType).catch(() => {});
+                  submit(settlementType);
                 }}
+                disabled={writesPaused}
                 style={styles.primaryButton}
               />
             </View>
           </Pressable>
         </Pressable>
       </Modal>
+
+      {currentPlayersBySeat.length === 4 ? (
+        <ReseatFlow
+          visible={reseatVisible}
+          allowNameEdit={false}
+          currentRoundLabelZh={wrapCandidate?.nextRoundLabelZh ?? roundLabel}
+          handsCount={roundState.handCount}
+          currentDealerSeatIndex={roundState.dealerSeatIndex}
+          currentPlayersBySeat={currentPlayersBySeat}
+          onDismiss={dismissReseat}
+          onApplyReseat={handleApplyReseat}
+        />
+      ) : null}
     </ScreenContainer>
   );
 }
@@ -945,6 +1367,77 @@ const styles = StyleSheet.create({
     opacity: 0.9,
     marginTop: 2,
     marginBottom: 4,
+  },
+  syncPausedBand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2B95C',
+    backgroundColor: '#FFF7E3',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 8,
+  },
+  syncPausedCopy: {
+    flex: 1,
+    marginRight: 10,
+  },
+  syncPausedTitle: {
+    ...typography.body,
+    color: '#694100',
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  syncPausedBody: {
+    ...typography.caption,
+    color: '#694100',
+    lineHeight: 16,
+  },
+  syncPausedCached: {
+    fontSize: 11,
+    color: theme.colors.textSecondary,
+    marginTop: 2,
+  },
+  syncRetryButton: {
+    minWidth: 100,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  syncPausedActions: {
+    width: 132,
+    gap: 6,
+  },
+  localTakeoverButton: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#7A3E00',
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  localTakeoverButtonText: {
+    ...typography.caption,
+    color: theme.colors.surface,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  syncRetryButtonDisabled: {
+    opacity: 0.55,
+  },
+  syncRetryButtonPressed: {
+    opacity: 0.75,
+  },
+  syncRetryButtonText: {
+    ...typography.caption,
+    color: theme.colors.primary,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   rulesSummaryCard: {
     borderRadius: theme.radius.md,

@@ -20,7 +20,7 @@ export async function submitHand(input: SubmitHandInput): Promise<SubmitResult> 
     const roomSnapshot = await transaction.get(roomRef(input.roomId));
     if (!roomSnapshot.exists()) return { ok: false, code: 'ROOM_NOT_FOUND', message: 'Room not found' } as SubmitResult;
     const room = roomSnapshot.data() as { currentVersion: number; currentHandIndex: number; activeLineupVersion: number; status: string; roomId: string };
-    if (room.status === 'ended' || room.status === 'archived') return { ok: false, code: 'ROOM_ENDED', message: 'Room is already ended', latestVersion: room.currentVersion } as SubmitResult;
+    if (room.status !== 'active') return { ok: false, code: 'ROOM_ENDED', message: 'Room is not active', latestVersion: room.currentVersion } as SubmitResult;
     if (input.baseVersion !== room.currentVersion) return { ok: false, code: 'VERSION_CONFLICT', message: 'Version conflict', latestVersion: room.currentVersion } as SubmitResult;
     const lineupSnapshot = await transaction.get(lineupsRef(input.roomId).doc(String(room.activeLineupVersion)));
     if (!lineupSnapshot.exists()) return { ok: false, code: 'INVALID_LINEUP', message: 'No active lineup', latestVersion: room.currentVersion } as SubmitResult;

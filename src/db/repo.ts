@@ -97,7 +97,7 @@ const REQUIRED_PLAYER_COUNT = 4;
 type InternalBackup = {
   id: string;
   createdAt: number;
-  trigger: 'insertHand' | 'endGame';
+  trigger: 'insertHand' | 'endGame' | 'importActiveGameBundle';
   schemaVersion: number;
   gameMeta: Array<{
     gameId: string;
@@ -207,7 +207,9 @@ export function __testOnly_validateBackupSnapshot(snapshot: InternalBackup): Bac
   return { ok: true };
 }
 
-async function createInternalBackupSnapshot(trigger: 'insertHand' | 'endGame'): Promise<void> {
+async function createInternalBackupSnapshot(
+  trigger: 'insertHand' | 'endGame' | 'importActiveGameBundle',
+): Promise<void> {
   const storage = getKeyValueStorage();
   const games = await listGames();
   if (games.length === 0) {
@@ -300,6 +302,119 @@ export async function createGameWithPlayers(
     });
   } catch (error) {
     const wrapped = normalizeError(error, 'createGameWithPlayers failed');
+    console.error('[DB]', wrapped);
+    throw wrapped;
+  }
+}
+
+export async function importActiveGameBundle(bundle: GameBundle): Promise<{ created: boolean }> {
+  try {
+    const { game, players, hands } = bundle;
+    validateCreateGamePlayers(game.id, players);
+    if (game.endedAt != null || (game.gameState !== 'draft' && game.gameState !== 'active')) {
+      throw new Error('Imported game must be active or draft');
+    }
+    if (hands.some((hand, index) => hand.gameId !== game.id || hand.handIndex !== index)) {
+      throw new Error('Imported hands must be sequential and belong to the game');
+    }
+
+    const playerIds = new Set(players.map((player) => player.id));
+    for (const hand of hands) {
+      if (hand.winnerPlayerId && !playerIds.has(hand.winnerPlayerId)) {
+        throw new Error('Imported winner does not belong to the game');
+      }
+      if (hand.discarderPlayerId && !playerIds.has(hand.discarderPlayerId)) {
+        throw new Error('Imported discarder does not belong to the game');
+      }
+      const deltas = resolveDeltasQ(hand.deltasJson);
+      if (deltas && (deltas.length !== 4 || deltas.some((value) => !Number.isFinite(value)))) {
+        throw new Error('Imported hand has invalid deltas');
+      }
+      if (deltas && deltas.reduce((sum, value) => sum + value, 0) !== 0) {
+        throw new Error('Imported hand deltas must be zero-sum');
+      }
+    }
+
+    const result = await runExplicitWriteTransaction('importActiveGameBundle', async (executeTx) => {
+      const existing = await executeTx('SELECT id FROM games WHERE id = ? LIMIT 1;', [game.id]);
+      if (existing.rows.length > 0) {
+        return { created: false };
+      }
+
+      await executeTx(
+        `INSERT INTO games
+         (id, title, createdAt, endedAt, currencySymbol, variant, rulesJson, startingDealerSeatIndex, handsCount, resultStatus, resultSummaryJson, resultUpdatedAt, progressIndex, currentWindIndex, currentRoundNumber, maxWindIndex, seatRotationOffset, gameState, currentRoundLabelZh, languageOverride)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+        [
+          game.id,
+          game.title,
+          game.createdAt,
+          null,
+          game.currencySymbol,
+          'HK',
+          game.rulesJson,
+          game.startingDealerSeatIndex,
+          hands.length,
+          'none',
+          null,
+          null,
+          game.progressIndex ?? 0,
+          game.currentWindIndex ?? 0,
+          game.currentRoundNumber ?? 1,
+          game.maxWindIndex ?? 1,
+          normalizeSeatRotationOffset(game.seatRotationOffset ?? 0),
+          hands.length > 0 ? 'active' : 'draft',
+          game.currentRoundLabelZh ?? INITIAL_ROUND_LABEL_ZH,
+          game.languageOverride ?? null,
+        ],
+      );
+
+      for (const player of players) {
+        await executeTx('INSERT INTO players (id, gameId, name, seatIndex) VALUES (?, ?, ?, ?);', [
+          player.id,
+          player.gameId,
+          truncatePlayerName(player.name),
+          player.seatIndex,
+        ]);
+      }
+
+      for (const hand of hands) {
+        await executeTx(
+          `INSERT INTO hands
+           (id, gameId, handIndex, dealerSeatIndex, windIndex, roundNumber, isDraw, winnerSeatIndex, type, winnerPlayerId, discarderPlayerId, inputValue, deltasJson, computedJson, nextRoundLabelZh, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          [
+            hand.id,
+            hand.gameId,
+            hand.handIndex,
+            hand.dealerSeatIndex,
+            hand.windIndex,
+            hand.roundNumber,
+            hand.isDraw ? 1 : 0,
+            hand.winnerSeatIndex ?? null,
+            hand.type,
+            hand.winnerPlayerId ?? null,
+            hand.discarderPlayerId ?? null,
+            hand.inputValue ?? null,
+            hand.deltasJson ?? null,
+            hand.computedJson,
+            hand.nextRoundLabelZh ?? null,
+            hand.createdAt,
+          ],
+        );
+      }
+
+      return { created: true };
+    });
+
+    if (result.created) {
+      createInternalBackupSnapshot('importActiveGameBundle').catch((error) => {
+        if (isDev) console.warn('[DB] internal backup after import failed', error);
+      });
+    }
+    return result;
+  } catch (error) {
+    const wrapped = normalizeError(error, 'importActiveGameBundle failed');
     console.error('[DB]', wrapped);
     throw wrapped;
   }

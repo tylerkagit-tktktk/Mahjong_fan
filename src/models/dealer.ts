@@ -47,6 +47,9 @@ export function getDealerSeatIndexForNextHand(
   }
 
   const lastHand = hands[hands.length - 1];
+  if (lastHand.isDraw && parseDrawDealerAction(lastHand) === 'pass') {
+    return (lastHand.dealerSeatIndex + 1) % 4;
+  }
   return getNextDealerSeatIndex({
     dealerSeatIndex: lastHand.dealerSeatIndex,
     isDraw: lastHand.isDraw,

@@ -14,7 +14,7 @@ import { getProfile, getProfileStats, updateProfile } from '../../services/cloud
 import { syncPendingArchiveStats } from '../../services/cloud/archiveRepo';
 import theme from '../../theme/theme';
 
-function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Profile'>) {
+function ProfileScreen({ navigation, route }: NativeStackScreenProps<RootStackParamList, 'Profile'>) {
   const { t } = useAppLanguage();
   const [uid, setUid] = useState('');
   const [provider, setProvider] = useState('');
@@ -49,13 +49,13 @@ function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList
   }, [load]);
 
   const handleSave = useCallback(() => {
-    updateProfile(uid, { displayName, avatarUrl: avatarUrl.trim() || null })
+    updateProfile(uid, { displayName, avatarUrl: avatarUrl.trim() || null }, route.params?.roomId)
       .then(() => {
         Alert.alert(t('profile.alert.savedTitle'), t('profile.alert.savedMessage'));
         return load();
       })
       .catch((error) => Alert.alert(t('profile.alert.saveFailedTitle'), String(error)));
-  }, [avatarUrl, displayName, load, t, uid]);
+  }, [avatarUrl, displayName, load, route.params?.roomId, t, uid]);
 
   const handleSignOut = useCallback(() => {
     signOut().then(async () => {
@@ -87,6 +87,7 @@ function ProfileScreen({ navigation }: NativeStackScreenProps<RootStackParamList
             style={styles.input}
             value={displayName}
             onChangeText={setDisplayName}
+            maxLength={10}
             placeholder={t('profile.form.displayNamePlaceholder')}
             placeholderTextColor={theme.colors.textSecondary}
           />

@@ -87,7 +87,6 @@ function HomeScreen({ navigation }: Props) {
     promptHint: translateWithFallback(t, 'home.activeGameModal.hint', '同一時間只可以打一場牌。'),
     continue: translateWithFallback(t, 'home.activeGameModal.action.continue', '繼續打'),
     endThenStart: translateWithFallback(t, 'home.activeGameModal.action.endThenStart', '收枱再開新枱'),
-    abandonSoon: translateWithFallback(t, 'home.activeGameModal.action.abandonSoon', '放棄呢局（稍後推出）'),
     cancel: translateWithFallback(t, 'home.activeGameModal.action.cancel', '唔搞住'),
     zeroMinutes: translateWithFallback(t, 'gameTable.elapsed.minutes', '已玩 0 分鐘', { minutes: 0 }),
   };
@@ -267,10 +266,6 @@ function HomeScreen({ navigation }: Props) {
             >
               <Text style={styles.promptSecondaryText}>{copy.endThenStart}</Text>
             </Pressable>
-
-            <View style={styles.promptDisabledButton}>
-              <Text style={styles.promptDisabledText}>{copy.abandonSoon}</Text>
-            </View>
 
             <Pressable
               onPress={() => setActiveGamePromptVisible(false)}
@@ -516,21 +511,6 @@ const styles = StyleSheet.create({
   promptSecondaryText: {
     ...typography.button,
     color: theme.colors.primary,
-  },
-  promptDisabledButton: {
-    marginTop: theme.spacing.sm,
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.background,
-    paddingVertical: theme.spacing.sm,
-    alignItems: 'center',
-    opacity: 0.75,
-  },
-  promptDisabledText: {
-    ...typography.body,
-    color: theme.colors.textSecondary,
-    fontWeight: '500',
   },
   promptCancelButton: {
     marginTop: theme.spacing.sm,

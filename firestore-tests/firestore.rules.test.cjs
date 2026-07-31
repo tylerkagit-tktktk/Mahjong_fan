@@ -9,10 +9,15 @@ const {
 } = require('@firebase/rules-unit-testing');
 const {
   deleteDoc,
+  collection,
   doc,
   getDoc,
+  getDocs,
+  serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
+  Timestamp,
 } = require('firebase/firestore');
 
 const PROJECT_ID = 'demo-mahjong-fan';
@@ -91,6 +96,37 @@ function authenticatedDatabase(uid) {
   return testEnvironment.authenticatedContext(uid).firestore();
 }
 
+async function createGuardedRoom(database, uid, roomId) {
+  const inviteToken = `invite-${roomId}-abcdefghijklmnop`;
+  const batch = writeBatch(database);
+  batch.set(doc(database, 'roomCreationGuards', uid), {
+    activeRoomId: roomId,
+    lastCreatedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  batch.set(doc(database, 'rooms', roomId), {
+    ...roomData('open'),
+    roomId,
+    hostUid: uid,
+    memberCount: 1,
+  });
+  batch.set(doc(database, 'rooms', roomId, 'members', uid), {
+    ...memberData(uid, 'host'),
+    roomId,
+  });
+  batch.set(doc(database, 'rooms', roomId, 'hostConfig', 'current'), {
+    activeInviteToken: inviteToken,
+    updatedAt: 500,
+  });
+  batch.set(doc(database, 'roomInvites', inviteToken), {
+    roomId,
+    createdByUid: uid,
+    createdAt: 500,
+    expiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+  });
+  await batch.commit();
+}
+
 before(async () => {
   testEnvironment = await initializeTestEnvironment({
     projectId: PROJECT_ID,
@@ -155,6 +191,26 @@ describe('room archive rules', () => {
     }));
   });
 
+  test('members can rename themselves only while the room is open', async () => {
+    await seedRoom('open');
+    const database = authenticatedDatabase(GUEST_UID);
+    const memberReference = doc(database, 'rooms', ROOM_ID, 'members', GUEST_UID);
+
+    await assertSucceeds(updateDoc(memberReference, {
+      displayName: 'Guest Name',
+    }));
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_ID), {
+        status: 'active',
+      });
+    });
+
+    await assertFails(updateDoc(memberReference, {
+      displayName: 'Too Late',
+    }));
+  });
+
   test('only the host can delete archived room data', async () => {
     await seedRoom('archived');
     const guestDatabase = authenticatedDatabase(GUEST_UID);
@@ -176,5 +232,70 @@ describe('room archive rules', () => {
     await assertFails(deleteDoc(doc(secondGuestDatabase, 'rooms', ROOM_ID, 'joinTickets', GUEST_UID)));
     await assertSucceeds(deleteDoc(doc(guestDatabase, 'rooms', ROOM_ID, 'joinTickets', GUEST_UID)));
     await assertSucceeds(deleteDoc(doc(hostDatabase, 'rooms', ROOM_ID, 'joinTickets', SECOND_GUEST_UID)));
+  });
+});
+
+describe('room creation guard rules', () => {
+  test('owner can atomically acquire a guard and create the referenced room', async () => {
+    const database = authenticatedDatabase(HOST_UID);
+    await assertSucceeds(createGuardedRoom(database, HOST_UID, ROOM_ID));
+    assert.equal((await getDoc(doc(database, 'roomCreationGuards', HOST_UID))).data().activeRoomId, ROOM_ID);
+  });
+
+  test('room creation without an atomic guard acquisition is denied', async () => {
+    const database = authenticatedDatabase(HOST_UID);
+    await assertFails(setDoc(doc(database, 'rooms', ROOM_ID), {
+      ...roomData('open'),
+      memberCount: 1,
+    }));
+  });
+
+  test('an active hosted room blocks acquiring a second room', async () => {
+    const database = authenticatedDatabase(HOST_UID);
+    await createGuardedRoom(database, HOST_UID, ROOM_ID);
+    await assertFails(createGuardedRoom(database, HOST_UID, 'room-second'));
+  });
+
+  test('cancelling does not reset the five-minute cooldown', async () => {
+    const database = authenticatedDatabase(HOST_UID);
+    await createGuardedRoom(database, HOST_UID, ROOM_ID);
+    await updateDoc(doc(database, 'rooms', ROOM_ID), { status: 'cancelling', updatedAt: 2_000 });
+    const cleanup = writeBatch(database);
+    cleanup.delete(doc(database, 'rooms', ROOM_ID));
+    cleanup.update(doc(database, 'roomCreationGuards', HOST_UID), {
+      activeRoomId: null,
+      updatedAt: serverTimestamp(),
+    });
+    await assertSucceeds(cleanup.commit());
+    await assertFails(createGuardedRoom(database, HOST_UID, 'room-too-soon'));
+  });
+
+  test('owner can create again after the stored cooldown has elapsed', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'roomCreationGuards', HOST_UID), {
+        activeRoomId: null,
+        lastCreatedAt: Timestamp.fromMillis(Date.now() - 6 * 60 * 1000),
+        updatedAt: Timestamp.fromMillis(Date.now() - 6 * 60 * 1000),
+      });
+    });
+    await assertSucceeds(createGuardedRoom(authenticatedDatabase(HOST_UID), HOST_UID, ROOM_ID));
+  });
+
+  test('other users cannot read, update, or delete a guard', async () => {
+    const hostDatabase = authenticatedDatabase(HOST_UID);
+    await createGuardedRoom(hostDatabase, HOST_UID, ROOM_ID);
+    const outsiderDatabase = authenticatedDatabase(OUTSIDER_UID);
+    const reference = doc(outsiderDatabase, 'roomCreationGuards', HOST_UID);
+    await assertFails(getDoc(reference));
+    await assertFails(updateDoc(reference, { activeRoomId: null }));
+    await assertFails(deleteDoc(reference));
+    await assertFails(deleteDoc(doc(hostDatabase, 'roomCreationGuards', HOST_UID)));
+  });
+
+  test('host can list join tickets during retryable cleanup', async () => {
+    await seedRoom('open');
+    await seedJoinTickets();
+    const snapshot = await assertSucceeds(getDocs(collection(authenticatedDatabase(HOST_UID), 'rooms', ROOM_ID, 'joinTickets')));
+    assert.equal(snapshot.size, 2);
   });
 });

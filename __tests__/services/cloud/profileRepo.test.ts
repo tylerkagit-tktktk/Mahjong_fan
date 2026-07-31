@@ -19,7 +19,7 @@ describe('cloud profile updates', () => {
     const joinResult = await joinWithInvite(room.roomId, invite.token, playerUid);
     expect(joinResult.ok).toBe(true);
 
-    await updateProfile(playerUid, { displayName: '阿明' });
+    await updateProfile(playerUid, { displayName: '阿明' }, room.roomId);
 
     const members = await listMembers(room.roomId);
     expect(members.find((member) => member.uid === playerUid)?.displayName).toBe('阿明');

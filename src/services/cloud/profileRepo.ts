@@ -20,27 +20,6 @@ function defaultStats(uid: string): ProfileStats {
   return { uid, handsParticipated: 0, wins: 0, zimoCount: 0, discardCount: 0, drawCount: 0, updatedAt: Date.now() };
 }
 
-async function syncRoomMemberProfile(uid: string, profile: CloudUserProfile): Promise<void> {
-  const snapshot = await getFirestore()
-    .collectionGroup('members')
-    .where('uid', '==', uid)
-    .get();
-  const activeMemberDocs = snapshot.docs.filter(
-    (doc) => (doc.data() as { membershipStatus?: string }).membershipStatus === 'active',
-  );
-
-  for (let index = 0; index < activeMemberDocs.length; index += 450) {
-    const batch = getFirestore().batch();
-    for (const memberDoc of activeMemberDocs.slice(index, index + 450)) {
-      batch.update(memberDoc.ref, {
-        displayName: profile.displayName,
-        avatarUrl: profile.avatarUrl,
-      });
-    }
-    await batch.commit();
-  }
-}
-
 export async function ensureProfile(uid: string, provider: CloudProvider = 'anonymous'): Promise<CloudUserProfile> {
   const ref = profiles().doc(uid);
   const existing = await ref.get();
@@ -58,16 +37,31 @@ export async function getProfile(uid: string): Promise<CloudUserProfile | null> 
   return snapshot.exists() ? (snapshot.data() as CloudUserProfile) : null;
 }
 
-export async function updateProfile(uid: string, input: { displayName: string; avatarUrl?: string | null }): Promise<CloudUserProfile> {
+export async function updateProfile(
+  uid: string,
+  input: { displayName: string; avatarUrl?: string | null },
+  roomId?: string,
+): Promise<CloudUserProfile> {
   const current = await ensureProfile(uid);
+  const displayName = input.displayName.trim();
+  if (displayName.length < 1 || displayName.length > 10) {
+    throw new Error('Display name must be between 1 and 10 characters');
+  }
   const next: CloudUserProfile = {
     ...current,
-    displayName: input.displayName.trim() || current.displayName,
+    displayName,
     avatarUrl: Object.prototype.hasOwnProperty.call(input, 'avatarUrl') ? input.avatarUrl ?? null : current.avatarUrl,
     updatedAt: Date.now(),
   };
-  await profiles().doc(uid).set(next);
-  await syncRoomMemberProfile(uid, next);
+  const batch = getFirestore().batch();
+  batch.set(profiles().doc(uid), next);
+  if (roomId) {
+    batch.update(getFirestore().collection('rooms').doc(roomId).collection('members').doc(uid), {
+      displayName: next.displayName,
+      avatarUrl: next.avatarUrl,
+    });
+  }
+  await batch.commit();
   return next;
 }
 

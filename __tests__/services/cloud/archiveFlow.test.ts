@@ -22,7 +22,7 @@ jest.mock('../../../src/db/cloudArchiveRepo', () => ({
 
 import { archiveRoomToLocal, loadArchivedGame } from '../../../src/services/cloud/archiveRepo';
 import { saveCloudArchive } from '../../../src/db/cloudArchiveRepo';
-import { ensureSession, signInWithProvider } from '../../../src/services/cloud/authRepo';
+import { ensureSession, signInWithProvider, signOut } from '../../../src/services/cloud/authRepo';
 import { submitHand } from '../../../src/services/cloud/handRepo';
 import {
   createInvite,
@@ -41,6 +41,7 @@ import { saveSnapshot } from '../../../src/services/cloud/storage';
 
 beforeEach(async () => {
   mockSavedArchives.clear();
+  await signOut();
   await saveSnapshot({ rooms: [], members: [], tempPlayers: [], lineups: [], hands: [], profiles: [], stats: [], archiveSyncs: [] });
 });
 

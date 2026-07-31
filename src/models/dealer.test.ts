@@ -1,5 +1,5 @@
 import { Hand } from './db';
-import { getNextDealerSeatIndex, getRoundLabel } from './dealer';
+import { getDealerSeatIndexForNextHand, getNextDealerSeatIndex, getRoundLabel } from './dealer';
 
 function makeHand(partial: Partial<Hand>): Hand {
   return {
@@ -60,19 +60,31 @@ describe('dealer progression', () => {
   });
 
   it('draw with pass advances dealer', () => {
-    const round = getRoundLabel(
-      0,
-      [
-        makeHand({
-          dealerSeatIndex: 0,
-          isDraw: true,
-          winnerSeatIndex: null,
-          computedJson: JSON.stringify({ dealerAction: 'pass' }),
-        }),
-      ],
-    );
+    const hands = [
+      makeHand({
+        dealerSeatIndex: 0,
+        isDraw: true,
+        winnerSeatIndex: null,
+        computedJson: JSON.stringify({ dealerAction: 'pass' }),
+      }),
+    ];
+    const round = getRoundLabel(0, hands);
 
     expect(round.labelZh).toBe('東風南局');
+    expect(getDealerSeatIndexForNextHand(0, hands)).toBe(1);
+  });
+
+  it('draw with stick keeps dealer after reloading the table', () => {
+    const hands = [
+      makeHand({
+        dealerSeatIndex: 2,
+        isDraw: true,
+        winnerSeatIndex: null,
+        computedJson: JSON.stringify({ dealerAction: 'stick' }),
+      }),
+    ];
+
+    expect(getDealerSeatIndexForNextHand(0, hands)).toBe(2);
   });
 
   it('four dealer advances increments wind', () => {

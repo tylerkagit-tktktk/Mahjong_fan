@@ -21,7 +21,7 @@ export type ProfileStats = {
 
 export type ProfileStatsContribution = Omit<ProfileStats, 'uid' | 'updatedAt'>;
 
-export type RoomStatus = 'open' | 'active' | 'ended' | 'archived';
+export type RoomStatus = 'open' | 'active' | 'ended' | 'archived' | 'cancelling';
 export type MembershipStatus = 'active' | 'left';
 export type RoomPlayerId = string;
 export type SeatKey = '0' | '1' | '2' | '3';
@@ -43,6 +43,17 @@ export type Room = {
   archiveVersion?: number | null;
   createdAt: number;
   updatedAt: number;
+};
+
+export type RoomCreationGuard = {
+  activeRoomId: string | null;
+  lastCreatedAt: { toMillis?: () => number; milliseconds?: number } | null;
+  updatedAt: { toMillis?: () => number; milliseconds?: number };
+};
+
+export type ActiveHostedRoomPointer = {
+  uid: string;
+  roomId: string;
 };
 
 export type RoomMember = {

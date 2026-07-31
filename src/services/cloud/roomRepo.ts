@@ -1,5 +1,6 @@
 import {
   ArchiveSyncStatus,
+  RoomCreationGuard,
   LineupChangeInput,
   ResolvedRoomPlayer,
   Room,
@@ -13,6 +14,7 @@ import {
 } from '../../models/cloud';
 import { getProfile } from './profileRepo';
 import { createToken, makeId } from './storage';
+import { clearActiveHostedRoomPointer, saveActiveHostedRoomPointer } from './storage';
 import { getFirestore } from '../firebase/firebase';
 import firestore from '@react-native-firebase/firestore';
 
@@ -21,6 +23,7 @@ export type InvitePayload = { roomId: string; token: string; expiresAt: number; 
 const MEMBER_CAP = 8;
 const ARCHIVE_RETENTION_MS = 48 * 60 * 60 * 1000;
 const DELETE_BATCH_SIZE = 450;
+export const ROOM_CREATION_COOLDOWN_MS = 5 * 60 * 1000;
 const SEAT_KEYS: SeatKey[] = ['0', '1', '2', '3'];
 const rooms = () => getFirestore().collection('rooms');
 const roomRef = (roomId: string) => rooms().doc(roomId);
@@ -31,6 +34,7 @@ const lineupsRef = (roomId: string) => roomRef(roomId).collection('lineups');
 const handsRef = (roomId: string) => roomRef(roomId).collection('hands');
 const joinTicketsRef = (roomId: string) => roomRef(roomId).collection('joinTickets');
 const hostConfigRef = (roomId: string) => roomRef(roomId).collection('hostConfig').doc('current');
+const roomCreationGuardRef = (uid: string) => getFirestore().collection('roomCreationGuards').doc(uid);
 
 type RoomInvite = {
   roomId: string;
@@ -43,6 +47,40 @@ type HostConfig = {
   activeInviteToken: string | null;
   updatedAt: number;
 };
+
+export type CreateRoomResult =
+  | { ok: true; kind: 'created' | 'restored'; room: Room; invite: InvitePayload | null }
+  | { ok: false; code: 'RATE_LIMITED'; retryAt: number }
+  | { ok: false; code: 'CLEANUP_IN_PROGRESS'; roomId: string }
+  | { ok: false; code: 'UNRECOVERABLE'; message: string };
+
+export type HostedRoomRecoveryResult =
+  | { kind: 'none'; retryAt: number | null }
+  | { kind: 'open'; room: Room; invite: InvitePayload }
+  | { kind: 'active'; room: Room }
+  | { kind: 'cleaning'; roomId: string };
+
+type GuardedCreationTransactionResult =
+  | { kind: 'created'; room: Room; invite: InvitePayload }
+  | { kind: 'existing'; room: Room }
+  | { kind: 'stale' }
+  | { kind: 'cleaning'; roomId: string }
+  | { kind: 'rateLimited'; retryAt: number };
+
+function timestampToMillis(value: RoomCreationGuard['lastCreatedAt']): number | null {
+  if (!value) return null;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  return typeof value.milliseconds === 'number' ? value.milliseconds : null;
+}
+
+function invitePayload(roomId: string, token: string, expiresAt: number): InvitePayload {
+  return {
+    roomId,
+    token,
+    expiresAt,
+    deepLink: `mahjongfan://join?roomId=${encodeURIComponent(roomId)}&token=${encodeURIComponent(token)}`,
+  };
+}
 
 function inviteHasExpired(invite: RoomInvite): boolean {
   const expiresAt = typeof invite.expiresAt === 'number'
@@ -83,31 +121,116 @@ function validateSeatSelection(room: Room, players: ResolvedRoomPlayer[], seats:
   const validIds = new Set(players.map((player) => player.playerId));
   if (ids.some((id) => !validIds.has(id))) return { ok: false, code: 'INVALID_LINEUP', message: 'Seat contains non-room player' };
   if (ids.filter((id) => !isTemporaryPlayerId(id)).length < 2) return { ok: false, code: 'NEED_MORE_REAL_PLAYERS', message: 'Need at least two real players to start online room' };
-  if (room.status === 'ended' || room.status === 'archived') return { ok: false, code: 'ROOM_ENDED', message: 'Room is already ended' };
+  if (room.status === 'ended' || room.status === 'archived' || room.status === 'cancelling') return { ok: false, code: 'ROOM_ENDED', message: 'Room is already ended' };
   return null;
 }
 
-export async function createRoom(input: { hostUid: string; title: string; rulesSnapshot?: Record<string, unknown>; memberCap?: number }): Promise<Room> {
-  const timestamp = Date.now();
-  const roomId = makeId('room');
-  const room: Room = {
-    roomId, title: input.title.trim() || '未命名牌局', hostUid: input.hostUid, status: 'open', maxSeats: 4,
-    memberCap: Math.max(4, Math.min(input.memberCap ?? MEMBER_CAP, MEMBER_CAP)), memberCount: 1,
-    currentVersion: 1, currentHandIndex: 0, activeLineupVersion: 0, rulesSnapshot: input.rulesSnapshot ?? {},
-    archiveReadyAt: null, expiresAt: null, archiveVersion: null, createdAt: timestamp, updatedAt: timestamp,
-  };
-  const profile = await getProfile(input.hostUid);
-  const member: RoomMember = {
-    uid: input.hostUid, roomId, role: 'host', membershipStatus: 'active', joinedAt: timestamp,
-    displayName: profile?.displayName ?? `Player-${input.hostUid.slice(-4)}`, avatarUrl: profile?.avatarUrl ?? null,
-    archiveSyncedAt: null, archiveSyncedVersion: null,
-  };
-  const batch = getFirestore().batch();
-  batch.set(roomRef(roomId), room);
-  batch.set(membersRef(roomId).doc(member.uid), member);
-  batch.set(hostConfigRef(roomId), { activeInviteToken: null, updatedAt: timestamp } satisfies HostConfig);
-  await batch.commit();
-  return room;
+async function createRoomResult(input: {
+  hostUid: string;
+  hostDisplayName: string;
+  title: string;
+  rulesSnapshot?: Record<string, unknown>;
+  memberCap?: number;
+}): Promise<CreateRoomResult> {
+  const hostProfile = await getProfile(input.hostUid);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const transactionResult = await getFirestore().runTransaction(async (transaction) => {
+      const guardReference = roomCreationGuardRef(input.hostUid);
+      const guardSnapshot = await transaction.get(guardReference);
+      const guard = guardSnapshot.exists() ? guardSnapshot.data() as RoomCreationGuard : null;
+      if (guard?.activeRoomId) {
+        const existingSnapshot = await transaction.get(roomRef(guard.activeRoomId));
+        if (existingSnapshot.exists()) {
+          const existingRoom = existingSnapshot.data() as Room;
+          if (existingRoom.status === 'open' || existingRoom.status === 'active') {
+            return { kind: 'existing', room: existingRoom } satisfies GuardedCreationTransactionResult;
+          }
+          if (existingRoom.status === 'cancelling') {
+            return { kind: 'cleaning', roomId: existingRoom.roomId } satisfies GuardedCreationTransactionResult;
+          }
+        }
+        transaction.update(guardReference, {
+          activeRoomId: null,
+          updatedAt: firestore.FieldValue.serverTimestamp(),
+        });
+        return { kind: 'stale' } satisfies GuardedCreationTransactionResult;
+      }
+
+      const lastCreatedAt = timestampToMillis(guard?.lastCreatedAt ?? null);
+      if (lastCreatedAt !== null && Date.now() < lastCreatedAt + ROOM_CREATION_COOLDOWN_MS) {
+        return { kind: 'rateLimited', retryAt: lastCreatedAt + ROOM_CREATION_COOLDOWN_MS } satisfies GuardedCreationTransactionResult;
+      }
+
+      const timestamp = Date.now();
+      const roomId = makeId('room');
+      const token = createToken();
+      const expiresAt = timestamp + 2 * 60 * 60 * 1000;
+      const room: Room = {
+        roomId, title: input.title.trim() || '未命名牌局', hostUid: input.hostUid, status: 'open', maxSeats: 4,
+        memberCap: Math.max(4, Math.min(input.memberCap ?? MEMBER_CAP, MEMBER_CAP)), memberCount: 1,
+        currentVersion: 1, currentHandIndex: 0, activeLineupVersion: 0, rulesSnapshot: input.rulesSnapshot ?? {},
+        archiveReadyAt: null, expiresAt: null, archiveVersion: null, createdAt: timestamp, updatedAt: timestamp,
+      };
+      const member: RoomMember = {
+        uid: input.hostUid, roomId, role: 'host', membershipStatus: 'active', joinedAt: timestamp,
+        displayName: input.hostDisplayName.trim().slice(0, 10) || hostProfile?.displayName || `Player-${input.hostUid.slice(-4)}`,
+        avatarUrl: hostProfile?.avatarUrl ?? null, archiveSyncedAt: null, archiveSyncedVersion: null,
+      };
+      const invite = invitePayload(roomId, token, expiresAt);
+      const serverTimestamp = firestore.FieldValue.serverTimestamp();
+      transaction.set(guardReference, {
+        activeRoomId: roomId,
+        lastCreatedAt: serverTimestamp,
+        updatedAt: serverTimestamp,
+      });
+      transaction.set(roomRef(roomId), room);
+      transaction.set(membersRef(roomId).doc(member.uid), member);
+      transaction.set(hostConfigRef(roomId), { activeInviteToken: token, updatedAt: timestamp } satisfies HostConfig);
+      transaction.set(inviteRef(token), {
+        roomId,
+        createdByUid: input.hostUid,
+        createdAt: timestamp,
+        expiresAt: firestore.Timestamp.fromMillis(expiresAt),
+      } satisfies RoomInvite);
+      return { kind: 'created', room, invite } satisfies GuardedCreationTransactionResult;
+    });
+
+    if (transactionResult.kind === 'stale') continue;
+    if (transactionResult.kind === 'rateLimited') return { ok: false, code: 'RATE_LIMITED', retryAt: transactionResult.retryAt };
+    if (transactionResult.kind === 'cleaning') return { ok: false, code: 'CLEANUP_IN_PROGRESS', roomId: transactionResult.roomId };
+    if (transactionResult.kind === 'existing') {
+      await saveActiveHostedRoomPointer({ uid: input.hostUid, roomId: transactionResult.room.roomId });
+      const invite = transactionResult.room.status === 'open'
+        ? await getOrCreateActiveInvite(transactionResult.room.roomId, input.hostUid)
+        : null;
+      return { ok: true, kind: 'restored', room: transactionResult.room, invite };
+    }
+    await saveActiveHostedRoomPointer({ uid: input.hostUid, roomId: transactionResult.room.roomId });
+    return { ok: true, kind: 'created', room: transactionResult.room, invite: transactionResult.invite };
+  }
+  return { ok: false, code: 'UNRECOVERABLE', message: 'Unable to release the previous room lock' };
+}
+
+type GuardedCreateRoomInput = {
+  hostUid: string;
+  hostDisplayName: string;
+  title: string;
+  rulesSnapshot?: Record<string, unknown>;
+  memberCap?: number;
+};
+
+type LegacyCreateRoomInput = Omit<GuardedCreateRoomInput, 'hostDisplayName'>;
+
+export function createRoom(input: GuardedCreateRoomInput): Promise<CreateRoomResult>;
+export function createRoom(input: LegacyCreateRoomInput): Promise<Room>;
+export async function createRoom(input: GuardedCreateRoomInput | LegacyCreateRoomInput): Promise<CreateRoomResult | Room> {
+  const guarded = 'hostDisplayName' in input;
+  const result = await createRoomResult({ ...input, hostDisplayName: guarded ? input.hostDisplayName : '' });
+  if (guarded) return result;
+  if (!result.ok) {
+    throw new Error(result.code === 'RATE_LIMITED' ? `Room creation rate limited until ${result.retryAt}` : result.code);
+  }
+  return result.room;
 }
 
 export async function createInvite(roomId: string, hostUid: string): Promise<InvitePayload> {
@@ -130,7 +253,69 @@ export async function createInvite(roomId: string, hostUid: string): Promise<Inv
     batch.delete(inviteRef(previousToken));
   }
   await batch.commit();
-  return { roomId, token, expiresAt, deepLink: `mahjongfan://join?roomId=${encodeURIComponent(roomId)}&token=${encodeURIComponent(token)}` };
+  return invitePayload(roomId, token, expiresAt);
+}
+
+export async function getOrCreateActiveInvite(roomId: string, hostUid: string): Promise<InvitePayload> {
+  const configSnapshot = await hostConfigRef(roomId).get();
+  const token = (configSnapshot.data() as HostConfig | undefined)?.activeInviteToken;
+  if (token) {
+    const snapshot = await inviteRef(token).get();
+    if (snapshot.exists()) {
+      const invite = snapshot.data() as RoomInvite;
+      if (invite.roomId === roomId && !inviteHasExpired(invite)) {
+        return invitePayload(roomId, token, typeof invite.expiresAt === 'number'
+          ? invite.expiresAt
+          : invite.expiresAt.toMillis?.() ?? invite.expiresAt.milliseconds ?? 0);
+      }
+    }
+  }
+  return createInvite(roomId, hostUid);
+}
+
+export async function getRoomCreationRetryAt(uid: string): Promise<number | null> {
+  const snapshot = await roomCreationGuardRef(uid).get();
+  if (!snapshot.exists()) return null;
+  const lastCreatedAt = timestampToMillis((snapshot.data() as RoomCreationGuard).lastCreatedAt);
+  return lastCreatedAt === null ? null : lastCreatedAt + ROOM_CREATION_COOLDOWN_MS;
+}
+
+async function releaseHostedRoomGuard(uid: string, roomId: string): Promise<void> {
+  await getFirestore().runTransaction(async (transaction) => {
+    const reference = roomCreationGuardRef(uid);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) return;
+    const guard = snapshot.data() as RoomCreationGuard;
+    if (guard.activeRoomId !== roomId) return;
+    transaction.update(reference, {
+      activeRoomId: null,
+      updatedAt: firestore.FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+export async function recoverHostedRoom(uid: string, expectedRoomId?: string): Promise<HostedRoomRecoveryResult> {
+  const guardSnapshot = await roomCreationGuardRef(uid).get();
+  if (!guardSnapshot.exists()) {
+    if (expectedRoomId) await clearActiveHostedRoomPointer({ uid, roomId: expectedRoomId });
+    return { kind: 'none', retryAt: null };
+  }
+  const guard = guardSnapshot.data() as RoomCreationGuard;
+  const retryAt = timestampToMillis(guard.lastCreatedAt);
+  if (!guard.activeRoomId) {
+    if (expectedRoomId) await clearActiveHostedRoomPointer({ uid, roomId: expectedRoomId });
+    return { kind: 'none', retryAt: retryAt === null ? null : retryAt + ROOM_CREATION_COOLDOWN_MS };
+  }
+  const room = await getRoom(guard.activeRoomId);
+  if (!room || room.status === 'ended' || room.status === 'archived') {
+    await releaseHostedRoomGuard(uid, guard.activeRoomId);
+    await clearActiveHostedRoomPointer({ uid, roomId: guard.activeRoomId });
+    return { kind: 'none', retryAt: retryAt === null ? null : retryAt + ROOM_CREATION_COOLDOWN_MS };
+  }
+  await saveActiveHostedRoomPointer({ uid, roomId: room.roomId });
+  if (room.status === 'cancelling') return { kind: 'cleaning', roomId: room.roomId };
+  if (room.status === 'active') return { kind: 'active', room };
+  return { kind: 'open', room, invite: await getOrCreateActiveInvite(room.roomId, uid) };
 }
 
 export async function joinWithInvite(roomId: string, token: string, uid: string): Promise<SubmitResult> {
@@ -218,7 +403,7 @@ export async function addTemporaryPlayer(input: { roomId: string; createdByUid: 
   const room = await getRoom(input.roomId);
   if (!room) throw new Error('Room not found');
   if (room.hostUid !== input.createdByUid) throw new Error('Only host can add temporary players');
-  if (room.status === 'ended' || room.status === 'archived') throw new Error('Room already ended');
+  if (room.status !== 'open' && room.status !== 'active') throw new Error('Room already ended');
   const displayName = input.displayName.trim();
   if (!displayName) throw new Error('Temporary player name is required');
   const total = (await listRoomPlayers(input.roomId)).length;
@@ -289,36 +474,66 @@ export async function mergeTemporaryPlayerIntoRealPlayer(input: { roomId: string
 }
 
 export async function deleteRoomAndFallbackToLocal(roomId: string, actorUid: string): Promise<void> {
-  const room = await getRoom(roomId);
-  if (!room || room.hostUid !== actorUid) {
-    if (room) throw new Error('Only host can remove room');
+  const markedRoom = await getFirestore().runTransaction(async (transaction) => {
+    const reference = roomRef(roomId);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) return null;
+    const room = snapshot.data() as Room;
+    if (room.hostUid !== actorUid) throw new Error('Only host can remove room');
+    if (room.status !== 'cancelling') {
+      transaction.update(reference, { status: 'cancelling', updatedAt: Date.now() });
+    }
+    return { ...room, status: 'cancelling' as const };
+  });
+  if (!markedRoom) {
+    await releaseHostedRoomGuard(actorUid, roomId);
+    await clearActiveHostedRoomPointer({ uid: actorUid, roomId });
     return;
   }
-  const [members, temporaryPlayers, lineups, hands, hostConfig] = await Promise.all([
+
+  const hostConfig = await hostConfigRef(roomId).get();
+  const activeInviteToken = (hostConfig.data() as HostConfig | undefined)?.activeInviteToken;
+  if (activeInviteToken || hostConfig.exists()) {
+    const revokeBatch = getFirestore().batch();
+    if (activeInviteToken) revokeBatch.delete(inviteRef(activeInviteToken));
+    if (hostConfig.exists()) {
+      revokeBatch.update(hostConfig.ref, { activeInviteToken: null, updatedAt: Date.now() });
+    }
+    await revokeBatch.commit();
+  }
+
+  const [members, temporaryPlayers, lineups, hands, joinTickets] = await Promise.all([
     membersRef(roomId).get(),
     temporaryPlayersRef(roomId).get(),
     lineupsRef(roomId).get(),
     handsRef(roomId).get(),
-    hostConfigRef(roomId).get(),
+    joinTicketsRef(roomId).get(),
   ]);
   const documentRefs = [
-    ...members.docs.map((doc) => doc.ref),
     ...temporaryPlayers.docs.map((doc) => doc.ref),
     ...lineups.docs.map((doc) => doc.ref),
     ...hands.docs.map((doc) => doc.ref),
-    ...members.docs.map((doc) => joinTicketsRef(roomId).doc(doc.id)),
+    ...joinTickets.docs.map((doc) => doc.ref),
   ];
   for (let index = 0; index < documentRefs.length; index += DELETE_BATCH_SIZE) {
     const batch = getFirestore().batch();
     documentRefs.slice(index, index + DELETE_BATCH_SIZE).forEach((ref) => batch.delete(ref));
     await batch.commit();
   }
-  const activeInviteToken = (hostConfig.data() as HostConfig | undefined)?.activeInviteToken;
   const finalBatch = getFirestore().batch();
-  if (hostConfig.exists()) finalBatch.delete(hostConfig.ref);
-  if (activeInviteToken) finalBatch.delete(inviteRef(activeInviteToken));
+  members.docs.forEach((doc) => finalBatch.delete(doc.ref));
+  const currentHostConfig = await hostConfigRef(roomId).get();
+  if (currentHostConfig.exists()) finalBatch.delete(currentHostConfig.ref);
+  const guardSnapshot = await roomCreationGuardRef(actorUid).get();
+  if (guardSnapshot.exists() && (guardSnapshot.data() as RoomCreationGuard).activeRoomId === roomId) {
+    finalBatch.update(roomCreationGuardRef(actorUid), {
+      activeRoomId: null,
+      updatedAt: firestore.FieldValue.serverTimestamp(),
+    });
+  }
+  finalBatch.delete(roomRef(roomId));
   await finalBatch.commit();
-  await roomRef(roomId).delete();
+  await clearActiveHostedRoomPointer({ uid: actorUid, roomId });
 }
 
 export async function endRoom(roomId: string, endedByUid: string): Promise<SubmitResult> {
@@ -423,6 +638,7 @@ export function subscribeRoomState(
   roomId: string,
   sessionUid: string,
   cb: (state: RoomLiveState) => void,
+  onError?: (error: unknown) => void,
 ): () => void {
   let room: Room | null = null;
   let members: RoomMember[] = [];
@@ -442,8 +658,8 @@ export function subscribeRoomState(
   const subscribeToLineup = (nextVersion: number) => {
     unsubscribeLineup?.();
     activeLineupVersion = nextVersion;
-    lineup = null;
     if (!nextVersion) {
+      lineup = null;
       publish();
       return;
     }
@@ -451,10 +667,9 @@ export function subscribeRoomState(
       if (activeLineupVersion !== nextVersion) return;
       lineup = snapshot?.exists() ? normalizeLineup(snapshot.data() as RoomLineup) : null;
       publish();
-    }, () => {
+    }, (error) => {
       if (activeLineupVersion !== nextVersion) return;
-      lineup = null;
-      publish();
+      onError?.(error);
     });
   };
 
@@ -467,25 +682,20 @@ export function subscribeRoomState(
       return;
     }
     publish();
-  }, () => {
-    room = null;
-    members = [];
-    temporary = [];
-    subscribeToLineup(0);
+  }, (error) => {
+    onError?.(error);
   });
   const unsubscribeMembers = membersRef(roomId).onSnapshot((snapshot) => {
     members = (snapshot?.docs ?? []).map((doc) => doc.data() as RoomMember).filter((member) => member.membershipStatus === 'active');
     publish();
-  }, () => {
-    members = [];
-    publish();
+  }, (error) => {
+    onError?.(error);
   });
   const unsubscribeTemporary = temporaryPlayersRef(roomId).onSnapshot((snapshot) => {
     temporary = (snapshot?.docs ?? []).map((doc) => doc.data() as RoomTemporaryPlayer);
     publish();
-  }, () => {
-    temporary = [];
-    publish();
+  }, (error) => {
+    onError?.(error);
   });
 
   return () => {

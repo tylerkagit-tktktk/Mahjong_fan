@@ -22,6 +22,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/rooms/$(roomId)/joinTickets/$(uid);
     }
 
+    function guardPath(uid) {
+      return /databases/$(database)/documents/roomCreationGuards/$(uid);
+    }
+
     function isRoomMember(roomId) {
       return signedIn() && exists(memberPath(roomId, request.auth.uid));
     }
@@ -112,10 +116,48 @@ service cloud.firestore {
 
     function isHostRoomUpdate(roomId) {
       return isHost(roomId)
+        && resource.data.status != 'cancelling'
+        && request.resource.data.status != 'cancelling'
         && hasOnlyChanges([
           'activeLineupVersion', 'currentVersion', 'status', 'updatedAt',
           'archiveReadyAt', 'archiveVersion', 'expiresAt', 'memberCount'
         ]);
+    }
+
+    function isHostCancellation(roomId) {
+      return isHost(roomId)
+        && resource.data.status in ['open', 'active', 'ended', 'archived']
+        && request.resource.data.status == 'cancelling'
+        && hasOnlyChanges(['status', 'updatedAt']);
+    }
+
+    function hasValidGuardFields() {
+      return request.resource.data.keys().hasOnly(['activeRoomId', 'lastCreatedAt', 'updatedAt'])
+        && request.resource.data.activeRoomId is string
+        && request.resource.data.lastCreatedAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function isGuardAcquire(uid) {
+      return hasValidGuardFields()
+        && getAfter(roomPath(request.resource.data.activeRoomId)).data.hostUid == uid
+        && getAfter(roomPath(request.resource.data.activeRoomId)).data.status == 'open';
+    }
+
+    function isGuardRelease(uid) {
+      return request.resource.data.keys().hasOnly(['activeRoomId', 'lastCreatedAt', 'updatedAt'])
+        && request.resource.data.activeRoomId == null
+        && request.resource.data.lastCreatedAt == resource.data.lastCreatedAt
+        && request.resource.data.updatedAt == request.time
+        && resource.data.activeRoomId is string
+        && (
+          !existsAfter(roomPath(resource.data.activeRoomId))
+          || (
+            exists(roomPath(resource.data.activeRoomId))
+            && get(roomPath(resource.data.activeRoomId)).data.hostUid == uid
+            && get(roomPath(resource.data.activeRoomId)).data.status in ['ended', 'archived']
+          )
+        );
     }
 
     match /profiles/{uid} {
@@ -136,6 +178,20 @@ service cloud.firestore {
       }
     }
 
+    match /roomCreationGuards/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list, delete: if false;
+      allow create: if signedIn() && request.auth.uid == uid && isGuardAcquire(uid);
+      allow update: if signedIn() && request.auth.uid == uid && (
+        (
+          resource.data.activeRoomId == null
+          && (resource.data.lastCreatedAt == null || resource.data.lastCreatedAt <= request.time - duration.value(5, 'm'))
+          && isGuardAcquire(uid)
+        )
+        || isGuardRelease(uid)
+      );
+    }
+
     // An invite ID is a high-entropy bearer token. Direct get is required for a
     // shared link; listing invite IDs is always denied.
     match /roomInvites/{token} {
@@ -143,7 +199,7 @@ service cloud.firestore {
       allow list: if false;
       allow create: if signedIn()
         && request.resource.data.createdByUid == request.auth.uid
-        && isHost(request.resource.data.roomId);
+        && getAfter(roomPath(request.resource.data.roomId)).data.hostUid == request.auth.uid;
       allow delete: if signedIn() && isHost(resource.data.roomId);
     }
 
@@ -153,13 +209,20 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.hostUid == request.auth.uid
         && request.resource.data.status == 'open'
-        && request.resource.data.memberCount == 1;
+        && request.resource.data.memberCount == 1
+        && getAfter(guardPath(request.auth.uid)).data.activeRoomId == roomId
+        && getAfter(guardPath(request.auth.uid)).data.lastCreatedAt == request.time;
       allow update: if isHostRoomUpdate(roomId)
         || isJoinRoomUpdate(roomId)
         || isHandAdvance(roomId)
         || isMemberEnd(roomId)
-        || isMemberArchive(roomId);
-      allow delete: if isHost(roomId);
+        || isMemberArchive(roomId)
+        || isHostCancellation(roomId);
+      allow delete: if isHost(roomId)
+        && (
+          !exists(guardPath(request.auth.uid))
+          || getAfter(guardPath(request.auth.uid)).data.activeRoomId == null
+        );
 
       match /hostConfig/{configId} {
         allow get: if isHost(roomId);
@@ -174,7 +237,7 @@ service cloud.firestore {
       // batch consumes them, so no invite token is retained in room data.
       match /joinTickets/{uid} {
         allow get: if signedIn() && request.auth.uid == uid;
-        allow list: if false;
+        allow list: if isHost(roomId);
         allow create, update: if signedIn()
           && request.auth.uid == uid
           && request.resource.data.uid == uid
@@ -200,7 +263,13 @@ service cloud.firestore {
           && request.resource.data.roomId == resource.data.roomId
           && request.resource.data.role == resource.data.role
           && request.resource.data.membershipStatus == resource.data.membershipStatus
-          && hasOnlyChanges(['displayName', 'avatarUrl', 'archiveSyncedAt', 'archiveSyncedVersion']);
+          && (
+            (
+              get(roomPath(roomId)).data.status == 'open'
+              && hasOnlyChanges(['displayName', 'avatarUrl'])
+            )
+            || hasOnlyChanges(['archiveSyncedAt', 'archiveSyncedVersion'])
+          );
         allow delete: if isHost(roomId);
       }
 

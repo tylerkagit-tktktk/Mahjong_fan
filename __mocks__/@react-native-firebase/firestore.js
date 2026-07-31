@@ -91,6 +91,10 @@ function firestore() {
   return db;
 }
 
-firestore.FieldValue = { increment: (amount) => ({ __increment: amount }) };
+firestore.FieldValue = {
+  increment: (amount) => ({ __increment: amount }),
+  serverTimestamp: () => ({ milliseconds: Date.now() }),
+};
 firestore.Timestamp = { fromMillis: (milliseconds) => ({ milliseconds }) };
+firestore.__reset = () => documents.clear();
 module.exports = firestore;

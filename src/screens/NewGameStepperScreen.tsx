@@ -1,6 +1,7 @@
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import AppText from '../components/AppText';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomActionBar from '../components/BottomActionBar';
@@ -15,18 +16,29 @@ import { useAppPreferences } from '../settings/useAppPreferences';
 import { getDefaultRules, HkGunMode, HkScoringPreset, HkStakePreset, parseRules, RulesV1, serializeRules, Variant } from '../models/rules';
 import { ResolvedRoomPlayer, Room, SeatKey } from '../models/cloud';
 import { RootStackParamList } from '../navigation/types';
-import { ensureSession } from '../services/cloud/authRepo';
+import { ensureSession, getCurrentSession } from '../services/cloud/authRepo';
 import {
   addTemporaryPlayer,
-  createInvite,
   createRoom,
   deleteRoomAndFallbackToLocal,
   getRoom,
   joinWithInvite,
+  recoverHostedRoom,
   startRoom,
   subscribeRoomPlayers,
 } from '../services/cloud/roomRepo';
-import { loadSnapshot, now, saveSnapshot } from '../services/cloud/storage';
+import { getProfile, updateProfile } from '../services/cloud/profileRepo';
+import {
+  clearActiveHostedRoomPointer,
+  clearPendingHostedRoomCleanup,
+  loadActiveHostedRoomDraft,
+  loadActiveHostedRoomPointer,
+  loadPendingHostedRoomCleanup,
+  loadSnapshot,
+  now,
+  saveActiveHostedRoomDraft,
+  saveSnapshot,
+} from '../services/cloud/storage';
 import theme from '../theme/theme';
 import { typography } from '../styles/typography';
 import {
@@ -52,6 +64,7 @@ import {
   rotatePlayersToEast,
 } from './newGameStepper/helpers';
 import CreateConfirmModal from './newGameStepper/sections/CreateConfirmModal';
+import HostNameConfirmModal from './newGameStepper/sections/HostNameConfirmModal';
 import CurrencySection from './newGameStepper/sections/CurrencySection';
 import GameTitleSection from './newGameStepper/sections/GameTitleSection';
 import ModeSection from './newGameStepper/sections/ModeSection';
@@ -161,6 +174,14 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const [selectedSyncPlayerId, setSelectedSyncPlayerId] = useState('');
   const [syncSeatAssignments, setSyncSeatAssignments] = useState<Record<SeatKey, string | null>>(EMPTY_SYNC_ASSIGNMENTS);
   const [debugSyncJoinCount, setDebugSyncJoinCount] = useState(0);
+  const [hostNameVisible, setHostNameVisible] = useState(false);
+  const [hostDisplayName, setHostDisplayName] = useState('');
+  const [hostNameError, setHostNameError] = useState<string | null>(null);
+  const [pendingSyncContext, setPendingSyncContext] = useState<{ trimmedTitle: string; rules: RulesV1 } | null>(null);
+  const [syncRetryAt, setSyncRetryAt] = useState<number | null>(null);
+  const [pendingCleanupRoomId, setPendingCleanupRoomId] = useState<string | null>(null);
+  const [cooldownNow, setCooldownNow] = useState(Date.now());
+  const recoveryStartedRef = useRef(false);
 
   useEffect(() => {
     if (mode !== 'HK') {
@@ -241,6 +262,33 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   }, [selectedSyncPlayerId, syncPlayers]);
 
   useEffect(() => {
+    if (syncRetryAt === null) return;
+    const tick = () => {
+      const current = Date.now();
+      setCooldownNow(current);
+      if (current >= syncRetryAt) setSyncRetryAt(null);
+    };
+    tick();
+    const timer = setInterval(tick, 1_000);
+    return () => clearInterval(timer);
+  }, [syncRetryAt]);
+
+  useEffect(() => {
+    if (!draftRoom) return;
+    saveActiveHostedRoomDraft({
+      roomId: draftRoom.roomId,
+      seatMode,
+      players,
+      autoNames,
+      autoAssigned,
+      autoAssignedPlayerIds,
+      startingDealerMode,
+      startingDealerSourceIndex,
+      syncSeatAssignments,
+    }).catch(() => {});
+  }, [autoAssigned, autoAssignedPlayerIds, autoNames, draftRoom, players, seatMode, startingDealerMode, startingDealerSourceIndex, syncSeatAssignments]);
+
+  useEffect(() => {
     if (selectedSyncPlayerId || syncPlayers.length === 0) {
       return;
     }
@@ -299,6 +347,12 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const sampleZimoEach = sampleBaseAmount !== null ? sampleBaseAmount : null;
   const sampleDiscarder = sampleBaseAmount !== null ? sampleBaseAmount * 2 : null;
   const currencySymbol = getCurrencyMeta(currencyCode).symbol;
+  const syncCooldownSeconds = syncRetryAt === null ? 0 : Math.max(0, Math.ceil((syncRetryAt - cooldownNow) / 1_000));
+  const syncCooldownLabel = syncCooldownSeconds > 0
+    ? translateWithFallback(t, 'newGame.sync.cooldown', '請等候 {time} 再建立同步房', {
+        time: `${String(Math.floor(syncCooldownSeconds / 60)).padStart(2, '0')}:${String(syncCooldownSeconds % 60).padStart(2, '0')}`,
+      })
+    : translateWithFallback(t, 'newGame.sync.enable', '加入同步玩家');
   const joinedSyncPlayers = useMemo(() => syncPlayers.filter((player) => player.kind === 'member'), [syncPlayers]);
   const assignedSyncPlayerIds = useMemo(
     () => new Set(Object.values(syncSeatAssignments).filter((value): value is string => Boolean(value))),
@@ -817,6 +871,144 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     setDebugSyncJoinCount(0);
   };
 
+  const restoreOpenSyncRoom = useCallback(async (room: Room, invite: { token: string; deepLink: string }) => {
+    const localDraft = await loadActiveHostedRoomDraft(room.roomId);
+    setSessionUid(room.hostUid);
+    setDraftRoom(room);
+    setInviteToken(invite.token);
+    setInviteText([
+      room.title,
+      `${translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}: ${room.roomId}`,
+      invite.deepLink,
+    ].join('\n'));
+    setTitle(room.title);
+    const serializedRules = typeof room.rulesSnapshot.serializedRules === 'string'
+      ? room.rulesSnapshot.serializedRules
+      : null;
+    if (serializedRules) {
+      const recoveredRules = parseRules(serializedRules, 'HK');
+      setCurrencyCode(recoveredRules.currencyCode);
+      setHkScoringPreset(recoveredRules.hk?.scoringPreset ?? 'traditionalFan');
+      setHkGunMode(recoveredRules.hk?.gunMode ?? 'fullGun');
+      setHkStakePreset(recoveredRules.hk?.stakePreset ?? 'TWO_FIVE_CHICKEN');
+      setUnitPerFan(recoveredRules.hk?.unitPerFan ?? 1);
+      setUnitPerFanInput(String(recoveredRules.hk?.unitPerFan ?? 1));
+      setMinFanToWin(recoveredRules.minFanToWin ?? 3);
+      setMinFanInput(String(recoveredRules.minFanToWin ?? 3));
+      if (recoveredRules.hk?.capFan === 8 || recoveredRules.hk?.capFan === 10 || recoveredRules.hk?.capFan === 13) {
+        setCapFan(recoveredRules.hk.capFan);
+      }
+    }
+    if (localDraft) {
+      setSeatMode(localDraft.seatMode);
+      setPlayers(localDraft.players.slice(0, PLAYER_COUNT));
+      setAutoNames(localDraft.autoNames.slice(0, PLAYER_COUNT));
+      setAutoAssigned(localDraft.autoAssigned);
+      setAutoAssignedPlayerIds(localDraft.autoAssignedPlayerIds);
+      setStartingDealerMode(localDraft.startingDealerMode);
+      setStartingDealerSourceIndex(localDraft.startingDealerSourceIndex);
+      setSyncSeatAssignments(localDraft.syncSeatAssignments);
+    } else {
+      setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
+      setSelectedSyncPlayerId(room.hostUid);
+    }
+    setSyncRetryAt(null);
+    setFormError(null);
+  }, [t]);
+
+  useEffect(() => {
+    if (recoveryStartedRef.current) return;
+    recoveryStartedRef.current = true;
+    loadActiveHostedRoomPointer()
+      .then(async (pointer) => {
+        if (!pointer) return;
+        const session = await getCurrentSession();
+        if (!session || session.uid !== pointer.uid) {
+          await clearActiveHostedRoomPointer(pointer);
+          return;
+        }
+        setSyncBusy(true);
+        const recovered = await recoverHostedRoom(session.uid, pointer.roomId);
+        if (recovered.kind === 'open') {
+          await restoreOpenSyncRoom(recovered.room, recovered.invite);
+        } else if (recovered.kind === 'active') {
+          navigation.replace('MultiplayerGameTable', { roomId: recovered.room.roomId });
+        } else if (recovered.kind === 'cleaning') {
+          await deleteRoomAndFallbackToLocal(recovered.roomId, session.uid);
+          const afterCleanup = await recoverHostedRoom(session.uid);
+          if (afterCleanup.kind === 'none') setSyncRetryAt(afterCleanup.retryAt);
+        } else {
+          setSyncRetryAt(recovered.retryAt);
+        }
+      })
+      .catch((error) => {
+        console.error('[Cloud] restore hosted room failed', error);
+        setFormError(translateWithFallback(t, 'newGame.sync.restoreFailed', '未能恢復上次同步房，請稍後再試。'));
+      })
+      .finally(() => setSyncBusy(false));
+  }, [navigation, restoreOpenSyncRoom, t]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+
+      loadPendingHostedRoomCleanup()
+        .then(async (pendingCleanup) => {
+          if (!pendingCleanup) return;
+          const session = await getCurrentSession();
+          if (!session || session.uid !== pendingCleanup.uid) return;
+
+          // A successful read is only a connectivity probe. Remote cleanup still requires confirmation.
+          await getRoom(pendingCleanup.roomId);
+          if (!alive) return;
+          setPendingCleanupRoomId(pendingCleanup.roomId);
+
+          Alert.alert(
+            t('newGame.sync.pendingCleanup.title'),
+            t('newGame.sync.pendingCleanup.body'),
+            [
+              { text: t('newGame.sync.pendingCleanup.later'), style: 'cancel' },
+              {
+                text: t('newGame.sync.pendingCleanup.confirm'),
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    setSyncBusy(true);
+                    await deleteRoomAndFallbackToLocal(pendingCleanup.roomId, pendingCleanup.uid);
+                    await clearPendingHostedRoomCleanup(pendingCleanup.roomId);
+                    if (alive) {
+                      setPendingCleanupRoomId(null);
+                      Alert.alert(
+                        t('newGame.sync.pendingCleanup.doneTitle'),
+                        t('newGame.sync.pendingCleanup.doneBody'),
+                      );
+                    }
+                  } catch (error) {
+                    console.error('[Cloud] pending room cleanup failed', error);
+                    if (alive) {
+                      Alert.alert(
+                        t('newGame.sync.pendingCleanup.failedTitle'),
+                        t('newGame.sync.pendingCleanup.failedBody'),
+                      );
+                    }
+                  } finally {
+                    if (alive) setSyncBusy(false);
+                  }
+                },
+              },
+            ],
+          );
+        })
+        .catch(() => {
+          // Firebase is still unavailable. Keep the marker and try again when this screen regains focus.
+        });
+
+      return () => {
+        alive = false;
+      };
+    }, [t]),
+  );
+
   const handleKeepPlayerOnBench = (playerId: string) => {
     setSyncSeatAssignments((prev) => {
       const next = { ...prev };
@@ -877,6 +1069,10 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   };
 
   const handleEnableSync = async () => {
+    if (pendingCleanupRoomId) {
+      setFormError(t('newGame.sync.pendingCleanup.blocked'));
+      return;
+    }
     const draftContext = validateDraftRoomPrerequisites();
     if (!draftContext || syncBusy || loading || hasDraftRoom) {
       return;
@@ -886,35 +1082,90 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       setSyncBusy(true);
       const session = await ensureSession('google');
       setSessionUid(session.uid);
-      const createdRoom = await createRoom({
-        hostUid: session.uid,
-        title: draftContext.trimmedTitle,
-        memberCap: 8,
-        rulesSnapshot: {
-          title: draftContext.trimmedTitle,
-          currencyCode: draftContext.rules.currencyCode,
-          currencySymbol: draftContext.rules.currencySymbol,
-          mode: draftContext.rules.mode,
-          serializedRules: serializeRules(draftContext.rules),
-        },
-      });
-      const invite = await createInvite(createdRoom.roomId, session.uid);
-      setDraftRoom(createdRoom);
-      setInviteToken(invite.token);
-      setInviteText(
-        [
-          createdRoom.title,
-          `${translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}: ${invite.roomId}`,
-          invite.deepLink,
-        ].join('\n'),
-      );
-      setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
-      setSelectedSyncPlayerId(session.uid);
-      setDebugSyncJoinCount(0);
+      const recovered = await recoverHostedRoom(session.uid);
+      if (recovered.kind === 'open') {
+        await restoreOpenSyncRoom(recovered.room, recovered.invite);
+        return;
+      }
+      if (recovered.kind === 'active') {
+        navigation.replace('MultiplayerGameTable', { roomId: recovered.room.roomId });
+        return;
+      }
+      if (recovered.kind === 'cleaning') {
+        await deleteRoomAndFallbackToLocal(recovered.roomId, session.uid);
+        const afterCleanup = await recoverHostedRoom(session.uid);
+        if (afterCleanup.kind === 'none') setSyncRetryAt(afterCleanup.retryAt);
+        return;
+      }
+      if (recovered.retryAt && recovered.retryAt > Date.now()) {
+        setSyncRetryAt(recovered.retryAt);
+        setCooldownNow(Date.now());
+        return;
+      }
+      const profile = await getProfile(session.uid);
+      setHostDisplayName(profile?.displayName ?? `Player-${session.uid.slice(-4)}`);
+      setHostNameError(null);
+      setPendingSyncContext(draftContext);
+      setHostNameVisible(true);
       setFormError(null);
     } catch (error) {
       console.error('[Cloud] enable sync failed', error);
       setFormError(t('errors.createGame'));
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const handleConfirmHostName = async () => {
+    const confirmedName = hostDisplayName.trim();
+    if (!pendingSyncContext || !sessionUid || confirmedName.length < 1 || confirmedName.length > MAX_PLAYER_NAME_LENGTH) {
+      setHostNameError(translateWithFallback(t, 'newGame.sync.hostNameInvalid', '名稱需要 1–10 個字。'));
+      return;
+    }
+    try {
+      setSyncBusy(true);
+      setHostNameError(null);
+      await updateProfile(sessionUid, { displayName: confirmedName });
+      const result = await createRoom({
+        hostUid: sessionUid,
+        hostDisplayName: confirmedName,
+        title: pendingSyncContext.trimmedTitle,
+        memberCap: 8,
+        rulesSnapshot: {
+          title: pendingSyncContext.trimmedTitle,
+          currencyCode: pendingSyncContext.rules.currencyCode,
+          currencySymbol: pendingSyncContext.rules.currencySymbol,
+          mode: pendingSyncContext.rules.mode,
+          serializedRules: serializeRules(pendingSyncContext.rules),
+        },
+      });
+      if (!result.ok) {
+        if (result.code === 'RATE_LIMITED') {
+          setSyncRetryAt(result.retryAt);
+          setCooldownNow(Date.now());
+          setHostNameVisible(false);
+          return;
+        }
+        if (result.code === 'CLEANUP_IN_PROGRESS') {
+          await deleteRoomAndFallbackToLocal(result.roomId, sessionUid);
+          setHostNameVisible(false);
+          return;
+        }
+        throw new Error(result.message);
+      }
+      if (result.room.status === 'active') {
+        setHostNameVisible(false);
+        navigation.replace('MultiplayerGameTable', { roomId: result.room.roomId });
+        return;
+      }
+      if (!result.invite) throw new Error('Open room invite is missing');
+      await restoreOpenSyncRoom(result.room, result.invite);
+      setHostNameVisible(false);
+      setPendingSyncContext(null);
+      setDebugSyncJoinCount(0);
+    } catch (error) {
+      console.error('[Cloud] confirm sync host name failed', error);
+      setHostNameError(translateWithFallback(t, 'newGame.sync.createFailed', '未能建立同步房，請稍後再試。'));
     } finally {
       setSyncBusy(false);
     }
@@ -951,13 +1202,15 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           text: translateWithFallback(t, 'newGame.sync.cancelConfirmAction', '刪除同步房'),
           style: 'destructive',
           onPress: () => {
+            setSyncBusy(true);
             deleteRoomAndFallbackToLocal(draftRoom.roomId, sessionUid)
               .then(() => {
                 clearDraftSyncState();
               })
               .catch((error) => {
                 Alert.alert(translateWithFallback(t, 'roomLobby.alert.startFailedTitle', '操作失敗'), String(error));
-              });
+              })
+              .finally(() => setSyncBusy(false));
           },
         },
       ],
@@ -965,7 +1218,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   };
 
   const handleAddDebugSyncPlayer = async () => {
-    if (!draftRoom || !inviteToken || syncBusy) {
+    if (!DEBUG_FLAGS.enableSyncTestTools || !draftRoom || !inviteToken || syncBusy) {
       return;
     }
 
@@ -1498,7 +1751,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
               startingDealerModeManual: t('newGame.startingDealerMode.manual'),
               autoFlowHint: t('newGame.autoFlowHint'),
               dealerBadge: t('newGame.dealerBadge'),
-              syncEnable: translateWithFallback(t, 'newGame.sync.enable', '加入同步玩家'),
+              syncEnable: syncCooldownLabel,
               syncEnableBusy: translateWithFallback(t, 'newGame.sync.enabling', '建立同步房中...'),
               syncJoinedPlayersTitle: translateWithFallback(t, 'newGame.sync.joinedPlayersTitle', '已加入玩家'),
               syncJoinedPlayersHint: translateWithFallback(
@@ -1530,6 +1783,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             onSelectStartingDealer={handleSelectStartingDealer}
             syncEnabled={hasDraftRoom}
             syncBusy={syncBusy}
+            syncEnableDisabled={syncCooldownSeconds > 0}
             syncedSeatDisplayNames={syncedSeatDisplayNames}
             joinedSyncPlayers={joinedSyncPlayers.map((player) => ({
               playerId: player.playerId,
@@ -1605,6 +1859,17 @@ function NewGameStepperScreen({ navigation, route }: Props) {
                   ) : null}
                   <Pressable
                     onPress={() => {
+                      if (draftRoom) navigation.navigate('Profile', { roomId: draftRoom.roomId });
+                    }}
+                    disabled={draftRoom?.status !== 'open' || syncBusy}
+                    style={styles.syncToolbarButton}
+                  >
+                    <AppText style={styles.syncToolbarButtonText}>
+                      {translateWithFallback(t, 'roomLobby.viewProfile', '修改我的名稱')}
+                    </AppText>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
                       handleShareInvite().catch((error) => {
                         console.error('[NewGame] share invite failed', error);
                       });
@@ -1645,6 +1910,34 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             handleConfirmCreate().catch((error) => {
               console.error('[NewGame] confirm create failed', error);
             });
+          }}
+        />
+        <HostNameConfirmModal
+          visible={hostNameVisible}
+          value={hostDisplayName}
+          busy={syncBusy}
+          error={hostNameError}
+          labels={{
+            title: translateWithFallback(t, 'newGame.sync.hostNameTitle', '確認你的名稱'),
+            message: translateWithFallback(t, 'newGame.sync.hostNameMessage', '其他玩家會用呢個名稱認出你。確認後先會建立同步房。'),
+            inputLabel: translateWithFallback(t, 'newGame.sync.hostNameLabel', '房主名稱'),
+            placeholder: translateWithFallback(t, 'newGame.sync.hostNamePlaceholder', '輸入 1–10 個字'),
+            cancel: translateWithFallback(t, 'common.cancel', '取消'),
+            confirm: translateWithFallback(t, 'newGame.sync.hostNameConfirm', '確認並建立房間'),
+            confirming: translateWithFallback(t, 'newGame.sync.enabling', '建立同步房中...'),
+          }}
+          onChange={(value) => {
+            setHostDisplayName(value);
+            setHostNameError(null);
+          }}
+          onCancel={() => {
+            if (syncBusy) return;
+            setHostNameVisible(false);
+            setPendingSyncContext(null);
+            setHostNameError(null);
+          }}
+          onConfirm={() => {
+            handleConfirmHostName().catch((error) => console.error('[NewGame] host name confirm failed', error));
           }}
         />
       </KeyboardAvoidingView>

@@ -765,7 +765,8 @@ function RoomLobbyScreen({ navigation, route }: Props) {
           />
           <AppButton
             label={t('roomLobby.viewProfile')}
-            onPress={() => navigation.navigate('Profile')}
+            onPress={() => navigation.navigate('Profile', { roomId })}
+            disabled={!room || room.status !== 'open'}
             variant="secondary"
           />
         </View>
@@ -801,6 +802,9 @@ function getRoomStatusLabel(t: (...args: any[]) => string, status: RoomStatus): 
   }
   if (status === 'archived') {
     return t('cloud.status.archived' as never);
+  }
+  if (status === 'cancelling') {
+    return t('cloud.status.cancelling' as never);
   }
   return t('cloud.status.open' as never);
 }

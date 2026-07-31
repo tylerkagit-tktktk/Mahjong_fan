@@ -1,15 +1,18 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Text } from 'react-native';
 import AppButton from '../../src/components/AppButton';
 import MultiplayerGameTableScreen from '../../src/screens/cloud/MultiplayerGameTableScreen';
 import { archiveRoomToLocal } from '../../src/services/cloud/archiveRepo';
 import { ensureSession } from '../../src/services/cloud/authRepo';
 import { listHands, submitHand } from '../../src/services/cloud/handRepo';
+import { abandonSyncAndCreateLocalGame } from '../../src/services/cloud/localTakeoverRepo';
 import {
   endRoom,
   getRoom,
   listLineups,
+  proposeLineupChange,
   subscribeRoomState,
 } from '../../src/services/cloud/roomRepo';
 
@@ -26,10 +29,16 @@ jest.mock('../../src/services/cloud/handRepo', () => ({
   submitHand: jest.fn(),
 }));
 
+jest.mock('../../src/services/cloud/localTakeoverRepo', () => ({
+  abandonSyncAndCreateLocalGame: jest.fn(),
+  LocalTakeoverError: class LocalTakeoverError extends Error {},
+}));
+
 jest.mock('../../src/services/cloud/roomRepo', () => ({
   endRoom: jest.fn(),
   getRoom: jest.fn(),
   listLineups: jest.fn(),
+  proposeLineupChange: jest.fn(),
   subscribeRoomState: jest.fn(),
 }));
 
@@ -67,9 +76,11 @@ const mockedArchiveRoomToLocal = archiveRoomToLocal as jest.MockedFunction<typeo
 const mockedEnsureSession = ensureSession as jest.MockedFunction<typeof ensureSession>;
 const mockedListHands = listHands as jest.MockedFunction<typeof listHands>;
 const mockedSubmitHand = submitHand as jest.MockedFunction<typeof submitHand>;
+const mockedAbandonSyncAndCreateLocalGame = abandonSyncAndCreateLocalGame as jest.MockedFunction<typeof abandonSyncAndCreateLocalGame>;
 const mockedEndRoom = endRoom as jest.MockedFunction<typeof endRoom>;
 const mockedGetRoom = getRoom as jest.MockedFunction<typeof getRoom>;
 const mockedListLineups = listLineups as jest.MockedFunction<typeof listLineups>;
+const mockedProposeLineupChange = proposeLineupChange as jest.MockedFunction<typeof proposeLineupChange>;
 const mockedSubscribeRoomState = subscribeRoomState as jest.MockedFunction<typeof subscribeRoomState>;
 
 function createRoom() {
@@ -141,6 +152,24 @@ function createPlayers() {
   })) as any;
 }
 
+function createFullWindCycleHands() {
+  return Array.from({ length: 16 }, (_, index) => ({
+    handId: `hand-${index + 1}`,
+    roomId: 'room-1',
+    handIndex: index + 1,
+    type: 'draw',
+    submittedByUid: `uid-${(index % 4) + 1}`,
+    baseVersion: index + 2,
+    serverVersion: index + 3,
+    lineupVersion: 1,
+    winnerPlayerId: null,
+    discarderPlayerId: null,
+    dealerAction: 'pass',
+    fan: 3,
+    createdAt: 1735689600000 + index,
+  })) as any;
+}
+
 async function renderScreen(navigation = {
   setOptions: jest.fn(),
   replace: jest.fn(),
@@ -169,13 +198,16 @@ function textNodes(root: renderer.ReactTestInstance): string[] {
 }
 
 describe('MultiplayerGameTableScreen end game flow', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
+    await AsyncStorage.clear();
     mockedEnsureSession.mockResolvedValue({ uid: 'uid-1', provider: 'google' });
     mockedGetRoom.mockResolvedValue(createRoom());
     mockedListHands.mockResolvedValue([]);
     mockedSubmitHand.mockResolvedValue({ ok: true, nextVersion: 3, nextHandIndex: 2 });
+    mockedAbandonSyncAndCreateLocalGame.mockResolvedValue('local-game-1');
     mockedListLineups.mockResolvedValue([createLineup()]);
+    mockedProposeLineupChange.mockResolvedValue({ ok: true, nextVersion: 3, nextHandIndex: 16 });
     mockedEndRoom.mockResolvedValue({ ok: true, nextVersion: 3, nextHandIndex: 1 });
     mockedArchiveRoomToLocal.mockResolvedValue({
       roomId: 'room-1',
@@ -285,6 +317,149 @@ describe('MultiplayerGameTableScreen end game flow', () => {
       await Promise.resolve();
     });
 
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
+  it('keeps the last synced table visible and pauses writes after a listener quota error', async () => {
+    let emitError: ((error: unknown) => void) | undefined;
+    mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb, onError) => {
+      emitError = onError;
+      cb({ room: createRoom(), players: createPlayers(), lineup: createLineup() });
+      return jest.fn();
+    });
+    const { tree, navigation } = await renderScreen();
+
+    await act(async () => {
+      emitError?.({ code: 'firestore/resource-exhausted' });
+    });
+
+    expect(navigation.setOptions).toHaveBeenLastCalledWith({ title: 'Room 1' });
+    expect(textNodes(tree.root)).toContain('multiplayer.syncPaused.title');
+    expect(tree.root.findByProps({ testID: 'multiplayer-sync-paused' })).toBeTruthy();
+    const drawButton = tree.root
+      .findAllByType(AppButton)
+      .find((button) => button.props.label === 'gameTable.action.draw');
+    expect(drawButton?.props.disabled).toBe(true);
+
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
+  it('lets only the host confirm a local takeover from the paused state', async () => {
+    let emitError: ((error: unknown) => void) | undefined;
+    mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb, onError) => {
+      emitError = onError;
+      cb({ room: createRoom(), players: createPlayers(), lineup: createLineup() });
+      return jest.fn();
+    });
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const { tree, navigation } = await renderScreen();
+
+    await act(async () => {
+      emitError?.({ code: 'firestore/resource-exhausted' });
+    });
+    const takeoverButton = tree.root.findByProps({ testID: 'multiplayer-local-takeover' });
+
+    await act(async () => {
+      takeoverButton.props.onPress();
+    });
+    const [, , buttons] = alertSpy.mock.calls[0];
+    const confirmButton = (buttons as Array<{ text: string; onPress?: () => Promise<void> }>).find(
+      (button) => button.text === 'multiplayer.localTakeover.confirm',
+    );
+
+    await act(async () => {
+      await confirmButton!.onPress?.();
+    });
+
+    expect(mockedAbandonSyncAndCreateLocalGame).toHaveBeenCalledWith('room-1', 'uid-1');
+    expect(navigation.replace).toHaveBeenCalledWith('GameTable', { gameId: 'local-game-1' });
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
+  it('does not show the local takeover action to a non-host player', async () => {
+    mockedEnsureSession.mockResolvedValue({ uid: 'uid-2', provider: 'google' });
+    let emitError: ((error: unknown) => void) | undefined;
+    mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb, onError) => {
+      emitError = onError;
+      cb({ room: createRoom(), players: createPlayers(), lineup: createLineup() });
+      return jest.fn();
+    });
+    const { tree } = await renderScreen();
+
+    await act(async () => {
+      emitError?.({ code: 'firestore/resource-exhausted' });
+    });
+
+    expect(tree.root.findAllByProps({ testID: 'multiplayer-local-takeover' })).toHaveLength(0);
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
+  it('does not retry a failed automatic archive in a render loop', async () => {
+    let emitRoom: ((room: ReturnType<typeof createRoom>) => void) | null = null;
+    mockedArchiveRoomToLocal.mockRejectedValue({ code: 'firestore/resource-exhausted' });
+    mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb) => {
+      emitRoom = (room) => cb({ room, players: createPlayers(), lineup: createLineup() });
+      cb({ room: createRoom(), players: createPlayers(), lineup: createLineup() });
+      return jest.fn();
+    });
+    const { tree } = await renderScreen();
+
+    await act(async () => {
+      emitRoom?.({ ...createRoom(), status: 'ended' });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockedArchiveRoomToLocal).toHaveBeenCalledTimes(1);
+    expect(tree.root.findByProps({ testID: 'multiplayer-sync-paused' })).toBeTruthy();
+
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
+  it('locks hand submission while the first request is in flight', async () => {
+    let resolveSubmit: (() => void) | null = null;
+    mockedSubmitHand.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveSubmit = () => resolve({ ok: true, nextVersion: 3, nextHandIndex: 2 });
+      }),
+    );
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const { tree } = await renderScreen();
+    const drawButton = tree.root
+      .findAllByType(AppButton)
+      .find((button) => button.props.label === 'gameTable.action.draw');
+
+    await act(async () => {
+      drawButton!.props.onPress();
+    });
+    const [, , buttons] = alertSpy.mock.calls[0];
+    const passButton = (buttons as Array<{ text: string; onPress?: () => void }>).find(
+      (button) => button.text === 'gameTable.draw.pass',
+    );
+
+    await act(async () => {
+      passButton!.onPress?.();
+      passButton!.onPress?.();
+    });
+    expect(mockedSubmitHand).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSubmit?.();
+      await Promise.resolve();
+    });
     alertSpy.mockRestore();
     await act(async () => {
       tree.unmount();
@@ -436,6 +611,85 @@ describe('MultiplayerGameTableScreen end game flow', () => {
     expect(labels).toContain('南風東局');
     expect(labels).toContain('第 2 圈 · 已打 4 鋪');
 
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
+  it('prompts the host after a full wind cycle and publishes the final reseat lineup', async () => {
+    const wrappedRoom = { ...createRoom(), currentVersion: 18, currentHandIndex: 16 };
+    mockedListHands.mockResolvedValue(createFullWindCycleHands());
+    mockedGetRoom.mockResolvedValue(wrappedRoom);
+    mockedProposeLineupChange.mockResolvedValue({ ok: true, nextVersion: 19, nextHandIndex: 16 });
+    mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb) => {
+      cb({ room: wrappedRoom, players: createPlayers(), lineup: createLineup() });
+      return jest.fn();
+    });
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const { tree } = await renderScreen();
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const promptCall = alertSpy.mock.calls.find(([title]) => title === 'gameTable.reseat.promptTitle');
+    expect(promptCall).toBeTruthy();
+    const promptButtons = promptCall?.[2] as Array<{ text: string; onPress?: () => void }>;
+    const openButton = promptButtons.find((button) => button.text === 'gameTable.reseat.action.open');
+
+    await act(async () => {
+      openButton?.onPress?.();
+    });
+    await act(async () => {
+      tree.root.findByProps({ testID: 'reseat-player-row-0' }).props.onPress();
+    });
+    await act(async () => {
+      tree.root.findByProps({ testID: 'reseat-player-row-2' }).props.onPress();
+    });
+
+    const confirmButton = tree.root
+      .findAllByType(AppButton)
+      .find((button) => button.props.label === 'gameTable.reseat.confirmNewSeats');
+    await act(async () => {
+      await confirmButton?.props.onPress();
+    });
+
+    expect(mockedProposeLineupChange).toHaveBeenCalledWith({
+      roomId: 'room-1',
+      createdByUid: 'uid-1',
+      baseVersion: 18,
+      nextSeats: {
+        '0': 'uid-3',
+        '1': 'uid-2',
+        '2': 'uid-1',
+        '3': 'uid-4',
+      },
+    });
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
+  it('does not offer full-cycle reseating to a non-host player', async () => {
+    mockedEnsureSession.mockResolvedValue({ uid: 'uid-2', provider: 'google' });
+    mockedListHands.mockResolvedValue(createFullWindCycleHands());
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    const { tree } = await renderScreen();
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(alertSpy.mock.calls.some(([title]) => title === 'gameTable.reseat.promptTitle')).toBe(false);
+    expect(mockedProposeLineupChange).not.toHaveBeenCalled();
+
+    alertSpy.mockRestore();
     await act(async () => {
       tree.unmount();
     });

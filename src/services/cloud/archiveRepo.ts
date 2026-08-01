@@ -5,9 +5,19 @@ import {
   saveCloudArchive,
 } from '../../db/cloudArchiveRepo';
 import { CloudArchivePayload } from '../../models/cloud';
-import { getRoom, listLineups, listMembers, listTemporaryPlayers, markArchiveSynced, markRoomArchived } from './roomRepo';
-import { listHands } from './handRepo';
+import {
+  getRoom,
+  listMembers,
+  listTemporaryPlayers,
+  markArchiveSynced,
+  markRoomArchived,
+} from './roomRepo';
 import { applyArchiveStats } from './profileRepo';
+import { syncRoomTimeline } from './roomTimelineRepo';
+import {
+  loadActiveRoomRecoverySnapshot,
+  waitForActiveRoomRecoveryWrites,
+} from './storage';
 
 export async function buildArchivePayload(roomId: string): Promise<CloudArchivePayload> {
   const room = await getRoom(roomId);
@@ -18,11 +28,22 @@ export async function buildArchivePayload(roomId: string): Promise<CloudArchiveP
     throw new Error('Room is not ready to archive');
   }
 
-  const [members, tempPlayers, lineups, hands] = await Promise.all([
+  await waitForActiveRoomRecoveryWrites(roomId);
+  const recovery = await loadActiveRoomRecoverySnapshot(roomId);
+  const [members, tempPlayers, timeline] = await Promise.all([
     listMembers(roomId),
     listTemporaryPlayers(roomId),
-    listLineups(roomId),
-    listHands(roomId),
+    syncRoomTimeline({
+      roomId,
+      currentHandIndex: room.currentHandIndex,
+      activeLineupVersion: room.activeLineupVersion,
+      cache: {
+        hands: recovery?.hands ?? [],
+        lineups: recovery?.lineups ?? (recovery?.lineup ? [recovery.lineup] : []),
+      },
+      activeLineup: recovery?.lineup,
+      requireAllLineupVersions: true,
+    }),
   ]);
   const archiveVersion = room.archiveVersion ?? 1;
 
@@ -30,8 +51,8 @@ export async function buildArchivePayload(roomId: string): Promise<CloudArchiveP
     room,
     members,
     tempPlayers,
-    lineups,
-    hands,
+    lineups: timeline.lineups,
+    hands: timeline.hands,
     archivedFromCloudAt: room.archiveReadyAt ?? Date.now(),
     archiveVersion,
   };

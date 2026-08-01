@@ -18,7 +18,7 @@ import { ResolvedRoomPlayer, Room, SeatKey } from '../models/cloud';
 import { RootStackParamList } from '../navigation/types';
 import { ensureSession, getCurrentSession } from '../services/cloud/authRepo';
 import {
-  addTemporaryPlayer,
+  addTemporaryPlayers,
   createRoom,
   deleteRoomAndFallbackToLocal,
   getRoom,
@@ -1305,12 +1305,8 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           return false;
         }
 
-        const latestRoom = await getRoom(draftRoom.roomId);
-        if (!latestRoom) {
-          throw new Error('Room not found');
-        }
-
         const nextSeats = { ...EMPTY_SYNC_ASSIGNMENTS } as Record<SeatKey, string>;
+        const missingTemporaryPlayers: Array<{ seatKey: SeatKey; displayName: string }> = [];
         for (let index = 0; index < PLAYER_COUNT; index += 1) {
           const seatKey = SEAT_KEYS[index];
           const assignedRealPlayerId = syncSeatAssignments[seatKey];
@@ -1318,18 +1314,26 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             nextSeats[seatKey] = assignedRealPlayerId;
             continue;
           }
-          const temporaryPlayer = await addTemporaryPlayer({
-            roomId: latestRoom.roomId,
-            createdByUid: session.uid,
+          missingTemporaryPlayers.push({
+            seatKey,
             displayName: context.resolvedPlayers[index],
           });
-          nextSeats[seatKey] = temporaryPlayer.playerId;
         }
+        const createdTemporaryPlayers = missingTemporaryPlayers.length
+          ? await addTemporaryPlayers({
+            roomId: draftRoom.roomId,
+            createdByUid: session.uid,
+            displayNames: missingTemporaryPlayers.map((player) => player.displayName),
+          })
+          : [];
+        missingTemporaryPlayers.forEach((player, index) => {
+          nextSeats[player.seatKey] = createdTemporaryPlayers[index].playerId;
+        });
 
         const startResult = await startRoom({
-          roomId: latestRoom.roomId,
+          roomId: draftRoom.roomId,
           startedByUid: session.uid,
-          baseVersion: latestRoom.currentVersion,
+          baseVersion: draftRoom.currentVersion,
           nextSeats,
         });
         if (!startResult.ok) {
@@ -1337,7 +1341,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           return false;
         }
 
-        navigation.replace('MultiplayerGameTable', { roomId: latestRoom.roomId });
+        navigation.replace('MultiplayerGameTable', { roomId: draftRoom.roomId });
         return true;
       } catch (err) {
         console.error('[Cloud] start sync room failed', err);

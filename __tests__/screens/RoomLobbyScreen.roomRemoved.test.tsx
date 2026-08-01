@@ -11,6 +11,7 @@ jest.mock('../../src/services/cloud/authRepo', () => ({
 
 jest.mock('../../src/services/cloud/roomRepo', () => ({
   addTemporaryPlayer: jest.fn(),
+  addTemporaryPlayers: jest.fn(),
   createInvite: jest.fn(),
   deleteRoomAndFallbackToLocal: jest.fn(),
   getBenchPlayers: jest.fn(() => []),

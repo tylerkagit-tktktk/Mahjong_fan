@@ -212,8 +212,12 @@ export function mergeActiveRoomRecoverySnapshot(
   });
 }
 
-export async function clearActiveRoomRecoverySnapshot(roomId: string): Promise<void> {
+export async function waitForActiveRoomRecoveryWrites(roomId: string): Promise<void> {
   await (recoveryWriteQueues.get(roomId) ?? Promise.resolve()).catch(() => {});
+}
+
+export async function clearActiveRoomRecoverySnapshot(roomId: string): Promise<void> {
+  await waitForActiveRoomRecoveryWrites(roomId);
   await removeItem(activeRoomRecoveryKey(roomId));
 }
 

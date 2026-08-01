@@ -14,6 +14,7 @@ import { typography } from '../../styles/typography';
 import { useAppLanguage } from '../../i18n/useAppLanguage';
 import {
   addTemporaryPlayer,
+  addTemporaryPlayers,
   createInvite,
   deleteRoomAndFallbackToLocal,
   getBenchPlayers,
@@ -316,14 +317,13 @@ function RoomLobbyScreen({ navigation, route }: Props) {
     );
   }, [room, selectedRealMergeUid, selectedTempMergeId, sessionUid, t]);
 
-  const executeStartRoom = useCallback(async () => {
+  const executeStartRoom = useCallback(async (startPlayers = players) => {
     if (!room) {
       return;
     }
     setStartingRoomBusy(true);
     try {
-      const latestPlayers = await listRoomPlayers(room.roomId, sessionUid);
-      const nextSeats = getDefaultStartSeats(latestPlayers);
+      const nextSeats = getDefaultStartSeats(startPlayers);
       if (!nextSeats) {
         setNotice(t('roomLobby.notice.needFourPlayers'));
         return;
@@ -347,7 +347,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
       setStartSetupVisible(false);
       setStartTempNames([]);
     }
-  }, [navigation, room, sessionUid, t]);
+  }, [navigation, players, room, sessionUid, t]);
 
   const handleConfirmSingleRealFallback = useCallback(() => {
     if (!room) {
@@ -415,14 +415,13 @@ function RoomLobbyScreen({ navigation, route }: Props) {
 
     setStartingRoomBusy(true);
     try {
-      for (const displayName of trimmedNames) {
-        await addTemporaryPlayer({
-          roomId: room.roomId,
-          createdByUid: sessionUid,
-          displayName,
-        });
-      }
-      await executeStartRoom();
+      await addTemporaryPlayers({
+        roomId: room.roomId,
+        createdByUid: sessionUid,
+        displayNames: trimmedNames,
+      });
+      const latestPlayers = await listRoomPlayers(room.roomId, sessionUid);
+      await executeStartRoom(latestPlayers);
     } catch (error) {
       Alert.alert(t('roomLobby.alert.startFailedTitle'), String(error));
       setStartingRoomBusy(false);

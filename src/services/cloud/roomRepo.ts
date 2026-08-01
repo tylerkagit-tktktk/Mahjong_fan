@@ -1,5 +1,6 @@
 import {
   ArchiveSyncStatus,
+  CloudUserProfile,
   RoomCreationGuard,
   LineupChangeInput,
   ResolvedRoomPlayer,
@@ -132,7 +133,6 @@ async function createRoomResult(input: {
   rulesSnapshot?: Record<string, unknown>;
   memberCap?: number;
 }): Promise<CreateRoomResult> {
-  const hostProfile = await getProfile(input.hostUid);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const transactionResult = await getFirestore().runTransaction(async (transaction) => {
       const guardReference = roomCreationGuardRef(input.hostUid);
@@ -161,6 +161,12 @@ async function createRoomResult(input: {
         return { kind: 'rateLimited', retryAt: lastCreatedAt + ROOM_CREATION_COOLDOWN_MS } satisfies GuardedCreationTransactionResult;
       }
 
+      const profileSnapshot = await transaction.get(
+        getFirestore().collection('profiles').doc(input.hostUid),
+      );
+      const hostProfile = profileSnapshot.exists()
+        ? profileSnapshot.data() as CloudUserProfile
+        : null;
       const timestamp = Date.now();
       const roomId = makeId('room');
       const token = createToken();
@@ -394,46 +400,91 @@ export async function getActiveLineup(roomId: string): Promise<RoomLineup | null
   return snapshot.exists() ? normalizeLineup(snapshot.data() as RoomLineup) : null;
 }
 
+export async function getLineupByVersion(roomId: string, lineupVersion: number): Promise<RoomLineup | null> {
+  if (!Number.isInteger(lineupVersion) || lineupVersion <= 0) return null;
+  const snapshot = await lineupsRef(roomId).doc(String(lineupVersion)).get();
+  return snapshot.exists() ? normalizeLineup(snapshot.data() as RoomLineup) : null;
+}
+
 export async function listLineups(roomId: string): Promise<RoomLineup[]> {
   const snapshot = await lineupsRef(roomId).orderBy('lineupVersion').get();
   return snapshot.docs.map((doc) => normalizeLineup(doc.data() as RoomLineup));
 }
 
-export async function addTemporaryPlayer(input: { roomId: string; createdByUid: string; displayName: string }): Promise<ResolvedRoomPlayer> {
-  const room = await getRoom(input.roomId);
-  if (!room) throw new Error('Room not found');
-  if (room.hostUid !== input.createdByUid) throw new Error('Only host can add temporary players');
-  if (room.status !== 'open' && room.status !== 'active') throw new Error('Room already ended');
-  const displayName = input.displayName.trim();
-  if (!displayName) throw new Error('Temporary player name is required');
-  const total = (await listRoomPlayers(input.roomId)).length;
-  if (total >= room.memberCap) throw new Error('Room member cap reached');
+export async function addTemporaryPlayers(input: {
+  roomId: string;
+  createdByUid: string;
+  displayNames: string[];
+}): Promise<ResolvedRoomPlayer[]> {
+  const displayNames = input.displayNames.map((displayName) => displayName.trim());
+  if (!displayNames.length || displayNames.some((displayName) => !displayName)) {
+    throw new Error('Temporary player name is required');
+  }
+  const temporaryPlayers = await listTemporaryPlayers(input.roomId);
   const timestamp = Date.now();
-  const tempPlayer: RoomTemporaryPlayer = { tempPlayerId: makeId('temp'), roomId: input.roomId, createdByUid: input.createdByUid, displayName, createdAt: timestamp, updatedAt: timestamp };
+  const nextTemporaryPlayers = displayNames.map<RoomTemporaryPlayer>((displayName, index) => ({
+    tempPlayerId: makeId('temp'),
+    roomId: input.roomId,
+    createdByUid: input.createdByUid,
+    displayName,
+    createdAt: timestamp + index,
+    updatedAt: timestamp + index,
+  }));
   await getFirestore().runTransaction(async (transaction) => {
     const current = await transaction.get(roomRef(input.roomId));
     if (!current.exists()) throw new Error('Room not found');
-    transaction.set(temporaryPlayersRef(input.roomId).doc(tempPlayer.tempPlayerId), tempPlayer);
+    const currentRoom = current.data() as Room;
+    if (currentRoom.hostUid !== input.createdByUid) throw new Error('Only host can add temporary players');
+    if (currentRoom.status !== 'open' && currentRoom.status !== 'active') throw new Error('Room already ended');
+    const total = currentRoom.memberCount + temporaryPlayers.length + displayNames.length;
+    if (total > currentRoom.memberCap) throw new Error('Room member cap reached');
+    nextTemporaryPlayers.forEach((tempPlayer) => {
+      transaction.set(temporaryPlayersRef(input.roomId).doc(tempPlayer.tempPlayerId), tempPlayer);
+    });
     transaction.update(roomRef(input.roomId), { updatedAt: timestamp });
   });
-  return { playerId: tempPlayer.tempPlayerId, roomId: tempPlayer.roomId, kind: 'temporary', uid: null, displayName, avatarUrl: null, isHost: false, isSelf: false, joinedAt: timestamp };
+  return nextTemporaryPlayers.map((tempPlayer) => ({
+    playerId: tempPlayer.tempPlayerId,
+    roomId: tempPlayer.roomId,
+    kind: 'temporary',
+    uid: null,
+    displayName: tempPlayer.displayName,
+    avatarUrl: null,
+    isHost: false,
+    isSelf: false,
+    joinedAt: tempPlayer.createdAt,
+  }));
+}
+
+export async function addTemporaryPlayer(input: {
+  roomId: string;
+  createdByUid: string;
+  displayName: string;
+}): Promise<ResolvedRoomPlayer> {
+  const [player] = await addTemporaryPlayers({
+    roomId: input.roomId,
+    createdByUid: input.createdByUid,
+    displayNames: [input.displayName],
+  });
+  return player;
 }
 
 async function writeLineup(input: StartRoomInput | LineupChangeInput, expectedStatus: 'open' | 'active'): Promise<SubmitResult> {
-  const players = await listRoomPlayers(input.roomId);
-  const room = await getRoom(input.roomId);
-  if (!room) return { ok: false, code: 'ROOM_NOT_FOUND', message: 'Room not found' };
-  if (room.hostUid !== ('startedByUid' in input ? input.startedByUid : input.createdByUid)) return { ok: false, code: 'LINEUP_CHANGE_WINDOW_CLOSED', message: 'Only host can change lineup' };
-  if (room.status !== expectedStatus) return { ok: false, code: 'ROOM_NOT_OPEN', message: 'Room is not available for this change' };
-  const validation = validateSeatSelection(room, players, input.nextSeats);
-  if (validation) return validation;
+  const [members, temporaryPlayers] = await Promise.all([
+    listMembers(input.roomId),
+    listTemporaryPlayers(input.roomId),
+  ]);
   const actorUid = 'startedByUid' in input ? input.startedByUid : input.createdByUid;
   return getFirestore().runTransaction(async (transaction) => {
     const snapshot = await transaction.get(roomRef(input.roomId));
     if (!snapshot.exists()) return { ok: false, code: 'ROOM_NOT_FOUND', message: 'Room not found' } as SubmitResult;
     const current = snapshot.data() as Room;
+    if (current.hostUid !== actorUid) return { ok: false, code: 'LINEUP_CHANGE_WINDOW_CLOSED', message: 'Only host can change lineup' } as SubmitResult;
     if (current.currentVersion !== input.baseVersion) return { ok: false, code: 'VERSION_CONFLICT', message: 'Version conflict', latestVersion: current.currentVersion } as SubmitResult;
     if (current.status !== expectedStatus) return { ok: false, code: 'ROOM_NOT_OPEN', message: 'Room is not available for this change' } as SubmitResult;
+    const players = resolveRoomPlayers(current, members, temporaryPlayers);
+    const validation = validateSeatSelection(current, players, input.nextSeats);
+    if (validation) return validation;
     const lineupVersion = current.activeLineupVersion + 1;
     const lineup: RoomLineup = { lineupId: `lineup_${lineupVersion}`, roomId: input.roomId, effectiveFromHandIndex: expectedStatus === 'open' ? current.currentHandIndex : current.currentHandIndex + 1, seats: { ...input.nextSeats }, createdByUid: actorUid, createdAt: Date.now(), baseVersion: input.baseVersion, lineupVersion };
     transaction.set(lineupsRef(input.roomId).doc(String(lineupVersion)), lineup);

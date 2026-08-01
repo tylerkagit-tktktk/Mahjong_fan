@@ -22,7 +22,7 @@ import {
   abandonSyncAndCreateLocalGame,
   LocalTakeoverError,
 } from '../../services/cloud/localTakeoverRepo';
-import { listHands, submitHand } from '../../services/cloud/handRepo';
+import { submitHand } from '../../services/cloud/handRepo';
 import { computeHkSettlement, toAmountFromQ } from '../../domain/hk/settlement';
 import ReseatFlow from '../gameTable/ReseatFlow';
 import { formatSeatLabel } from '../gameTable/seatMapping';
@@ -36,10 +36,10 @@ import {
 import {
   endRoom,
   getRoom,
-  listLineups,
   proposeLineupChange,
   subscribeRoomState,
 } from '../../services/cloud/roomRepo';
+import { RoomTimelineCache, syncRoomTimeline } from '../../services/cloud/roomTimelineRepo';
 import {
   clearActiveRoomRecoverySnapshot,
   loadActiveRoomRecoverySnapshot,
@@ -142,6 +142,9 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
   const wrapTokenLoadPromiseRef = useRef<Promise<void> | null>(null);
   const lastPromptedWrapTokenRef = useRef<string | null>(null);
   const activeReseatWrapTokenRef = useRef<string | null>(null);
+  const timelineCacheRef = useRef<RoomTimelineCache>({ hands: [], lineups: [] });
+  const timelineCacheHydratedRef = useRef(false);
+  const timelineSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const pauseCloudSync = useCallback((error: unknown) => {
     const now = Date.now();
@@ -192,6 +195,9 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
     activeReseatWrapTokenRef.current = null;
     setWrapCandidate(null);
     setReseatVisible(false);
+    timelineCacheRef.current = { hands: [], lineups: [] };
+    timelineCacheHydratedRef.current = false;
+    timelineSyncQueueRef.current = Promise.resolve();
     ensureWrapTokenLoaded().catch(() => {});
   }, [ensureWrapTokenLoaded]);
 
@@ -503,8 +509,30 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
   useEffect(() => {
     let alive = true;
 
+    if (!room) {
+      return undefined;
+    }
+
+    const targetRoom = room;
     const loadTotals = async () => {
-      const [hands, lineups] = await Promise.all([listHands(roomId), listLineups(roomId)]);
+      if (!timelineCacheHydratedRef.current) {
+        const snapshot = await loadActiveRoomRecoverySnapshot(roomId);
+        timelineCacheRef.current = {
+          hands: snapshot?.hands ?? [],
+          lineups: snapshot?.lineups ?? (snapshot?.lineup ? [snapshot.lineup] : []),
+        };
+        timelineCacheHydratedRef.current = true;
+      }
+
+      const timeline = await syncRoomTimeline({
+        roomId,
+        currentHandIndex: targetRoom.currentHandIndex,
+        activeLineupVersion: targetRoom.activeLineupVersion,
+        cache: timelineCacheRef.current,
+        activeLineup: lineup,
+      });
+      timelineCacheRef.current = timeline;
+      const { hands, lineups } = timeline;
       const lineupByVersion = new Map(lineups.map((entry) => [entry.lineupVersion, entry] as const));
       const nextTotals: Record<string, number> = {};
       let nextDealerSeatIndex = 0;
@@ -607,16 +635,18 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
       }
     };
 
-    loadTotals().catch((error) => {
-      if (alive) {
-        pauseCloudSync(error);
-      }
+    const queuedSync = timelineSyncQueueRef.current
+      .catch(() => {})
+      .then(loadTotals);
+    timelineSyncQueueRef.current = queuedSync.catch(() => {});
+    queuedSync.catch((error) => {
+      if (alive) pauseCloudSync(error);
     });
 
     return () => {
       alive = false;
     };
-  }, [minFanInput, pauseCloudSync, retryGeneration, roomId, roomRules, roomVersion]);
+  }, [lineup, minFanInput, pauseCloudSync, retryGeneration, room, roomId, roomRules]);
 
   useEffect(() => {
     if (!wrapCandidate || !room || !uid || room.hostUid !== uid || room.status !== 'active') {

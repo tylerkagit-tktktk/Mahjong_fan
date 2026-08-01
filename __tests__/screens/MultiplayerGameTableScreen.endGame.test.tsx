@@ -6,12 +6,13 @@ import AppButton from '../../src/components/AppButton';
 import MultiplayerGameTableScreen from '../../src/screens/cloud/MultiplayerGameTableScreen';
 import { archiveRoomToLocal } from '../../src/services/cloud/archiveRepo';
 import { ensureSession } from '../../src/services/cloud/authRepo';
-import { listHands, submitHand } from '../../src/services/cloud/handRepo';
+import { listHandsAfter, submitHand } from '../../src/services/cloud/handRepo';
 import { abandonSyncAndCreateLocalGame } from '../../src/services/cloud/localTakeoverRepo';
+import { mergeActiveRoomRecoverySnapshot } from '../../src/services/cloud/storage';
 import {
   endRoom,
+  getLineupByVersion,
   getRoom,
-  listLineups,
   proposeLineupChange,
   subscribeRoomState,
 } from '../../src/services/cloud/roomRepo';
@@ -25,7 +26,7 @@ jest.mock('../../src/services/cloud/authRepo', () => ({
 }));
 
 jest.mock('../../src/services/cloud/handRepo', () => ({
-  listHands: jest.fn(),
+  listHandsAfter: jest.fn(),
   submitHand: jest.fn(),
 }));
 
@@ -36,8 +37,8 @@ jest.mock('../../src/services/cloud/localTakeoverRepo', () => ({
 
 jest.mock('../../src/services/cloud/roomRepo', () => ({
   endRoom: jest.fn(),
+  getLineupByVersion: jest.fn(),
   getRoom: jest.fn(),
-  listLineups: jest.fn(),
   proposeLineupChange: jest.fn(),
   subscribeRoomState: jest.fn(),
 }));
@@ -74,12 +75,12 @@ jest.mock('react-native-safe-area-context', () => {
 
 const mockedArchiveRoomToLocal = archiveRoomToLocal as jest.MockedFunction<typeof archiveRoomToLocal>;
 const mockedEnsureSession = ensureSession as jest.MockedFunction<typeof ensureSession>;
-const mockedListHands = listHands as jest.MockedFunction<typeof listHands>;
+const mockedListHandsAfter = listHandsAfter as jest.MockedFunction<typeof listHandsAfter>;
 const mockedSubmitHand = submitHand as jest.MockedFunction<typeof submitHand>;
 const mockedAbandonSyncAndCreateLocalGame = abandonSyncAndCreateLocalGame as jest.MockedFunction<typeof abandonSyncAndCreateLocalGame>;
 const mockedEndRoom = endRoom as jest.MockedFunction<typeof endRoom>;
+const mockedGetLineupByVersion = getLineupByVersion as jest.MockedFunction<typeof getLineupByVersion>;
 const mockedGetRoom = getRoom as jest.MockedFunction<typeof getRoom>;
-const mockedListLineups = listLineups as jest.MockedFunction<typeof listLineups>;
 const mockedProposeLineupChange = proposeLineupChange as jest.MockedFunction<typeof proposeLineupChange>;
 const mockedSubscribeRoomState = subscribeRoomState as jest.MockedFunction<typeof subscribeRoomState>;
 
@@ -170,6 +171,24 @@ function createFullWindCycleHands() {
   })) as any;
 }
 
+function createFirstHand() {
+  return {
+    handId: 'hand-1',
+    roomId: 'room-1',
+    handIndex: 1,
+    type: 'draw',
+    submittedByUid: 'uid-1',
+    baseVersion: 1,
+    serverVersion: 2,
+    lineupVersion: 1,
+    winnerPlayerId: null,
+    discarderPlayerId: null,
+    dealerAction: 'stick',
+    fan: 3,
+    createdAt: 1735689600000,
+  } as any;
+}
+
 async function renderScreen(navigation = {
   setOptions: jest.fn(),
   replace: jest.fn(),
@@ -203,10 +222,10 @@ describe('MultiplayerGameTableScreen end game flow', () => {
     await AsyncStorage.clear();
     mockedEnsureSession.mockResolvedValue({ uid: 'uid-1', provider: 'google' });
     mockedGetRoom.mockResolvedValue(createRoom());
-    mockedListHands.mockResolvedValue([]);
+    mockedListHandsAfter.mockResolvedValue([createFirstHand()]);
     mockedSubmitHand.mockResolvedValue({ ok: true, nextVersion: 3, nextHandIndex: 2 });
     mockedAbandonSyncAndCreateLocalGame.mockResolvedValue('local-game-1');
-    mockedListLineups.mockResolvedValue([createLineup()]);
+    mockedGetLineupByVersion.mockResolvedValue(createLineup());
     mockedProposeLineupChange.mockResolvedValue({ ok: true, nextVersion: 3, nextHandIndex: 16 });
     mockedEndRoom.mockResolvedValue({ ok: true, nextVersion: 3, nextHandIndex: 1 });
     mockedArchiveRoomToLocal.mockResolvedValue({
@@ -504,7 +523,7 @@ describe('MultiplayerGameTableScreen end game flow', () => {
   });
 
   it('shows the next dealer after a non-dealer win', async () => {
-    mockedListHands.mockResolvedValue([
+    mockedListHandsAfter.mockResolvedValue([
       {
         handId: 'hand-1',
         roomId: 'room-1',
@@ -542,7 +561,8 @@ describe('MultiplayerGameTableScreen end game flow', () => {
   });
 
   it('advances to the next wind after four dealer passes', async () => {
-    mockedListHands.mockResolvedValue([
+    const fourHandRoom = { ...createRoom(), currentVersion: 5, currentHandIndex: 4 };
+    mockedListHandsAfter.mockResolvedValue([
       {
         handId: 'hand-1',
         roomId: 'room-1',
@@ -600,6 +620,10 @@ describe('MultiplayerGameTableScreen end game flow', () => {
         createdAt: 1735689600003,
       },
     ] as any);
+    mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb) => {
+      cb({ room: fourHandRoom, players: createPlayers(), lineup: createLineup() });
+      return jest.fn();
+    });
 
     const { tree } = await renderScreen();
     await act(async () => {
@@ -618,7 +642,7 @@ describe('MultiplayerGameTableScreen end game flow', () => {
 
   it('prompts the host after a full wind cycle and publishes the final reseat lineup', async () => {
     const wrappedRoom = { ...createRoom(), currentVersion: 18, currentHandIndex: 16 };
-    mockedListHands.mockResolvedValue(createFullWindCycleHands());
+    mockedListHandsAfter.mockResolvedValue(createFullWindCycleHands());
     mockedGetRoom.mockResolvedValue(wrappedRoom);
     mockedProposeLineupChange.mockResolvedValue({ ok: true, nextVersion: 19, nextHandIndex: 16 });
     mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb) => {
@@ -676,7 +700,12 @@ describe('MultiplayerGameTableScreen end game flow', () => {
 
   it('does not offer full-cycle reseating to a non-host player', async () => {
     mockedEnsureSession.mockResolvedValue({ uid: 'uid-2', provider: 'google' });
-    mockedListHands.mockResolvedValue(createFullWindCycleHands());
+    mockedListHandsAfter.mockResolvedValue(createFullWindCycleHands());
+    const wrappedRoom = { ...createRoom(), currentVersion: 18, currentHandIndex: 16 };
+    mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb) => {
+      cb({ room: wrappedRoom, players: createPlayers(), lineup: createLineup() });
+      return jest.fn();
+    });
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
     const { tree } = await renderScreen();
 
@@ -690,6 +719,35 @@ describe('MultiplayerGameTableScreen end game flow', () => {
     expect(mockedProposeLineupChange).not.toHaveBeenCalled();
 
     alertSpy.mockRestore();
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
+  it('loads only the hand missing from the recovery snapshot', async () => {
+    const cachedHand = createFirstHand();
+    const nextHand = { ...createFirstHand(), handId: 'hand-2', handIndex: 2, baseVersion: 2, serverVersion: 3 };
+    const currentRoom = { ...createRoom(), currentVersion: 3, currentHandIndex: 2 };
+    await mergeActiveRoomRecoverySnapshot('room-1', {
+      room: { ...createRoom(), currentVersion: 2, currentHandIndex: 1 },
+      hands: [cachedHand],
+      lineups: [createLineup()],
+      lineup: createLineup(),
+    });
+    mockedListHandsAfter.mockResolvedValue([nextHand]);
+    mockedSubscribeRoomState.mockImplementation((_roomId, _uid, cb) => {
+      cb({ room: currentRoom, players: createPlayers(), lineup: createLineup() });
+      return jest.fn();
+    });
+
+    const { tree } = await renderScreen();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockedListHandsAfter).toHaveBeenCalledWith('room-1', 1, 2);
+    expect(textNodes(tree.root)).toContain('第 1 圈 · 已打 2 鋪');
     await act(async () => {
       tree.unmount();
     });

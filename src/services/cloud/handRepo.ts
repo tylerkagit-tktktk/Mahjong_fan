@@ -15,6 +15,19 @@ export async function listHands(roomId: string): Promise<HandLog[]> {
   return snapshot.docs.map((doc) => doc.data() as HandLog);
 }
 
+export async function listHandsAfter(
+  roomId: string,
+  afterHandIndex: number,
+  throughHandIndex?: number,
+): Promise<HandLog[]> {
+  let query = handsRef(roomId).where('handIndex', '>', afterHandIndex);
+  if (typeof throughHandIndex === 'number') {
+    query = query.where('handIndex', '<=', throughHandIndex);
+  }
+  const snapshot = await query.orderBy('handIndex').get();
+  return snapshot.docs.map((doc) => doc.data() as HandLog);
+}
+
 export async function submitHand(input: SubmitHandInput): Promise<SubmitResult> {
   const result = await getFirestore().runTransaction(async (transaction) => {
     const roomSnapshot = await transaction.get(roomRef(input.roomId));

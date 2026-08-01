@@ -20,10 +20,15 @@ jest.mock('../../../src/db/cloudArchiveRepo', () => ({
   markCloudArchiveStatsApplied: jest.fn(async () => {}),
 }));
 
-import { archiveRoomToLocal, loadArchivedGame } from '../../../src/services/cloud/archiveRepo';
+import firestore from '@react-native-firebase/firestore';
+import {
+  archiveRoomToLocal,
+  buildArchivePayload,
+  loadArchivedGame,
+} from '../../../src/services/cloud/archiveRepo';
 import { saveCloudArchive } from '../../../src/db/cloudArchiveRepo';
 import { ensureSession, signInWithProvider, signOut } from '../../../src/services/cloud/authRepo';
-import { submitHand } from '../../../src/services/cloud/handRepo';
+import { listHands, submitHand } from '../../../src/services/cloud/handRepo';
 import {
   createInvite,
   createRoom,
@@ -37,7 +42,17 @@ import {
   markRoomArchived,
   startRoom,
 } from '../../../src/services/cloud/roomRepo';
-import { saveSnapshot } from '../../../src/services/cloud/storage';
+import {
+  mergeActiveRoomRecoverySnapshot,
+  saveSnapshot,
+} from '../../../src/services/cloud/storage';
+
+type FirestoreTestApi = {
+  __resetReadCount: () => void;
+  __getReadCount: () => number;
+};
+
+const firestoreTestApi = firestore as unknown as FirestoreTestApi;
 
 beforeEach(async () => {
   mockSavedArchives.clear();
@@ -46,6 +61,58 @@ beforeEach(async () => {
 });
 
 describe('cloud archive flow', () => {
+  it('builds the same archive timeline from recovery cache without rereading hands or lineups', async () => {
+    const host = await ensureSession('google');
+    const room = await createRoom({ hostUid: host.uid, title: '封存減讀房間', memberCap: 8 });
+    const invite = await createInvite(room.roomId, host.uid);
+
+    for (let i = 0; i < 3; i += 1) {
+      const session = await signInWithProvider('apple');
+      await joinWithInvite(room.roomId, invite.token, session.uid);
+    }
+
+    const members = await listMembers(room.roomId);
+    const started = await startRoom({
+      roomId: room.roomId,
+      startedByUid: host.uid,
+      baseVersion: 1,
+      nextSeats: {
+        '0': members[0].uid,
+        '1': members[1].uid,
+        '2': members[2].uid,
+        '3': members[3].uid,
+      },
+    });
+    expect(started.ok).toBe(true);
+
+    const lineup = await getActiveLineup(room.roomId);
+    await submitHand({
+      roomId: room.roomId,
+      submittedByUid: lineup!.seats['0']!,
+      type: 'draw',
+      baseVersion: 2,
+    });
+    await endRoom(room.roomId, host.uid);
+    const hands = await listHands(room.roomId);
+
+    firestoreTestApi.__resetReadCount();
+    const uncached = await buildArchivePayload(room.roomId);
+    const uncachedReads = firestoreTestApi.__getReadCount();
+
+    await mergeActiveRoomRecoverySnapshot(room.roomId, {
+      lineup,
+      lineups: [lineup!],
+      hands,
+    });
+    firestoreTestApi.__resetReadCount();
+    const cached = await buildArchivePayload(room.roomId);
+    const cachedReads = firestoreTestApi.__getReadCount();
+
+    expect(cached.hands).toEqual(uncached.hands);
+    expect(cached.lineups).toEqual(uncached.lineups);
+    expect(uncachedReads - cachedReads).toBe(2);
+  });
+
   it('treats an already archived room as success without rewriting it', async () => {
     const host = await ensureSession('google');
     const room = await createRoom({ hostUid: host.uid, title: '重複封存房間', memberCap: 4 });

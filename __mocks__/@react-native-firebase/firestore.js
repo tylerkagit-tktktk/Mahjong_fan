@@ -1,4 +1,5 @@
 const documents = new Map();
+let readCount = 0;
 
 function clone(value) {
   return value === undefined ? value : JSON.parse(JSON.stringify(value));
@@ -27,7 +28,10 @@ function apply(path, value, merge) {
 
 function doc(path) {
   return {
-    get: async () => snapshot(path),
+    get: async () => {
+      readCount += 1;
+      return snapshot(path);
+    },
     set: async (value, options) => apply(path, value, options?.merge),
     update: async (value) => apply(path, value, true),
     delete: async () => documents.delete(path),
@@ -39,13 +43,36 @@ function doc(path) {
   };
 }
 
-function collection(path, order = null) {
+function matchesFilter(value, filter) {
+  const actual = value[filter.field];
+  if (filter.operator === '==') return actual === filter.value;
+  if (filter.operator === '>') return actual > filter.value;
+  if (filter.operator === '>=') return actual >= filter.value;
+  if (filter.operator === '<') return actual < filter.value;
+  if (filter.operator === '<=') return actual <= filter.value;
+  return false;
+}
+
+function collection(path, options = {}) {
+  const order = options.order ?? null;
+  const filters = options.filters ?? [];
   const query = {
     doc: (id) => doc(`${path}/${id}`),
-    orderBy: (field, direction = 'asc') => collection(path, { field, direction }),
+    where: (field, operator, value) => collection(path, {
+      ...options,
+      filters: [...filters, { field, operator, value }],
+    }),
+    orderBy: (field, direction = 'asc') => collection(path, {
+      ...options,
+      order: { field, direction },
+    }),
     async get() {
-      let docs = [...documents.entries()].filter(([key]) => matchesPrefix(key, path)).map(([key, value]) => ({ id: key.split('/').pop(), ref: doc(key), data: () => clone(value) }));
+      let docs = [...documents.entries()]
+        .filter(([key]) => matchesPrefix(key, path))
+        .filter(([, value]) => filters.every((filter) => matchesFilter(value, filter)))
+        .map(([key, value]) => ({ id: key.split('/').pop(), ref: doc(key), data: () => clone(value) }));
       if (order) docs = docs.sort((a, b) => ((a.data()[order.field] ?? 0) - (b.data()[order.field] ?? 0)) * (order.direction === 'desc' ? -1 : 1));
+      readCount += docs.length;
       return { docs, size: docs.length };
     },
     onSnapshot(next) {
@@ -64,6 +91,7 @@ function collectionGroup(name, filters = []) {
         .filter(([key]) => key.split('/').slice(-2, -1)[0] === name)
         .filter(([, value]) => filters.every((filter) => filter.operator === '==' && value[filter.field] === filter.value))
         .map(([key, value]) => ({ id: key.split('/').pop(), ref: doc(key), data: () => clone(value) }));
+      readCount += docs.length;
       return { docs, size: docs.length };
     },
   };
@@ -96,5 +124,12 @@ firestore.FieldValue = {
   serverTimestamp: () => ({ milliseconds: Date.now() }),
 };
 firestore.Timestamp = { fromMillis: (milliseconds) => ({ milliseconds }) };
-firestore.__reset = () => documents.clear();
+firestore.__reset = () => {
+  documents.clear();
+  readCount = 0;
+};
+firestore.__resetReadCount = () => {
+  readCount = 0;
+};
+firestore.__getReadCount = () => readCount;
 module.exports = firestore;

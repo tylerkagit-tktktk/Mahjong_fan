@@ -36,8 +36,29 @@ if ! command -v pod >/dev/null 2>&1; then
 fi
 
 # Firebase config stays out of the public repository. Xcode Cloud must provide
-# its base64 value as a secret workflow environment variable.
-if [ -n "${FIREBASE_IOS_PLIST_BASE64:-}" ]; then
+# either an encoded value as a secret workflow environment variable.
+if [ -n "${FIREBASE_IOS_PLIST_HEX:-}" ]; then
+  trap 'rm -f "$TEMP_PLIST"' EXIT
+  if ! command -v xxd >/dev/null 2>&1; then
+    echo "error: xxd is required to decode FIREBASE_IOS_PLIST_HEX." >&2
+    exit 1
+  fi
+  hex_value=$(printf '%s' "$FIREBASE_IOS_PLIST_HEX" | tr -d '[:space:]')
+  case "$hex_value" in
+    ''|*[!0123456789abcdefABCDEF]*)
+      echo "error: FIREBASE_IOS_PLIST_HEX contains non-hex characters." >&2
+      exit 1
+      ;;
+  esac
+  hex_length=$(printf '%s' "$hex_value" | wc -c | tr -d ' ')
+  if [ $((hex_length % 2)) -ne 0 ]; then
+    echo "error: FIREBASE_IOS_PLIST_HEX has an odd number of characters." >&2
+    exit 1
+  fi
+  printf '%s' "$hex_value" | xxd -r -p > "$TEMP_PLIST"
+  /usr/bin/plutil -lint "$TEMP_PLIST"
+  mv "$TEMP_PLIST" "$FIREBASE_PLIST"
+elif [ -n "${FIREBASE_IOS_PLIST_BASE64:-}" ]; then
   trap 'rm -f "$TEMP_PLIST"' EXIT
   if ! printf '%s' "$FIREBASE_IOS_PLIST_BASE64" | base64 -D > "$TEMP_PLIST" 2>/dev/null; then
     printf '%s' "$FIREBASE_IOS_PLIST_BASE64" | base64 -d > "$TEMP_PLIST"

@@ -73,4 +73,15 @@ fi
 
 echo "==> Installing iOS dependencies"
 cd "$IOS_DIR"
-pod install --deployment
+lockfile_pod_version=""
+if [ -f "$IOS_DIR/Podfile.lock" ]; then
+  lockfile_pod_version=$(awk '$1 == "COCOAPODS:" { print $2; exit }' "$IOS_DIR/Podfile.lock")
+fi
+installed_pod_version=$(pod --version 2>/dev/null || true)
+
+if [ -n "$lockfile_pod_version" ] && [ "$installed_pod_version" != "$lockfile_pod_version" ]; then
+  echo "warning: CocoaPods $installed_pod_version differs from Podfile.lock ($lockfile_pod_version); using the committed dependency lock without deployment mode."
+  pod install --no-repo-update
+else
+  pod install --deployment --no-repo-update
+fi

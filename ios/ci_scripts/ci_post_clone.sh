@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO_ROOT="${CI_PRIMARY_REPOSITORY_PATH:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
+REPO_ROOT="${CI_PRIMARY_REPOSITORY_PATH:-$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)}"
 IOS_DIR="$REPO_ROOT/ios"
 FIREBASE_PLIST="$IOS_DIR/GoogleService-Info.plist"
 TEMP_PLIST="$IOS_DIR/.GoogleService-Info.plist.tmp"

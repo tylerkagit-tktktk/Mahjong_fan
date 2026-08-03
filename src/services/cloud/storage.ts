@@ -12,6 +12,7 @@ import { createSecureToken } from './secureRandom';
 const CLOUD_SNAPSHOT_KEY = 'cloud_snapshot_v2';
 const ACTIVE_HOSTED_ROOM_KEY = 'cloud_active_hosted_room_v1';
 const ACTIVE_HOSTED_ROOM_DRAFT_KEY = 'cloud_active_hosted_room_draft_v1';
+const ACTIVE_JOINED_ROOM_KEY = 'cloud_active_joined_room_v1';
 const ACTIVE_ROOM_RECOVERY_KEY_PREFIX = 'cloud_active_room_recovery_v1:';
 const LOCAL_TAKEOVER_GAME_KEY_PREFIX = 'cloud_local_takeover_game_v1:';
 const PENDING_HOSTED_ROOM_CLEANUP_KEY = 'cloud_pending_hosted_room_cleanup_v1';
@@ -43,6 +44,11 @@ export type ActiveHostedRoomDraft = {
   startingDealerMode: 'random' | 'manual';
   startingDealerSourceIndex: number | null;
   syncSeatAssignments: Record<'0' | '1' | '2' | '3', string | null>;
+};
+
+export type ActiveJoinedRoomPointer = {
+  uid: string;
+  roomId: string;
 };
 
 export type PendingHostedRoomCleanup = {
@@ -116,6 +122,31 @@ export async function clearActiveHostedRoomPointer(expected?: ActiveHostedRoomPo
   }
   await removeItem(ACTIVE_HOSTED_ROOM_KEY);
   await removeItem(ACTIVE_HOSTED_ROOM_DRAFT_KEY);
+}
+
+export async function loadActiveJoinedRoomPointer(): Promise<ActiveJoinedRoomPointer | null> {
+  const raw = await getItem(ACTIVE_JOINED_ROOM_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ActiveJoinedRoomPointer>;
+    return typeof parsed.uid === 'string' && typeof parsed.roomId === 'string'
+      ? { uid: parsed.uid, roomId: parsed.roomId }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveActiveJoinedRoomPointer(pointer: ActiveJoinedRoomPointer): Promise<void> {
+  await setItem(ACTIVE_JOINED_ROOM_KEY, JSON.stringify(pointer));
+}
+
+export async function clearActiveJoinedRoomPointer(expected?: ActiveJoinedRoomPointer): Promise<void> {
+  if (expected) {
+    const current = await loadActiveJoinedRoomPointer();
+    if (!current || current.uid !== expected.uid || current.roomId !== expected.roomId) return;
+  }
+  await removeItem(ACTIVE_JOINED_ROOM_KEY);
 }
 
 export async function loadActiveHostedRoomDraft(roomId: string): Promise<ActiveHostedRoomDraft | null> {

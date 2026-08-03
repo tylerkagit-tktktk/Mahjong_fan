@@ -14,8 +14,13 @@ import {
   SubmitResult,
 } from '../../models/cloud';
 import { getProfile } from './profileRepo';
-import { createToken, makeId } from './storage';
-import { clearActiveHostedRoomPointer, saveActiveHostedRoomPointer } from './storage';
+import {
+  clearActiveHostedRoomPointer,
+  createToken,
+  makeId,
+  saveActiveHostedRoomPointer,
+  saveActiveJoinedRoomPointer,
+} from './storage';
 import { getFirestore } from '../firebase/firebase';
 import firestore from '@react-native-firebase/firestore';
 
@@ -368,6 +373,7 @@ export async function joinWithInvite(roomId: string, token: string, uid: string)
 
   const room = await getRoom(roomId);
   if (!room) return { ok: false, code: 'ROOM_NOT_FOUND', message: 'Room not found' };
+  await saveActiveJoinedRoomPointer({ uid, roomId });
   return { ok: true, nextVersion: room.currentVersion, nextHandIndex: room.currentHandIndex };
 }
 

@@ -1,10 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  clearActiveJoinedRoomPointer,
   clearActiveRoomRecoverySnapshot,
   clearPendingHostedRoomCleanup,
   loadActiveRoomRecoverySnapshot,
+  loadActiveJoinedRoomPointer,
   loadPendingHostedRoomCleanup,
   mergeActiveRoomRecoverySnapshot,
+  saveActiveJoinedRoomPointer,
   savePendingHostedRoomCleanup,
 } from '../../../src/services/cloud/storage';
 
@@ -60,5 +63,18 @@ describe('active room recovery snapshot', () => {
 
     await clearPendingHostedRoomCleanup('room-1');
     expect(await loadPendingHostedRoomCleanup()).toBeNull();
+  });
+
+  it('persists and conditionally clears the joined-room pointer', async () => {
+    const pointer = { uid: 'guest-1', roomId: 'room-1' };
+    await saveActiveJoinedRoomPointer(pointer);
+
+    expect(await loadActiveJoinedRoomPointer()).toEqual(pointer);
+
+    await clearActiveJoinedRoomPointer({ uid: 'guest-2', roomId: 'room-1' });
+    expect(await loadActiveJoinedRoomPointer()).toEqual(pointer);
+
+    await clearActiveJoinedRoomPointer(pointer);
+    expect(await loadActiveJoinedRoomPointer()).toBeNull();
   });
 });

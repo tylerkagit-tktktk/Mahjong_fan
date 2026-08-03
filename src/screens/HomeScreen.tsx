@@ -8,6 +8,12 @@ import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { Game } from '../models/db';
 import { RootStackParamList } from '../navigation/types';
+import { ensureSession, getCurrentSession } from '../services/cloud/authRepo';
+import { getRoom } from '../services/cloud/roomRepo';
+import {
+  clearActiveJoinedRoomPointer,
+  loadActiveJoinedRoomPointer,
+} from '../services/cloud/storage';
 import theme from '../theme/theme';
 import { typography } from '../styles/typography';
 
@@ -125,6 +131,53 @@ function HomeScreen({ navigation }: Props) {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const recoverJoinedRoom = async () => {
+      const pointer = await loadActiveJoinedRoomPointer();
+      if (!pointer) return;
+
+      const session = (await getCurrentSession()) ?? (await ensureSession());
+      if (!active) return;
+
+      if (session.uid !== pointer.uid) {
+        await clearActiveJoinedRoomPointer(pointer);
+        return;
+      }
+
+      const room = await getRoom(pointer.roomId);
+      if (!active) return;
+
+      if (!room) {
+        await clearActiveJoinedRoomPointer(pointer);
+        return;
+      }
+
+      if (room.status === 'cancelling') {
+        await clearActiveJoinedRoomPointer(pointer);
+        return;
+      }
+
+      if (room.status === 'open') {
+        navigation.replace('RoomLobby', { roomId: room.roomId });
+        return;
+      }
+
+      if (room.status === 'active' || room.status === 'ended' || room.status === 'archived') {
+        navigation.replace('MultiplayerGameTable', { roomId: room.roomId });
+      }
+    };
+
+    recoverJoinedRoom().catch((error) => {
+      console.warn('[Home] failed to recover joined room', error);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [navigation]);
 
   const markOnboardingSeen = async () => {
     setShowOnboarding(false);

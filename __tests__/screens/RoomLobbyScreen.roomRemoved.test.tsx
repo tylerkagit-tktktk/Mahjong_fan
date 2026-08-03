@@ -4,6 +4,7 @@ import { Alert } from 'react-native';
 import RoomLobbyScreen from '../../src/screens/cloud/RoomLobbyScreen';
 import { ensureSession } from '../../src/services/cloud/authRepo';
 import { subscribeRoomState } from '../../src/services/cloud/roomRepo';
+import { clearActiveJoinedRoomPointer } from '../../src/services/cloud/storage';
 
 jest.mock('../../src/services/cloud/authRepo', () => ({
   ensureSession: jest.fn(),
@@ -21,6 +22,10 @@ jest.mock('../../src/services/cloud/roomRepo', () => ({
   proposeLineupChange: jest.fn(),
   startRoom: jest.fn(),
   subscribeRoomState: jest.fn(),
+}));
+
+jest.mock('../../src/services/cloud/storage', () => ({
+  clearActiveJoinedRoomPointer: jest.fn(),
 }));
 
 jest.mock('../../src/i18n/useAppLanguage', () => {
@@ -45,14 +50,16 @@ jest.mock('react-native-safe-area-context', () => {
 
 const mockedEnsureSession = ensureSession as jest.MockedFunction<typeof ensureSession>;
 const mockedSubscribeRoomState = subscribeRoomState as jest.MockedFunction<typeof subscribeRoomState>;
+const mockedClearActiveJoinedRoomPointer = clearActiveJoinedRoomPointer as jest.MockedFunction<typeof clearActiveJoinedRoomPointer>;
 
 describe('RoomLobbyScreen deleted room handling', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedEnsureSession.mockResolvedValue({ uid: 'guest-1', provider: 'google' });
+    mockedClearActiveJoinedRoomPointer.mockResolvedValue();
   });
 
-  async function renderRemovedRoom(canGoBack: boolean) {
+  async function renderRemovedRoom(canGoBack: boolean, initialStatus: 'open' | 'cancelling' = 'open') {
     let publishRoomState: Parameters<typeof subscribeRoomState>[2] = () => {};
     mockedSubscribeRoomState.mockImplementation((_roomId, _sessionUid, cb) => {
       publishRoomState = cb;
@@ -83,7 +90,7 @@ describe('RoomLobbyScreen deleted room handling', () => {
           roomId: 'room-1',
           title: 'Room 1',
           hostUid: 'host-1',
-          status: 'open',
+          status: initialStatus,
           memberCap: 8,
           activeLineupVersion: 0,
         } as any,
@@ -91,11 +98,13 @@ describe('RoomLobbyScreen deleted room handling', () => {
         lineup: null,
       });
     });
-    expect(alertSpy).not.toHaveBeenCalled();
+    if (initialStatus === 'open') {
+      expect(alertSpy).not.toHaveBeenCalled();
 
-    act(() => {
-      publishRoomState({ room: null, players: [], lineup: null });
-    });
+      act(() => {
+        publishRoomState({ room: null, players: [], lineup: null });
+      });
+    }
 
     return { alertSpy, navigation, publishRoomState, tree: tree! };
   }
@@ -137,6 +146,18 @@ describe('RoomLobbyScreen deleted room handling', () => {
 
     expect(navigation.goBack).not.toHaveBeenCalled();
     expect(navigation.replace).toHaveBeenCalledWith('Home');
+
+    await act(async () => {
+      tree.unmount();
+    });
+    alertSpy.mockRestore();
+  });
+
+  it('alerts guests and clears the pointer when the host starts cancellation', async () => {
+    const { alertSpy, tree } = await renderRemovedRoom(true, 'cancelling');
+
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    expect(mockedClearActiveJoinedRoomPointer).toHaveBeenCalledWith({ uid: 'guest-1', roomId: 'room-1' });
 
     await act(async () => {
       tree.unmount();

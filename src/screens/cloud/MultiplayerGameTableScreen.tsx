@@ -42,6 +42,7 @@ import {
 import { RoomTimelineCache, syncRoomTimeline } from '../../services/cloud/roomTimelineRepo';
 import {
   clearActiveRoomRecoverySnapshot,
+  clearActiveJoinedRoomPointer,
   loadActiveRoomRecoverySnapshot,
   mergeActiveRoomRecoverySnapshot,
 } from '../../services/cloud/storage';
@@ -287,6 +288,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
       .then((summary) => {
         archivedRoomRef.current = room.roomId;
         clearActiveRoomRecoverySnapshot(room.roomId).catch(() => {});
+        clearActiveJoinedRoomPointer({ uid, roomId: room.roomId }).catch(() => {});
         setNotice(
           formatMessage(t('multiplayer.notice.archiveReady'), {
             handCount: summary.handCount,
@@ -899,6 +901,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
             archivedRoomRef.current = roomId;
             archiveAttemptedRoomRef.current = roomId;
             clearActiveRoomRecoverySnapshot(roomId).catch(() => {});
+            clearActiveJoinedRoomPointer({ uid, roomId }).catch(() => {});
             setNotice(
               formatMessage(t('multiplayer.notice.archiveReady'), {
                 handCount: summary.handCount,
@@ -978,6 +981,7 @@ function MultiplayerGameTableScreen({ route, navigation }: Props) {
         archivedRoomRef.current = roomId;
         archiveAttemptedRoomRef.current = roomId;
         await clearActiveRoomRecoverySnapshot(roomId);
+        await clearActiveJoinedRoomPointer({ uid, roomId });
         resumeCloudSync();
         setNotice(formatMessage(t('multiplayer.notice.archiveReady'), { handCount: summary.handCount }));
         navigation.replace('CloudArchiveDetail', { roomId });

@@ -26,6 +26,7 @@ import {
   subscribeRoomState,
 } from '../../services/cloud/roomRepo';
 import { ensureSession } from '../../services/cloud/authRepo';
+import { clearActiveJoinedRoomPointer } from '../../services/cloud/storage';
 import theme from '../../theme/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RoomLobby'>;
@@ -56,7 +57,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
   const [mergingPlayers, setMergingPlayers] = useState(false);
   const didEnterActiveTable = useRef(false);
   const hasLoadedRoom = useRef(false);
-  const didHandleRemovedRoom = useRef(false);
+  const didHandleRoomExit = useRef(false);
 
   const leaveRemovedRoom = useCallback(() => {
     if (navigation.canGoBack()) {
@@ -81,10 +82,20 @@ function RoomLobbyScreen({ navigation, route }: Props) {
       }
 
       unsubscribe = subscribeRoomState(roomId, session.uid, (state) => {
-        if (state.room) {
+        if (state.room?.status === 'cancelling' && state.room.hostUid !== session.uid && !didHandleRoomExit.current) {
+          didHandleRoomExit.current = true;
+          clearActiveJoinedRoomPointer({ uid: session.uid, roomId }).catch(() => {});
+          Alert.alert(
+            t('roomLobby.alert.roomRemovedTitle'),
+            t('roomLobby.alert.roomRemovedMessage'),
+            [{ text: t('common.ok'), onPress: leaveRemovedRoom }],
+            { cancelable: false },
+          );
+        } else if (state.room) {
           hasLoadedRoom.current = true;
-        } else if (hasLoadedRoom.current && !didHandleRemovedRoom.current) {
-          didHandleRemovedRoom.current = true;
+        } else if (hasLoadedRoom.current && !didHandleRoomExit.current) {
+          didHandleRoomExit.current = true;
+          clearActiveJoinedRoomPointer({ uid: session.uid, roomId }).catch(() => {});
           Alert.alert(
             t('roomLobby.alert.roomRemovedTitle'),
             t('roomLobby.alert.roomRemovedMessage'),

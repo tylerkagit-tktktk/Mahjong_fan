@@ -22,7 +22,6 @@ import {
   createRoom,
   deleteRoomAndFallbackToLocal,
   getRoom,
-  joinWithInvite,
   recoverHostedRoom,
   startRoom,
   subscribeRoomPlayers,
@@ -34,10 +33,7 @@ import {
   loadActiveHostedRoomDraft,
   loadActiveHostedRoomPointer,
   loadPendingHostedRoomCleanup,
-  loadSnapshot,
-  now,
   saveActiveHostedRoomDraft,
-  saveSnapshot,
 } from '../services/cloud/storage';
 import theme from '../theme/theme';
 import { typography } from '../styles/typography';
@@ -168,7 +164,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const [sessionUid, setSessionUid] = useState('');
   const [draftRoom, setDraftRoom] = useState<Room | null>(null);
   const [inviteText, setInviteText] = useState('');
-  const [inviteToken, setInviteToken] = useState('');
   const [syncPlayers, setSyncPlayers] = useState<ResolvedRoomPlayer[]>([]);
   const [syncBusy, setSyncBusy] = useState(false);
   const [selectedSyncPlayerId, setSelectedSyncPlayerId] = useState('');
@@ -864,7 +859,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const clearDraftSyncState = () => {
     setDraftRoom(null);
     setInviteText('');
-    setInviteToken('');
     setSyncPlayers([]);
     setSelectedSyncPlayerId('');
     setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
@@ -875,7 +869,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     const localDraft = await loadActiveHostedRoomDraft(room.roomId);
     setSessionUid(room.hostUid);
     setDraftRoom(room);
-    setInviteToken(invite.token);
     setInviteText([
       room.title,
       `${translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}: ${room.roomId}`,
@@ -1218,40 +1211,21 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   };
 
   const handleAddDebugSyncPlayer = async () => {
-    if (!DEBUG_FLAGS.enableSyncTestTools || !draftRoom || !inviteToken || syncBusy) {
+    if (!DEBUG_FLAGS.enableSyncTestTools || !draftRoom || !sessionUid || syncBusy) {
       return;
     }
 
     try {
       setSyncBusy(true);
-      const debugUid = makeId('debug_member');
       const playerNumber = debugSyncJoinCount + 1;
       const displayName = DEBUG_SYNC_PLAYER_NAMES[debugSyncJoinCount] ?? `測試玩家 ${playerNumber}`;
-      const ts = now();
-      const snapshot = await loadSnapshot();
-      snapshot.profiles.push({
-        uid: debugUid,
-        provider: 'google',
-        displayName,
-        avatarUrl: null,
-        createdAt: ts,
-        updatedAt: ts,
+      // A dev-only player is not an authenticated Firebase user. Model it as a
+      // temporary player so the host stays within the same permission boundary.
+      await addTemporaryPlayers({
+        roomId: draftRoom.roomId,
+        createdByUid: sessionUid,
+        displayNames: [displayName],
       });
-      snapshot.stats.push({
-        uid: debugUid,
-        handsParticipated: 0,
-        wins: 0,
-        zimoCount: 0,
-        discardCount: 0,
-        drawCount: 0,
-        updatedAt: ts,
-      });
-      await saveSnapshot(snapshot);
-
-      const result = await joinWithInvite(draftRoom.roomId, inviteToken, debugUid);
-      if (!result.ok) {
-        throw new Error(result.message);
-      }
       setDebugSyncJoinCount(playerNumber);
     } catch (error) {
       Alert.alert(

@@ -113,6 +113,41 @@ describe('room timeline incremental reads', () => {
     expect(firestoreTestApi.__getReadCount()).toBe(1);
   });
 
+  it.each([250, 500, 1000])(
+    'recovers %i hands once, then reads only the next hand',
+    async (handCount) => {
+      const lineup = createLineup();
+      const hands = Array.from({ length: handCount }, (_, index) => createHand(index + 1));
+      await seedLineup(lineup);
+      await seedHands(hands);
+      firestoreTestApi.__resetReadCount();
+
+      const initial = await syncRoomTimeline({
+        roomId,
+        currentHandIndex: handCount,
+        activeLineupVersion: 1,
+        cache: { hands: [], lineups: [] },
+      });
+
+      expect(initial.hands).toHaveLength(handCount);
+      expect(firestoreTestApi.__getReadCount()).toBe(handCount + 1);
+
+      const nextHand = createHand(handCount + 1);
+      await seedHands([nextHand]);
+      firestoreTestApi.__resetReadCount();
+      const updated = await syncRoomTimeline({
+        roomId,
+        currentHandIndex: handCount + 1,
+        activeLineupVersion: 1,
+        cache: initial,
+      });
+
+      expect(updated.hands).toHaveLength(handCount + 1);
+      expect(updated.hands.at(-1)).toEqual(nextHand);
+      expect(firestoreTestApi.__getReadCount()).toBe(1);
+    },
+  );
+
   it('does not read Firestore when the recovery cache is already complete', async () => {
     const lineup = createLineup();
     const hands = Array.from({ length: 200 }, (_, index) => createHand(index + 1));

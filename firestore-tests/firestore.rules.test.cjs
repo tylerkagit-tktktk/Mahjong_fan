@@ -15,6 +15,7 @@ const {
   getDocs,
   serverTimestamp,
   setDoc,
+  runTransaction,
   updateDoc,
   writeBatch,
   Timestamp,
@@ -232,6 +233,39 @@ describe('room archive rules', () => {
     await assertFails(deleteDoc(doc(secondGuestDatabase, 'rooms', ROOM_ID, 'joinTickets', GUEST_UID)));
     await assertSucceeds(deleteDoc(doc(guestDatabase, 'rooms', ROOM_ID, 'joinTickets', GUEST_UID)));
     await assertSucceeds(deleteDoc(doc(hostDatabase, 'rooms', ROOM_ID, 'joinTickets', SECOND_GUEST_UID)));
+  });
+});
+
+describe('temporary player rules', () => {
+  test('host can atomically add a temporary player while updating an open room', async () => {
+    await seedRoom('open');
+    const database = authenticatedDatabase(HOST_UID);
+
+    await assertSucceeds(runTransaction(database, async (transaction) => {
+      transaction.set(doc(database, 'rooms', ROOM_ID, 'tempPlayers', 'temp-host-added'), {
+        tempPlayerId: 'temp-host-added',
+        roomId: ROOM_ID,
+        createdByUid: HOST_UID,
+        displayName: 'Dev player',
+        createdAt: 2_000,
+        updatedAt: 2_000,
+      });
+      transaction.update(doc(database, 'rooms', ROOM_ID), { updatedAt: 2_000 });
+    }));
+  });
+
+  test('a non-host member cannot add a temporary player', async () => {
+    await seedRoom('open');
+    const database = authenticatedDatabase(GUEST_UID);
+
+    await assertFails(setDoc(doc(database, 'rooms', ROOM_ID, 'tempPlayers', 'temp-guest-added'), {
+      tempPlayerId: 'temp-guest-added',
+      roomId: ROOM_ID,
+      createdByUid: GUEST_UID,
+      displayName: 'Not allowed',
+      createdAt: 2_000,
+      updatedAt: 2_000,
+    }));
   });
 });
 

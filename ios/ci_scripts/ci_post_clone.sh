@@ -8,6 +8,21 @@ TEMP_PLIST="$IOS_DIR/.GoogleService-Info.plist.tmp"
 
 cd "$REPO_ROOT"
 
+if ! command -v npm >/dev/null 2>&1; then
+  if ! command -v brew >/dev/null 2>&1; then
+    echo "error: npm is missing and Homebrew is unavailable." >&2
+    exit 1
+  fi
+  echo "==> Installing Node.js"
+  brew install node
+  export PATH="$(brew --prefix)/bin:$PATH"
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "error: npm is still unavailable after installing Node.js." >&2
+  exit 1
+fi
+
 echo "==> Installing JavaScript dependencies"
 npm ci --no-audit --no-fund
 

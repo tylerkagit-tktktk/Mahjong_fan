@@ -8,6 +8,8 @@ type AppButtonProps = {
   style?: ViewStyle;
   disabled?: boolean;
   variant?: 'primary' | 'secondary';
+  testID?: string;
+  accessibilityLabel?: string;
 };
 
 function AppButton({
@@ -16,12 +18,16 @@ function AppButton({
   style,
   disabled,
   variant = 'primary',
+  testID,
+  accessibilityLabel,
 }: AppButtonProps) {
   const isSecondary = variant === 'secondary';
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ disabled: Boolean(disabled) }}
+      testID={testID}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       onPress={onPress}
       disabled={disabled}

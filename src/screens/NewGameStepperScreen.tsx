@@ -283,14 +283,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     }).catch(() => {});
   }, [autoAssigned, autoAssignedPlayerIds, autoNames, draftRoom, players, seatMode, startingDealerMode, startingDealerSourceIndex, syncSeatAssignments]);
 
-  useEffect(() => {
-    if (selectedSyncPlayerId || syncPlayers.length === 0) {
-      return;
-    }
-    const selfPlayer = syncPlayers.find((player) => player.isSelf);
-    setSelectedSyncPlayerId(selfPlayer?.playerId ?? syncPlayers[0]?.playerId ?? '');
-  }, [selectedSyncPlayerId, syncPlayers]);
-
   const scrollRef = useRef<ScrollView | null>(null);
   const titleInputRef = useRef<TextInput | null>(null);
   const manualPlayerRefs = useRef<Array<TextInput | null>>([]);
@@ -1012,6 +1004,11 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       }
       return next;
     });
+    setSelectedSyncPlayerId('');
+  };
+
+  const handleSelectSyncPlayer = (playerId: string) => {
+    setSelectedSyncPlayerId((current) => (current === playerId ? '' : playerId));
   };
 
   const handleAssignSyncPlayerToSeat = (seatKey: SeatKey) => {
@@ -1777,7 +1774,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
                 console.error('[NewGame] enable sync failed', error);
               });
             }}
-            onSelectSyncPlayer={setSelectedSyncPlayerId}
+            onSelectSyncPlayer={handleSelectSyncPlayer}
             onAssignSyncPlayerToSeat={(seatIndex) => {
               const seatKey = SEAT_KEYS[seatIndex];
               if (!seatKey) {
@@ -1809,6 +1806,8 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           primaryLabel={loading ? screenCopy.primaryActionBusy : screenCopy.primaryAction}
           onPrimaryPress={handlePressCreate}
           disabled={loading || confirmBusy || syncBusy}
+          primaryTestID={hasDraftRoom ? 'new-game-start-synced-room' : 'new-game-create-local'}
+          primaryAccessibilityLabel={screenCopy.primaryAction}
           topContent={
             hasDraftRoom ? (
               <View style={styles.syncToolbar}>
@@ -1820,7 +1819,11 @@ function NewGameStepperScreen({ navigation, route }: Props) {
                     {draftRoom?.roomId ?? '-'}
                   </AppText>
                 </View>
-                <View style={styles.syncToolbarActions}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.syncToolbarActions}
+                >
                   {DEBUG_FLAGS.enableSyncTestTools ? (
                     <Pressable
                       onPress={() => {
@@ -1828,6 +1831,11 @@ function NewGameStepperScreen({ navigation, route }: Props) {
                           console.error('[NewGame] add debug sync player failed', error);
                         });
                       }}
+                      accessibilityRole="button"
+                      accessibilityLabel={translateWithFallback(t, 'newGame.sync.debugAddPlayer', '加入虛擬真人玩家')}
+                      accessibilityState={{ disabled: syncBusy }}
+                      disabled={syncBusy}
+                      testID="new-game-debug-add-temporary-player"
                       style={styles.syncToolbarButton}
                     >
                       <AppText style={styles.syncToolbarButtonText}>
@@ -1863,7 +1871,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
                       {translateWithFallback(t, 'newGame.sync.cancelConfirmAction', '取消同步')}
                     </AppText>
                   </Pressable>
-                </View>
+                </ScrollView>
               </View>
             ) : null
           }
@@ -1967,7 +1975,7 @@ const styles = StyleSheet.create({
   syncToolbarActions: {
     flexDirection: 'row',
     gap: GRID.x1,
-    flexWrap: 'wrap',
+    paddingRight: GRID.x1,
   },
   syncToolbarButton: {
     borderRadius: 999,

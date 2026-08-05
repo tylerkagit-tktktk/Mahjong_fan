@@ -4,13 +4,12 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Card from '../../../components/Card';
 import SegmentedControl from '../../../components/SegmentedControl';
 import StepperNumberInput from '../../../components/StepperNumberInput';
-import { HkGunMode, HkScoringPreset, HkStakePreset, Variant } from '../../../models/rules';
+import { HkGunMode, HkScoringPreset, HkStakePreset } from '../../../models/rules';
 import theme from '../../../theme/theme';
 import { CAP_FAN_MAX, CAP_FAN_MIN, GRID, MIN_FAN_MAX, MIN_FAN_MIN, SAMPLE_FAN_MAX, SAMPLE_FAN_MIN, UNIT_PER_FAN_MAX, UNIT_PER_FAN_MIN } from '../constants';
 import { CapMode } from '../types';
 
 type Props = {
-  mode: Variant;
   hkScoringPreset: HkScoringPreset;
   hkGunMode: HkGunMode;
   hkStakePreset: HkStakePreset;
@@ -63,8 +62,6 @@ type Props = {
     realtimeEffectiveFan: string;
     realtimeZimoSplitLabel: string;
     realtimeDiscarderLabel: string;
-    twThresholdHelp: string;
-    pmaDescription: string;
   };
   stakePresetHintLines: string[];
   onShowStakePaytable: () => void;
@@ -91,7 +88,6 @@ type Props = {
 };
 
 function ScoringSection({
-  mode,
   hkScoringPreset,
   hkGunMode,
   hkStakePreset,
@@ -141,8 +137,7 @@ function ScoringSection({
     <Card style={styles.card}>
       <AppText style={styles.sectionTitle}>{labels.title}</AppText>
 
-      {mode === 'HK' ? (
-        <>
+      <>
           <SegmentedControl<HkScoringPreset>
             options={[
               { value: 'traditionalFan', label: labels.hkPresetTraditional },
@@ -330,28 +325,7 @@ function ScoringSection({
               ) : null}
             </View>
           ) : null}
-        </>
-      ) : null}
-
-      {mode === 'TW' ? (
-        <View style={styles.blockSpacing}>
-          <AppText style={styles.inputLabel}>{labels.minFanThresholdLabel}</AppText>
-          <StepperNumberInput
-            valueText={minFanInput}
-            onChangeText={onMinFanInputChange}
-            onBlur={onMinFanBlur}
-            onIncrement={onMinFanIncrement}
-            onDecrement={onMinFanDecrement}
-            placeholder={`${MIN_FAN_MIN}-${MIN_FAN_MAX}`}
-            editable={!disabled}
-            hasError={Boolean(minFanError)}
-          />
-          <AppText style={styles.helperText}>{labels.twThresholdHelp}</AppText>
-          {minFanError ? <AppText style={styles.inlineErrorText}>{minFanError}</AppText> : null}
-        </View>
-      ) : null}
-
-      {mode === 'PMA' ? <AppText style={styles.helperText}>{labels.pmaDescription}</AppText> : null}
+      </>
     </Card>
   );
 }

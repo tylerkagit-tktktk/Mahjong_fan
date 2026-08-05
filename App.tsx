@@ -1,6 +1,6 @@
 import { NavigationContainer } from '@react-navigation/native';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, StatusBar, StyleSheet, useColorScheme } from 'react-native';
+import { Alert, StatusBar, StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import RootNavigator from './src/navigation/RootNavigator';
@@ -32,7 +32,6 @@ type GlobalScope = typeof globalThis & {
 const globalScope = globalThis as GlobalScope;
 
 function App() {
-  const isDarkMode = useColorScheme() === 'dark';
   const [navigationKey, setNavigationKey] = useState(0);
   const crashAlertShownRef = useRef(false);
 
@@ -201,7 +200,7 @@ function App() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
-        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+        <StatusBar barStyle="dark-content" />
         <AppErrorBoundary
           onBackHome={() => {
             setNavigationKey((prev) => prev + 1);

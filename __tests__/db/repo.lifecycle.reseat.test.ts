@@ -1,11 +1,11 @@
-import { NewHandInput, Hand } from '../models/db';
-import { getRoundLabel } from '../models/dealer';
-import { aggregatePlayerTotalsQByTimeline } from '../models/seatRotation';
+import { NewHandInput, Hand } from '../../src/models/db';
+import { getRoundLabel } from '../../src/models/dealer';
+import { aggregatePlayerTotalsQByTimeline } from '../../src/models/seatRotation';
 import {
   __testOnly_applySeatRotationOffsetWithTx,
   __testOnly_endGameWithTx,
   __testOnly_insertHandWithTx,
-} from './repo';
+} from '../../src/db/repo';
 
 type MockGameRow = {
   id: string;

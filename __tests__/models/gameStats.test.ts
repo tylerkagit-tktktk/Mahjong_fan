@@ -1,4 +1,4 @@
-import { computeGameStats } from './gameStats';
+import { computeGameStats } from '../../src/models/gameStats';
 
 function createBundle() {
   return {

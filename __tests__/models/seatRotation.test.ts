@@ -4,7 +4,7 @@ import {
   getEffectivePlayersBySeat,
   getEffectiveSeatForPlayer,
   normalizeSeatRotationOffset,
-} from './seatRotation';
+} from '../../src/models/seatRotation';
 
 describe('seatRotation helpers', () => {
   const players = [0, 1, 2, 3].map((seatIndex) => ({

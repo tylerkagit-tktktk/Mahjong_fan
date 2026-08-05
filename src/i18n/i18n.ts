@@ -2,15 +2,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import en from './locales/en.json';
 import zhHans from './locales/zh-Hans.json';
 import zhHant from './locales/zh-Hant.json';
-import { LanguageCode, TranslationKey } from './types';
+import type { LanguageCode, TranslationKey } from './types';
 
 const STORAGE_KEY = 'app_language';
 
-const dictionaries: Record<LanguageCode, Record<TranslationKey, string>> = {
+const dictionaries = {
   en,
   'zh-Hans': zhHans,
   'zh-Hant': zhHant,
-};
+} satisfies Record<LanguageCode, Record<TranslationKey, string>>;
 
 let currentLanguage: LanguageCode = 'zh-Hant';
 const listeners = new Set<(language: LanguageCode) => void>();

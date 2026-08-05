@@ -1,7 +1,7 @@
-import { __testOnly_createGameWithPlayersWithTx } from './repo';
-import { NewGameInput, NewPlayerInput } from '../models/db';
-import { getRoundLabel } from '../models/dealer';
-import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
+import { __testOnly_createGameWithPlayersWithTx } from '../../src/db/repo';
+import { NewGameInput, NewPlayerInput } from '../../src/models/db';
+import { getRoundLabel } from '../../src/models/dealer';
+import { INITIAL_ROUND_LABEL_ZH } from '../../src/constants/game';
 
 type CapturedInsert = {
   statement: string;

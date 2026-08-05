@@ -1,4 +1,4 @@
-import { __testOnly_validateBackupSnapshot } from './repo';
+import { __testOnly_validateBackupSnapshot } from '../../src/db/repo';
 
 function createSnapshot() {
   return {

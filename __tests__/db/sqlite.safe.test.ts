@@ -1,4 +1,4 @@
-import { normalizeError, safeDbCall } from './sqlite';
+import { normalizeError, safeDbCall } from '../../src/db/sqlite';
 
 describe('sqlite safe helpers', () => {
   it('normalizeError wraps existing Error with friendly message', () => {

@@ -4,9 +4,9 @@ import {
   __testOnly_endGameWithTx,
   __testOnly_insertHandWithTx,
   __testOnly_mutationBlockedErrorMessage,
-} from './repo';
-import { aggregatePlayerTotalsQByTimeline } from '../models/seatRotation';
-import { Player } from '../models/db';
+} from '../../src/db/repo';
+import { aggregatePlayerTotalsQByTimeline } from '../../src/models/seatRotation';
+import { Player } from '../../src/models/db';
 
 type RowSet<T> = {
   rows: {

@@ -13,7 +13,7 @@ import {
   StartRoomInput,
   SubmitResult,
 } from '../../models/cloud';
-import { getProfile } from './profileRepo';
+import { getProfile, normalizeDisplayName } from './profileRepo';
 import {
   clearActiveHostedRoomPointer,
   createToken,
@@ -184,7 +184,7 @@ async function createRoomResult(input: {
       };
       const member: RoomMember = {
         uid: input.hostUid, roomId, role: 'host', membershipStatus: 'active', joinedAt: timestamp,
-        displayName: input.hostDisplayName.trim().slice(0, 10) || hostProfile?.displayName || `Player-${input.hostUid.slice(-4)}`,
+        displayName: normalizeDisplayName(input.hostDisplayName || hostProfile?.displayName, input.hostUid),
         avatarUrl: hostProfile?.avatarUrl ?? null, archiveSyncedAt: null, archiveSyncedVersion: null,
       };
       const invite = invitePayload(roomId, token, expiresAt);
@@ -351,7 +351,7 @@ export async function joinWithInvite(roomId: string, token: string, uid: string)
     await ticketRef.set({ uid, token, createdAt: timestamp });
     batch.set(memberRef, {
       uid, roomId, role: 'player', membershipStatus: 'active', joinedAt: timestamp,
-      displayName: profile?.displayName ?? `Player-${uid.slice(-4)}`, avatarUrl: profile?.avatarUrl ?? null,
+      displayName: normalizeDisplayName(profile?.displayName, uid), avatarUrl: profile?.avatarUrl ?? null,
       archiveSyncedAt: null, archiveSyncedVersion: null,
     } satisfies RoomMember);
     batch.update(roomRef(roomId), {

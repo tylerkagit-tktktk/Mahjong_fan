@@ -1,6 +1,6 @@
 {
   "name": "mahjong-fan",
-  "version": "0.0.1",
+  "version": "2.1.0",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
@@ -22,8 +22,10 @@
     "react-native": "0.83.1",
     "react-native-gesture-handler": "^2.30.0",
     "react-native-get-random-values": "^2.0.0",
+    "react-native-qrcode-svg": "^6.3.15",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-screens": "^4.22.0",
+    "react-native-svg": "^15.15.0",
     "react-native-sqlite-storage": "6.0.1"
   },
   "devDependencies": {

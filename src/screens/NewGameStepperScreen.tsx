@@ -1,6 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import AppText from '../components/AppText';
+import InviteShareModal from '../components/InviteShareModal';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,11 +22,14 @@ import {
   addTemporaryPlayers,
   createRoom,
   deleteRoomAndFallbackToLocal,
+  getOrCreateActiveInvite,
   getRoom,
   recoverHostedRoom,
   startRoom,
   subscribeRoomPlayers,
 } from '../services/cloud/roomRepo';
+import type { InvitePayload } from '../services/cloud/roomRepo';
+import { buildInviteShareMessage } from '../services/cloud/inviteShare';
 import { getProfile, updateProfile } from '../services/cloud/profileRepo';
 import {
   clearActiveHostedRoomPointer,
@@ -163,7 +167,9 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const [pendingPayload, setPendingPayload] = useState<PreparedCreateContext | null>(null);
   const [sessionUid, setSessionUid] = useState('');
   const [draftRoom, setDraftRoom] = useState<Room | null>(null);
-  const [inviteText, setInviteText] = useState('');
+  const [invite, setInvite] = useState<InvitePayload | null>(null);
+  const [inviteShareVisible, setInviteShareVisible] = useState(false);
+  const [inviteBusy, setInviteBusy] = useState(false);
   const [syncPlayers, setSyncPlayers] = useState<ResolvedRoomPlayer[]>([]);
   const [syncBusy, setSyncBusy] = useState(false);
   const [selectedSyncPlayerId, setSelectedSyncPlayerId] = useState('');
@@ -365,7 +371,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     [joinedSyncPlayers, syncSeatAssignments],
   );
   const screenCopy = {
-    title: t('nav.newGame'),
     subtitle: translateWithFallback(
       t,
       'newGame.headerSubtitle',
@@ -850,22 +855,19 @@ function NewGameStepperScreen({ navigation, route }: Props) {
 
   const clearDraftSyncState = () => {
     setDraftRoom(null);
-    setInviteText('');
+    setInvite(null);
+    setInviteShareVisible(false);
     setSyncPlayers([]);
     setSelectedSyncPlayerId('');
     setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
     setDebugSyncJoinCount(0);
   };
 
-  const restoreOpenSyncRoom = useCallback(async (room: Room, invite: { token: string; deepLink: string }) => {
+  const restoreOpenSyncRoom = useCallback(async (room: Room, nextInvite: InvitePayload) => {
     const localDraft = await loadActiveHostedRoomDraft(room.roomId);
     setSessionUid(room.hostUid);
     setDraftRoom(room);
-    setInviteText([
-      room.title,
-      `${translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}: ${room.roomId}`,
-      invite.deepLink,
-    ].join('\n'));
+    setInvite(nextInvite);
     setTitle(room.title);
     const serializedRules = typeof room.rulesSnapshot.serializedRules === 'string'
       ? room.rulesSnapshot.serializedRules
@@ -899,7 +901,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     }
     setSyncRetryAt(null);
     setFormError(null);
-  }, [t]);
+  }, []);
 
   useEffect(() => {
     if (recoveryStartedRef.current) return;
@@ -1161,19 +1163,42 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     }
   };
 
-  const handleShareInvite = async () => {
-    if (!inviteText || !draftRoom) {
+  const handleOpenInviteShare = useCallback(async () => {
+    if (!draftRoom || !sessionUid) {
+      return;
+    }
+    setInviteBusy(true);
+    try {
+      const nextInvite = invite ?? (await getOrCreateActiveInvite(draftRoom.roomId, sessionUid));
+      setInvite(nextInvite);
+      setInviteShareVisible(true);
+    } catch (error) {
+      Alert.alert(
+        translateWithFallback(t, 'roomLobby.alert.createInviteFailedTitle', '建立邀請失敗'),
+        String(error),
+      );
+    } finally {
+      setInviteBusy(false);
+    }
+  }, [draftRoom, invite, sessionUid, t]);
+
+  const handleShareInvite = useCallback(async () => {
+    if (!invite || !draftRoom) {
       return;
     }
     try {
       await Share.share({
         title: draftRoom.title,
-        message: inviteText,
+        message: buildInviteShareMessage(
+          draftRoom.title,
+          translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼'),
+          invite,
+        ),
       });
     } catch (error) {
       Alert.alert(translateWithFallback(t, 'roomLobby.alert.shareInviteFailedTitle', '分享邀請失敗'), String(error));
     }
-  };
+  }, [draftRoom, invite, t]);
 
   const handleCancelSync = () => {
     if (!draftRoom || !sessionUid) {
@@ -1518,7 +1543,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           }}
         >
           <View style={styles.headerBlock}>
-            <AppText style={styles.headerTitle}>{screenCopy.title}</AppText>
             <AppText style={styles.headerSubtitle}>{screenCopy.subtitle}</AppText>
           </View>
           <GameTitleSection
@@ -1856,14 +1880,17 @@ function NewGameStepperScreen({ navigation, route }: Props) {
                   </Pressable>
                   <Pressable
                     onPress={() => {
-                      handleShareInvite().catch((error) => {
+                      handleOpenInviteShare().catch((error) => {
                         console.error('[NewGame] share invite failed', error);
                       });
                     }}
+                    disabled={draftRoom?.status !== 'open' || syncBusy || inviteBusy}
                     style={styles.syncToolbarButton}
                   >
                     <AppText style={styles.syncToolbarButtonText}>
-                      {translateWithFallback(t, 'roomLobby.hostTools.shareInvite', '分享邀請')}
+                      {inviteBusy
+                        ? translateWithFallback(t, 'roomLobby.hostTools.inviteLoading', '準備邀請中...')
+                        : translateWithFallback(t, 'roomLobby.hostTools.shareInvite', '分享邀請')}
                     </AppText>
                   </Pressable>
                   <Pressable onPress={handleCancelSync} style={styles.syncToolbarButton}>
@@ -1926,6 +1953,30 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             handleConfirmHostName().catch((error) => console.error('[NewGame] host name confirm failed', error));
           }}
         />
+        <InviteShareModal
+          visible={inviteShareVisible}
+          roomTitle={draftRoom?.title ?? ''}
+          invite={invite}
+          busy={inviteBusy}
+          labels={{
+            title: translateWithFallback(t, 'roomLobby.hostTools.shareSheetTitle', '分享邀請'),
+            subtitle: translateWithFallback(
+              t,
+              'roomLobby.hostTools.shareSheetSubtitle',
+              '掃描 QR Code 或使用連結加入同步房。',
+            ),
+            qrCodeLabel: translateWithFallback(t, 'roomLobby.hostTools.qrCodeLabel', 'QR Code'),
+            roomCodeLabel: translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼'),
+            inviteUrlLabel: translateWithFallback(t, 'roomLobby.hostTools.inviteUrlLabel', '邀請連結'),
+            shareAction: translateWithFallback(t, 'roomLobby.hostTools.shareAction', '分享連結'),
+            close: translateWithFallback(t, 'roomLobby.hostTools.closeShare', '關閉'),
+            loading: translateWithFallback(t, 'roomLobby.hostTools.inviteLoading', '準備邀請中...'),
+          }}
+          onClose={() => setInviteShareVisible(false)}
+          onShare={() => {
+            handleShareInvite().catch((error) => console.error('[NewGame] share invite failed', error));
+          }}
+        />
       </KeyboardAvoidingView>
     </ScreenContainer>
   );
@@ -1945,10 +1996,6 @@ const styles = StyleSheet.create({
   headerBlock: {
     marginBottom: GRID.x2,
     gap: 4,
-  },
-  headerTitle: {
-    ...typography.title,
-    color: theme.colors.textPrimary,
   },
   headerSubtitle: {
     ...typography.body,

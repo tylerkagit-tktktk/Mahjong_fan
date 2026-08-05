@@ -1,6 +1,4 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import AppText from '../components/AppText';
-import { Pressable } from 'react-native';
 import AddHandScreen from '../screens/AddHandScreen';
 import AboutScreen from '../screens/AboutScreen';
 import GameDashboardScreen from '../screens/GameDashboardScreen';
@@ -20,22 +18,6 @@ import { RootStackParamList } from './types';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-
-const settingsHeaderTextStyle = {
-  color: theme.colors.textSecondary,
-  fontSize: 18,
-  fontWeight: '500',
-} as const;
-
-function renderSettingsHeaderRight(onPress: () => void) {
-  return function SettingsHeaderRight() {
-    return (
-      <Pressable onPress={onPress} hitSlop={10}>
-        <AppText style={settingsHeaderTextStyle}>⚙︎</AppText>
-      </Pressable>
-    );
-  };
-}
 
 function RootNavigator() {
   const { t } = useAppLanguage();
@@ -57,10 +39,7 @@ function RootNavigator() {
       <Stack.Screen
         name="History"
         component={HistoryScreen}
-        options={({ navigation }) => ({
-          title: t('home.historyAll'),
-          headerRight: renderSettingsHeaderRight(() => navigation.navigate('Settings')),
-        })}
+        options={{ title: t('home.historyAll') }}
       />
       <Stack.Screen
         name="NewGameStepper"

@@ -219,13 +219,15 @@ function HistoryScreen({ navigation }: Props) {
     () => (
       <Pressable
         onPress={() => navigation.navigate('Settings')}
+        accessibilityRole="button"
+        accessibilityLabel={t('nav.settings')}
         hitSlop={10}
         style={({ pressed }) => [styles.headerIconHitArea, pressed && styles.headerIconPressed]}
       >
         <AppText style={styles.headerGearIcon}>⚙︎</AppText>
       </Pressable>
     ),
-    [navigation],
+    [navigation, t],
   );
 
   useLayoutEffect(() => {
@@ -652,8 +654,10 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.xs,
   },
   headerIconHitArea: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 44,
+    height: 44,
     backgroundColor: 'transparent',
   },
   headerIconPressed: {
@@ -666,9 +670,9 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   headerGearIcon: {
-    fontSize: 28,
-    lineHeight: 30,
-    fontWeight: '500',
+    fontSize: 30,
+    lineHeight: 34,
+    fontWeight: '600',
     color: theme.colors.textPrimary,
   },
   filterWrap: {

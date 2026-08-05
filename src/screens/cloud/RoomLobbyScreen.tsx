@@ -1,5 +1,6 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import AppText from '../../components/AppText';
+import InviteShareModal from '../../components/InviteShareModal';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import AppButton from '../../components/AppButton';
@@ -15,8 +16,8 @@ import { useAppLanguage } from '../../i18n/useAppLanguage';
 import {
   addTemporaryPlayer,
   addTemporaryPlayers,
-  createInvite,
   deleteRoomAndFallbackToLocal,
+  getOrCreateActiveInvite,
   getBenchPlayers,
   getDefaultStartSeats,
   listRoomPlayers,
@@ -25,6 +26,8 @@ import {
   startRoom,
   subscribeRoomState,
 } from '../../services/cloud/roomRepo';
+import type { InvitePayload } from '../../services/cloud/roomRepo';
+import { buildInviteShareMessage } from '../../services/cloud/inviteShare';
 import { ensureSession } from '../../services/cloud/authRepo';
 import { clearActiveJoinedRoomPointer } from '../../services/cloud/storage';
 import theme from '../../theme/theme';
@@ -41,7 +44,8 @@ function RoomLobbyScreen({ navigation, route }: Props) {
   const [players, setPlayers] = useState<ResolvedRoomPlayer[]>([]);
   const [lineup, setLineup] = useState<RoomLineup | null>(null);
   const [hostToolsExpanded, setHostToolsExpanded] = useState(false);
-  const [inviteText, setInviteText] = useState('');
+  const [invite, setInvite] = useState<InvitePayload | null>(null);
+  const [inviteShareVisible, setInviteShareVisible] = useState(false);
   const [inviteBusy, setInviteBusy] = useState(false);
   const [selectedSeat, setSelectedSeat] = useState<SeatKey>('0');
   const [selectedBenchId, setSelectedBenchId] = useState('');
@@ -207,39 +211,35 @@ function RoomLobbyScreen({ navigation, route }: Props) {
     setSelectedRealMergeUid(realPlayers.find((player) => player.uid)?.uid ?? '');
   }, [realPlayers, selectedRealMergeUid]);
 
-  const handleCreateInvite = useCallback(async () => {
+  const handleOpenInviteShare = useCallback(async () => {
     if (!room) {
       return;
     }
     setInviteBusy(true);
     try {
-      const invite = await createInvite(room.roomId, sessionUid);
-      const nextInviteText = [
-        room.title,
-        `${t('roomLobby.hostTools.roomCode')}: ${invite.roomId}`,
-        t('roomLobby.hostTools.localInviteNotice'),
-      ].join('\n');
-      setInviteText(nextInviteText);
+      const nextInvite = invite ?? (await getOrCreateActiveInvite(room.roomId, sessionUid));
+      setInvite(nextInvite);
+      setInviteShareVisible(true);
     } catch (error) {
       Alert.alert(t('roomLobby.alert.createInviteFailedTitle'), String(error));
     } finally {
       setInviteBusy(false);
     }
-  }, [room, sessionUid, t]);
+  }, [invite, room, sessionUid, t]);
 
   const handleShareInvite = useCallback(async () => {
-    if (!inviteText || !room) {
+    if (!invite || !room) {
       return;
     }
     try {
       await Share.share({
         title: room.title,
-        message: inviteText,
+        message: buildInviteShareMessage(room.title, t('roomLobby.hostTools.roomCode'), invite),
       });
     } catch (error) {
       Alert.alert(t('roomLobby.alert.shareInviteFailedTitle'), String(error));
     }
-  }, [inviteText, room, t]);
+  }, [invite, room, t]);
 
   const handleSwapSeat = useCallback(async () => {
     if (!room || !lineup || !selectedBenchId) {
@@ -578,31 +578,13 @@ function RoomLobbyScreen({ navigation, route }: Props) {
             <AppText style={styles.helperText}>{t('roomLobby.hostTools.inviteHint')}</AppText>
             <View style={styles.actionStack}>
               <AppButton
-                label={inviteBusy ? t('roomLobby.hostTools.generating') : t('roomLobby.hostTools.createInvite')}
+                label={inviteBusy ? t('roomLobby.hostTools.inviteLoading') : t('roomLobby.hostTools.shareInvite')}
                 onPress={() => {
-                  handleCreateInvite().catch(() => {});
+                  handleOpenInviteShare().catch(() => {});
                 }}
                 disabled={!canCreateInvite || inviteBusy}
               />
-              <AppButton
-                label={t('roomLobby.hostTools.shareInvite')}
-                onPress={() => {
-                  handleShareInvite().catch(() => {});
-                }}
-                disabled={!inviteText}
-                variant="secondary"
-              />
             </View>
-
-            {inviteText ? (
-              <View style={styles.inviteCard}>
-                <InviteRow label={t('roomLobby.hostTools.roomCode')} value={room?.roomId ?? '-'} />
-                <InviteRow
-                  label={t('roomLobby.hostTools.localInviteNoticeLabel')}
-                  value={t('roomLobby.hostTools.localInviteNotice')}
-                />
-              </View>
-            ) : null}
 
             <AppText style={styles.sectionTitle}>{t('roomLobby.hostTools.addTempTitle')}</AppText>
             <AppText style={styles.sectionSubtitle}>{t('roomLobby.hostTools.addTempHint')}</AppText>
@@ -781,6 +763,26 @@ function RoomLobbyScreen({ navigation, route }: Props) {
           />
         </View>
       </ScrollView>
+      <InviteShareModal
+        visible={inviteShareVisible}
+        roomTitle={room?.title ?? ''}
+        invite={invite}
+        busy={inviteBusy}
+        labels={{
+          title: t('roomLobby.hostTools.shareSheetTitle'),
+          subtitle: t('roomLobby.hostTools.shareSheetSubtitle'),
+          qrCodeLabel: t('roomLobby.hostTools.qrCodeLabel'),
+          roomCodeLabel: t('roomLobby.hostTools.roomCode'),
+          inviteUrlLabel: t('roomLobby.hostTools.inviteUrlLabel'),
+          shareAction: t('roomLobby.hostTools.shareAction'),
+          close: t('roomLobby.hostTools.closeShare'),
+          loading: t('roomLobby.hostTools.inviteLoading'),
+        }}
+        onClose={() => setInviteShareVisible(false)}
+        onShare={() => {
+          handleShareInvite().catch(() => {});
+        }}
+      />
     </ScreenContainer>
   );
 }
@@ -790,15 +792,6 @@ function InfoRow({ label, value }: { label: string; value: string }) {
     <View style={styles.infoRow}>
       <AppText style={styles.infoLabel}>{label}</AppText>
       <AppText style={styles.infoValue}>{value}</AppText>
-    </View>
-  );
-}
-
-function InviteRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.inviteRow}>
-      <AppText style={styles.infoLabel}>{label}</AppText>
-      <AppText style={styles.inviteValue}>{value}</AppText>
     </View>
   );
 }
@@ -930,21 +923,6 @@ const styles = StyleSheet.create({
   },
   actionStack: {
     gap: theme.spacing.sm,
-  },
-  inviteCard: {
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    backgroundColor: '#FAF8F4',
-    padding: theme.spacing.md,
-    gap: theme.spacing.sm,
-  },
-  inviteRow: {
-    gap: 4,
-  },
-  inviteValue: {
-    ...typography.body,
-    color: theme.colors.textPrimary,
   },
   selectorBlock: {
     gap: theme.spacing.xs,

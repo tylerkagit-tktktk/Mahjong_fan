@@ -1,6 +1,6 @@
 import { ensureSession, signInWithProvider } from '../../../src/services/cloud/authRepo';
 import { listHands, submitHand } from '../../../src/services/cloud/handRepo';
-import { createInvite, createRoom, getActiveLineup, joinWithInvite, proposeLineupChange, startRoom } from '../../../src/services/cloud/roomRepo';
+import { createInvite, createRoom, getActiveLineup, getOrCreateActiveInvite, joinWithInvite, proposeLineupChange, startRoom } from '../../../src/services/cloud/roomRepo';
 import { saveSnapshot } from '../../../src/services/cloud/storage';
 
 beforeEach(async () => {
@@ -8,6 +8,16 @@ beforeEach(async () => {
 });
 
 describe('cloud room + hand flow', () => {
+  it('reuses an unexpired active invite when the share panel is reopened', async () => {
+    const host = await ensureSession('google');
+    const room = await createRoom({ hostUid: host.uid, title: '重用邀請測試', memberCap: 4 });
+
+    const firstInvite = await getOrCreateActiveInvite(room.roomId, host.uid);
+    const secondInvite = await getOrCreateActiveInvite(room.roomId, host.uid);
+
+    expect(secondInvite).toEqual(firstInvite);
+  });
+
   it('only lets the host issue an invite and invalidates a replaced invite', async () => {
     const host = await ensureSession('google');
     const guest = await signInWithProvider('apple');

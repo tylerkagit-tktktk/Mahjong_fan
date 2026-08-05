@@ -407,7 +407,7 @@
   "roomLobby.hostTools.createInvite": "产生邀请",
   "roomLobby.hostTools.generating": "产生中...",
   "roomLobby.hostTools.shareInvite": "分享邀请",
-  "roomLobby.hostTools.shareSheetTitle": "分享邀请",
+  "roomLobby.hostTools.shareSheetTitle": "一扫Qrcode, 立即加入",
   "roomLobby.hostTools.shareSheetSubtitle": "扫描 QR Code 或使用链接加入同步房。",
   "roomLobby.hostTools.qrCodeLabel": "QR Code",
   "roomLobby.hostTools.inviteUrlLabel": "邀请链接",

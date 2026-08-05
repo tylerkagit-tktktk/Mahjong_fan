@@ -31,7 +31,7 @@ const labels = {
 };
 
 describe('InviteShareModal', () => {
-  it('renders the QR value, room code and share controls', async () => {
+  it('renders the QR value and share controls without redundant labels', async () => {
     const onShare = jest.fn();
     const onClose = jest.fn();
     let tree: renderer.ReactTestRenderer;
@@ -55,6 +55,13 @@ describe('InviteShareModal', () => {
     expect(qr[0].props.value).toBe(invite.deepLink);
     expect(JSON.stringify(tree!.toJSON())).toContain(invite.roomId);
     expect(JSON.stringify(tree!.toJSON())).toContain(invite.deepLink);
+
+    const textValues = tree!.root
+      .findAll((node) => typeof node.props?.children === 'string')
+      .map((node) => node.props.children);
+    expect(textValues).not.toContain(labels.qrCodeLabel);
+    expect(textValues).not.toContain(labels.roomCodeLabel);
+    expect(tree!.root.findAllByProps({ testID: 'invite-share-room-code' })).toHaveLength(0);
 
     act(() => {
       tree!.root.findByProps({ testID: 'invite-share-action' }).props.onPress();

@@ -58,7 +58,14 @@ export default function InviteShareModal({
         />
         <View style={styles.sheet} accessibilityViewIsModal>
           <ScrollView contentContainerStyle={styles.content}>
-            <AppText style={styles.title}>{labels.title}</AppText>
+            <AppText
+              style={styles.title}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.75}
+            >
+              {labels.title}
+            </AppText>
             {roomTitle ? <AppText style={styles.subtitle}>{roomTitle}</AppText> : null}
 
             {invite ? (
@@ -70,14 +77,6 @@ export default function InviteShareModal({
                     backgroundColor={theme.colors.surface}
                     color={theme.colors.textPrimary}
                   />
-                </View>
-                <AppText style={styles.label}>{labels.qrCodeLabel}</AppText>
-
-                <View testID="invite-share-room-code" style={styles.valueBlock}>
-                  <AppText style={styles.label}>{labels.roomCodeLabel}</AppText>
-                  <AppText selectable style={styles.value}>
-                    {invite.roomId}
-                  </AppText>
                 </View>
 
                 <View style={styles.valueBlock}>
@@ -152,11 +151,6 @@ const styles = StyleSheet.create({
   },
   valueBlock: {
     gap: theme.spacing.xs,
-  },
-  value: {
-    color: theme.colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '700',
   },
   url: {
     color: theme.colors.textPrimary,

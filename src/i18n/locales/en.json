@@ -407,7 +407,7 @@
   "roomLobby.hostTools.createInvite": "Create invite",
   "roomLobby.hostTools.generating": "Creating...",
   "roomLobby.hostTools.shareInvite": "Share invite",
-  "roomLobby.hostTools.shareSheetTitle": "Share invite",
+  "roomLobby.hostTools.shareSheetTitle": "Scan Qrcode to join",
   "roomLobby.hostTools.shareSheetSubtitle": "Scan the QR code or use the link to join the sync room.",
   "roomLobby.hostTools.qrCodeLabel": "QR Code",
   "roomLobby.hostTools.inviteUrlLabel": "Invite link",

@@ -1,4 +1,8 @@
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import {
+  createNativeStackNavigator,
+  type NativeStackHeaderBackProps,
+  type NativeStackHeaderItemProps,
+} from '@react-navigation/native-stack';
 import AddHandScreen from '../screens/AddHandScreen';
 import AboutScreen from '../screens/AboutScreen';
 import GameDashboardScreen from '../screens/GameDashboardScreen';
@@ -16,24 +20,58 @@ import CloudArchiveDetailScreen from '../screens/cloud/CloudArchiveDetailScreen'
 import JoinInviteScreen from '../screens/cloud/JoinInviteScreen';
 import { RootStackParamList } from './types';
 import { useAppLanguage } from '../i18n/useAppLanguage';
+import HeaderIconButton from '../components/HeaderIconButton';
+import { createCustomHeaderItem } from './headerItems';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+type HeaderNavigation = {
+  goBack: () => void;
+};
+
+function createHeaderBackButton(navigation: HeaderNavigation, accessibilityLabel: string) {
+  return ({ canGoBack }: NativeStackHeaderBackProps) =>
+    canGoBack ? (
+      <HeaderIconButton
+        icon="‹"
+        onPress={() => navigation.goBack()}
+        accessibilityLabel={accessibilityLabel}
+      />
+    ) : null;
+}
+
+function createHeaderBackItems(navigation: HeaderNavigation, accessibilityLabel: string) {
+  return ({ canGoBack }: NativeStackHeaderItemProps) =>
+    canGoBack
+      ? [
+          createCustomHeaderItem(
+            <HeaderIconButton
+              icon="‹"
+              onPress={() => navigation.goBack()}
+              accessibilityLabel={accessibilityLabel}
+            />,
+          ),
+        ]
+      : [];
+}
 
 function RootNavigator() {
   const { t } = useAppLanguage();
   return (
     <Stack.Navigator
       initialRouteName="Home"
-      screenOptions={{
+      screenOptions={({ navigation }) => ({
         headerTitleAlign: 'center',
-        headerBackVisible: true,
+        headerBackVisible: false,
         headerBackButtonDisplayMode: 'minimal',
+        headerLeft: createHeaderBackButton(navigation, t('common.back')),
+        unstable_headerLeftItems: createHeaderBackItems(navigation, t('common.back')),
         headerStyle: {
           backgroundColor: theme.colors.background,
         },
         headerShadowVisible: false,
         headerTintColor: theme.colors.textPrimary,
-      }}
+      })}
     >
       <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
       <Stack.Screen

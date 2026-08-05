@@ -6,7 +6,7 @@ import AppButton from '../../components/AppButton';
 import Card from '../../components/Card';
 import ScreenContainer from '../../components/ScreenContainer';
 import { useAppLanguage } from '../../i18n/useAppLanguage';
-import { TranslationKey } from '../../i18n/types';
+import { translateWithFallback } from '../../i18n/translateWithFallback';
 import { RootStackParamList } from '../../navigation/types';
 import { ensureSession } from '../../services/cloud/authRepo';
 import { joinWithInvite } from '../../services/cloud/roomRepo';
@@ -16,25 +16,6 @@ import theme from '../../theme/theme';
 type Props = NativeStackScreenProps<RootStackParamList, 'JoinInvite'>;
 
 type JoinState = 'loading' | 'missingParams' | 'invalidInvite' | 'roomFull' | 'roomEnded' | 'error';
-
-function translateWithFallback(
-  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
-  key: string,
-  fallback: string,
-  replacements?: Record<string, string | number>,
-): string {
-  const raw = t(key as TranslationKey, replacements);
-  const base = raw === key ? fallback : raw;
-  if (!replacements) {
-    return base;
-  }
-  return Object.entries(replacements).reduce((result, [token, value]) => {
-    const valueText = String(value);
-    const doublePattern = new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`, 'g');
-    const singlePattern = new RegExp(`\\{${token}\\}`, 'g');
-    return result.replace(doublePattern, valueText).replace(singlePattern, valueText);
-  }, base);
-}
 
 function normalizeParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) {

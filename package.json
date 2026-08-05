@@ -3,8 +3,8 @@
   "version": "2.1.0",
   "private": true,
   "scripts": {
-    "android": "react-native run-android",
-    "ios": "react-native run-ios --simulator='iPhone 17' --no-packager",
+    "android": "react-native run-android --active-arch-only",
+    "ios": "react-native run-ios --simulator='iPhone 17'",
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",

@@ -1,5 +1,5 @@
-import { Hand } from './db';
-import { getDealerSeatIndexForNextHand, getNextDealerSeatIndex, getRoundLabel } from './dealer';
+import { Hand } from '../../src/models/db';
+import { getDealerSeatIndexForNextHand, getNextDealerSeatIndex, getRoundLabel } from '../../src/models/dealer';
 
 function makeHand(partial: Partial<Hand>): Hand {
   return {

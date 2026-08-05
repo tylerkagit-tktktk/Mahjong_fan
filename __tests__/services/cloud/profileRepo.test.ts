@@ -1,13 +1,23 @@
 import {
   applyArchiveStats,
+  defaultDisplayName,
   ensureProfile,
   getArchiveStatsContribution,
   getProfileStats,
+  normalizeDisplayName,
   updateProfile,
 } from '../../../src/services/cloud/profileRepo';
 import { createInvite, createRoom, joinWithInvite, listMembers } from '../../../src/services/cloud/roomRepo';
 
 describe('cloud profile updates', () => {
+  it('keeps generated and legacy names within the display name limit', () => {
+    expect(defaultDisplayName('abcdefGDm2')).toBe('Player-Dm2');
+    expect(defaultDisplayName('abcdefGDm2')).toHaveLength(10);
+    expect(normalizeDisplayName('Player-GDm2', 'uid')).toBe('Player-GDm');
+    expect(normalizeDisplayName('  阿東  ', 'uid')).toBe('阿東');
+    expect(normalizeDisplayName('   ', 'uid')).toBe('Player-uid');
+  });
+
   it('updates the member name visible in rooms the player already joined', async () => {
     const hostUid = 'profile-host';
     const playerUid = 'profile-player';

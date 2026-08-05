@@ -12,9 +12,10 @@ import { createGameWithPlayers } from '../db/repo';
 import { DEBUG_FLAGS } from '../debug/debugFlags';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
+import { translateWithFallback } from '../i18n/translateWithFallback';
 import { DEFAULT_CURRENCY_CODE, CurrencyCode, formatCurrencyUnit, getCurrencyMeta } from '../models/currency';
 import { useAppPreferences } from '../settings/useAppPreferences';
-import { getDefaultRules, HkGunMode, HkScoringPreset, HkStakePreset, parseRules, RulesV1, serializeRules, Variant } from '../models/rules';
+import { getDefaultRules, HkGunMode, HkScoringPreset, HkStakePreset, parseRules, RulesV1, serializeRules } from '../models/rules';
 import { ResolvedRoomPlayer, Room, SeatKey } from '../models/cloud';
 import { RootStackParamList } from '../navigation/types';
 import { ensureSession, getCurrentSession } from '../services/cloud/authRepo';
@@ -30,7 +31,7 @@ import {
 } from '../services/cloud/roomRepo';
 import type { InvitePayload } from '../services/cloud/roomRepo';
 import { buildInviteShareMessage } from '../services/cloud/inviteShare';
-import { getProfile, updateProfile } from '../services/cloud/profileRepo';
+import { getProfile, normalizeDisplayName, updateProfile } from '../services/cloud/profileRepo';
 import {
   clearActiveHostedRoomPointer,
   clearPendingHostedRoomCleanup,
@@ -67,7 +68,6 @@ import CreateConfirmModal from './newGameStepper/sections/CreateConfirmModal';
 import HostNameConfirmModal from './newGameStepper/sections/HostNameConfirmModal';
 import CurrencySection from './newGameStepper/sections/CurrencySection';
 import GameTitleSection from './newGameStepper/sections/GameTitleSection';
-import ModeSection from './newGameStepper/sections/ModeSection';
 import PlayersSection from './newGameStepper/sections/PlayersSection';
 import ScoringSection from './newGameStepper/sections/ScoringSection';
 import { CapMode, ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateContext, SeatMode, StartingDealerMode } from './newGameStepper/types';
@@ -107,23 +107,6 @@ function shuffleArray<T>(values: T[]): T[] {
   return next;
 }
 
-function translateWithFallback(
-  t: (key: TranslationKey) => string,
-  key: string,
-  fallback: string,
-  replacements?: Record<string, string | number>,
-): string {
-  const raw = t(key as TranslationKey);
-  const base = raw === key ? fallback : raw;
-  if (!replacements) {
-    return base;
-  }
-  return Object.entries(replacements).reduce(
-    (result, [token, value]) => result.replace(new RegExp(`\\{${token}\\}`, 'g'), String(value)),
-    base,
-  );
-}
-
 function NewGameStepperScreen({ navigation, route }: Props) {
   const { t, language } = useAppLanguage();
   const { defaultCurrencyCode } = useAppPreferences();
@@ -133,7 +116,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
 
   const [title, setTitle] = useState(prefill?.title ?? '');
   const [seatMode, setSeatMode] = useState<SeatMode>('manual');
-  const [mode, setMode] = useState<Variant>('HK');
   const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(prefill?.currencyCode ?? DEFAULT_CURRENCY_CODE);
   const [hkScoringPreset, setHkScoringPreset] = useState<HkScoringPreset>('traditionalFan');
   const [hkGunMode, setHkGunMode] = useState<HkGunMode>('fullGun');
@@ -183,12 +165,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const [pendingCleanupRoomId, setPendingCleanupRoomId] = useState<string | null>(null);
   const [cooldownNow, setCooldownNow] = useState(Date.now());
   const recoveryStartedRef = useRef(false);
-
-  useEffect(() => {
-    if (mode !== 'HK') {
-      setMode('HK');
-    }
-  }, [mode]);
 
   useEffect(() => {
     if (!prefill && !currencyManuallyChangedRef.current) {
@@ -306,27 +282,25 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const seatLabels = useMemo(() => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')], [t]);
   const hasDraftRoom = Boolean(draftRoom);
   const setupLocked = hasDraftRoom;
-  const minFanLowerBound = mode === 'HK' && hkScoringPreset === 'customTable' ? 1 : MIN_FAN_MIN;
-  const showMinFan = mode === 'TW' || mode === 'HK';
+  const minFanLowerBound = hkScoringPreset === 'customTable' ? 1 : MIN_FAN_MIN;
   const parsedMinFanInput = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
   const parsedCustomCapFan = parseMinFan(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
   const customCapFanForCalc = customCapMode === 'fanCap' ? parsedCustomCapFan ?? customCapFan : null;
   const minFanCapRelationInvalid =
-    mode === 'HK' &&
     parsedMinFanInput !== null &&
     (hkScoringPreset === 'traditionalFan' ? parsedMinFanInput > capFan : customCapFanForCalc !== null && parsedMinFanInput > customCapFanForCalc);
 
   const minFanError =
-    showMinFan && (minFanTouched || submitAttempted)
+    (minFanTouched || submitAttempted)
       ? getMinFanError(minFanInput, minFanLowerBound, MIN_FAN_MAX, t('newGame.minFanValidation')) ??
         (minFanCapRelationInvalid ? t('newGame.minFanMustNotExceedCap') : null)
       : null;
   const unitPerFanError =
-    mode === 'HK' && hkScoringPreset === 'customTable' && (unitPerFanTouched || submitAttempted)
+    hkScoringPreset === 'customTable' && (unitPerFanTouched || submitAttempted)
       ? getDecimalRangeError(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX, t('newGame.unitPerFanValidation'))
       : null;
   const customCapFanError =
-    mode === 'HK' && hkScoringPreset === 'customTable' && customCapMode === 'fanCap' && (customCapFanTouched || submitAttempted)
+    hkScoringPreset === 'customTable' && customCapMode === 'fanCap' && (customCapFanTouched || submitAttempted)
       ? getMinFanError(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX, t('newGame.customCapFanValidation'))
       : null;
 
@@ -595,19 +569,17 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     }
 
     let resolvedMinFan = minFanToWin;
-    if (showMinFan) {
-      const parsedMinFanWithBound = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
-      if (parsedMinFanWithBound === null) {
-        focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
-        return null;
-      }
-      resolvedMinFan = parsedMinFanWithBound;
-      setMinFanToWin(parsedMinFanWithBound);
+    const parsedMinFanWithBound = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
+    if (parsedMinFanWithBound === null) {
+      focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
+      return null;
     }
+    resolvedMinFan = parsedMinFanWithBound;
+    setMinFanToWin(parsedMinFanWithBound);
 
     let resolvedUnitPerFan = unitPerFan;
     let resolvedCustomCapFan = customCapFanForCalc;
-    if (mode === 'HK' && hkScoringPreset === 'customTable') {
+    if (hkScoringPreset === 'customTable') {
       const validatedUnitPerFan = parseDecimalWithinRange(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
       if (validatedUnitPerFan === null) {
         focusInvalidTarget(invalidTarget ?? { kind: 'unitPerFan' });
@@ -630,13 +602,11 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       }
     }
 
-    if (mode === 'HK') {
-      const capToValidate = hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan;
-      if (capToValidate !== null && resolvedMinFan > capToValidate) {
-        setFormError(t('newGame.minFanMustNotExceedCap'));
-        focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
-        return null;
-      }
+    const capToValidate = hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan;
+    if (capToValidate !== null && resolvedMinFan > capToValidate) {
+      setFormError(t('newGame.minFanMustNotExceedCap'));
+      focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
+      return null;
     }
 
     let resolvedPlayers: string[] = [];
@@ -731,29 +701,25 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       seatIndex: index,
     }));
 
-    const selectedMode: Variant = 'HK';
-
     const rules: RulesV1 = {
-      ...getDefaultRules(selectedMode),
-      variant: selectedMode,
-      mode: selectedMode,
+      ...getDefaultRules('HK'),
+      variant: 'HK',
+      mode: 'HK',
       languageDefault: language,
       currencyCode,
       currencySymbol: getCurrencyMeta(currencyCode).symbol,
     };
 
-    if (selectedMode === 'HK') {
-      const hkBase = rules.hk ?? getDefaultRules('HK').hk!;
-      rules.hk = {
-        ...hkBase,
-        scoringPreset: hkScoringPreset,
-        gunMode: hkGunMode,
-        stakePreset: hkStakePreset,
-        unitPerFan: resolvedUnitPerFan,
-        capFan: hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan,
-      };
-      rules.minFanToWin = resolvedMinFan;
-    }
+    const hkBase = rules.hk ?? getDefaultRules('HK').hk!;
+    rules.hk = {
+      ...hkBase,
+      scoringPreset: hkScoringPreset,
+      gunMode: hkGunMode,
+      stakePreset: hkStakePreset,
+      unitPerFan: resolvedUnitPerFan,
+      capFan: hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan,
+    };
+    rules.minFanToWin = resolvedMinFan;
 
     return {
       creationMode: hasDraftRoom ? 'online' : 'local',
@@ -779,19 +745,17 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     }
 
     let resolvedMinFan = minFanToWin;
-    if (showMinFan) {
-      const parsedMinFanWithBound = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
-      if (parsedMinFanWithBound === null) {
-        focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
-        return null;
-      }
-      resolvedMinFan = parsedMinFanWithBound;
-      setMinFanToWin(parsedMinFanWithBound);
+    const parsedMinFanWithBound = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
+    if (parsedMinFanWithBound === null) {
+      focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
+      return null;
     }
+    resolvedMinFan = parsedMinFanWithBound;
+    setMinFanToWin(parsedMinFanWithBound);
 
     let resolvedUnitPerFan = unitPerFan;
     let resolvedCustomCapFan = customCapFanForCalc;
-    if (mode === 'HK' && hkScoringPreset === 'customTable') {
+    if (hkScoringPreset === 'customTable') {
       const validatedUnitPerFan = parseDecimalWithinRange(unitPerFanInput, UNIT_PER_FAN_MIN, UNIT_PER_FAN_MAX);
       if (validatedUnitPerFan === null) {
         focusInvalidTarget(invalidTarget ?? { kind: 'unitPerFan' });
@@ -814,13 +778,11 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       }
     }
 
-    if (mode === 'HK') {
-      const capToValidate = hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan;
-      if (capToValidate !== null && resolvedMinFan > capToValidate) {
-        setFormError(t('newGame.minFanMustNotExceedCap'));
-        focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
-        return null;
-      }
+    const capToValidate = hkScoringPreset === 'traditionalFan' ? capFan : resolvedCustomCapFan;
+    if (capToValidate !== null && resolvedMinFan > capToValidate) {
+      setFormError(t('newGame.minFanMustNotExceedCap'));
+      focusInvalidTarget(invalidTarget ?? { kind: 'minFan' });
+      return null;
     }
 
     setTitleError(nextTitleError);
@@ -1095,7 +1057,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         return;
       }
       const profile = await getProfile(session.uid);
-      setHostDisplayName(profile?.displayName ?? `Player-${session.uid.slice(-4)}`);
+      setHostDisplayName(normalizeDisplayName(profile?.displayName, session.uid));
       setHostNameError(null);
       setPendingSyncContext(draftContext);
       setHostNameVisible(true);
@@ -1375,7 +1337,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   };
 
   const buildConfirmSections = (context: PreparedCreateContext): ConfirmSections => {
-    const modeLabel = context.rules.mode === 'HK' ? t('newGame.mode.hk') : context.rules.mode === 'TW' ? t('newGame.mode.tw') : t('newGame.mode.pma');
+    const modeLabel = t('newGame.mode.hk');
 
     const gameFields: ConfirmField[] = [
       { label: t('newGame.confirmModal.field.title'), value: context.trimmedTitle },
@@ -1392,7 +1354,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
 
     const scoringFields: ConfirmField[] = [];
 
-    if (context.rules.mode === 'HK' && context.rules.hk) {
+    if (context.rules.hk) {
       scoringFields.push({
         label: t('newGame.confirmModal.field.scoringMethod'),
         value: context.rules.hk.scoringPreset === 'customTable' ? t('newGame.hkPreset.custom') : t('newGame.hkPreset.traditional'),
@@ -1420,14 +1382,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         scoringFields.push({ label: t('newGame.confirmModal.field.unitPerFan'), value: String(context.rules.hk.unitPerFan ?? 1) });
       }
       scoringFields.push({ label: t('newGame.confirmModal.field.minFan'), value: String(context.rules.minFanToWin ?? minFanToWin) });
-    }
-
-    if (context.rules.mode === 'TW') {
-      scoringFields.push({ label: t('newGame.confirmModal.field.twMinFan'), value: String(context.rules.minFanToWin ?? minFanToWin) });
-    }
-
-    if (context.rules.mode === 'PMA') {
-      scoringFields.push({ label: t('newGame.confirmModal.field.pmaMode'), value: t('newGame.pmaDescription') });
     }
 
     let playerFields: ConfirmField[] = [];
@@ -1505,7 +1459,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const confirmSections = pendingPayload ? buildConfirmSections(pendingPayload) : null;
   const scoringHintLines = getStakePresetHintLines(hkStakePreset, hkGunMode, minFanForHint, capFan, t);
   const stakePaytableRules = useMemo<RulesV1 | null>(() => {
-    if (mode !== 'HK' || hkScoringPreset !== 'traditionalFan') {
+    if (hkScoringPreset !== 'traditionalFan') {
       return null;
     }
     const defaultRules = getDefaultRules('HK');
@@ -1522,7 +1476,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         capFan,
       },
     };
-  }, [capFan, currencyCode, currencySymbol, hkGunMode, hkScoringPreset, hkStakePreset, language, minFanForHint, mode]);
+  }, [capFan, currencyCode, currencySymbol, hkGunMode, hkScoringPreset, hkStakePreset, language, minFanForHint]);
 
   return (
     <ScreenContainer style={styles.container} horizontalPadding={0} includeTopInset={false} includeBottomInset={false}>
@@ -1559,14 +1513,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           />
         </View>
 
-        <ModeSection
-          title={t('newGame.modeTitle')}
-          value={mode}
-          onChange={setMode}
-          disabled={loading || setupLocked}
-          labels={{ hk: t('newGame.mode.hk'), tw: t('newGame.mode.tw'), pma: t('newGame.mode.pma') }}
-        />
-
         <CurrencySection
           title={t('newGame.currencyTitle')}
           value={currencyCode}
@@ -1585,7 +1531,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           }}
         >
           <ScoringSection
-            mode={mode}
             hkScoringPreset={hkScoringPreset}
             hkGunMode={hkGunMode}
             hkStakePreset={hkStakePreset}
@@ -1638,8 +1583,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
               realtimeEffectiveFan: t('newGame.realtime.effectiveFan'),
               realtimeZimoSplitLabel: t('newGame.realtime.custom.zimo'),
               realtimeDiscarderLabel: t('newGame.realtime.custom.discard'),
-              twThresholdHelp: t('newGame.twThresholdHelp'),
-              pmaDescription: t('newGame.pmaDescription'),
             }}
             stakePresetHintLines={scoringHintLines}
             onShowStakePaytable={() => setStakePaytableVisible(true)}
@@ -1823,7 +1766,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         />
 
         {formError ? <AppText style={styles.errorText}>{formError}</AppText> : null}
-        {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
         </ScrollView>
 
         <BottomActionBar
@@ -2042,9 +1984,6 @@ const styles = StyleSheet.create({
     marginTop: GRID.x1,
     marginBottom: GRID.x2,
     color: theme.colors.danger,
-  },
-  debugSpacer: {
-    height: 800,
   },
 });
 

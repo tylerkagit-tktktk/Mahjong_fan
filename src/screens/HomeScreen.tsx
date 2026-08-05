@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { endGame, listGames } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
+import { translateWithFallback } from '../i18n/translateWithFallback';
 import { Game } from '../models/db';
 import { RootStackParamList } from '../navigation/types';
 import { ensureSession, getCurrentSession } from '../services/cloud/authRepo';
@@ -31,23 +32,6 @@ const CTA_SHADOW = {
 const DEPTH_BACKGROUND = 0;
 const DEPTH_ELEMENT = 2;
 const DEPTH_FOCUS = 12;
-
-function translateWithFallback(
-  t: (key: TranslationKey) => string,
-  key: string,
-  fallback: string,
-  replacements?: Record<string, string | number>,
-): string {
-  const raw = t(key as TranslationKey);
-  const base = raw === key ? fallback : raw;
-  if (!replacements) {
-    return base;
-  }
-  return Object.entries(replacements).reduce(
-    (result, [token, value]) => result.replace(new RegExp(`\\{${token}\\}`, 'g'), String(value)),
-    base,
-  );
-}
 
 function formatElapsedLabel(game: Game, t: (key: TranslationKey) => string): string {
   const endAt = game.endedAt ?? Date.now();
@@ -226,7 +210,7 @@ function HomeScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <Image
-        source={require('../assets/home/home-3d-background-v1.png')}
+        source={require('../assets/home/home-3d-background-v1.jpg')}
         style={styles.generatedBackground}
         resizeMode="cover"
       />

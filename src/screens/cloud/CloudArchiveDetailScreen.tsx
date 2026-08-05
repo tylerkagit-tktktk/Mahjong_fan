@@ -8,7 +8,8 @@ import ScreenContainer from '../../components/ScreenContainer';
 import { computeHkSettlement, toAmountFromQ } from '../../domain/hk/settlement';
 import { useAppLanguage } from '../../i18n/useAppLanguage';
 import { TranslationKey } from '../../i18n/types';
-import { ArchiveSyncStatus, CloudArchivePayload, HandLog, RoomLineup, RoomMember, SeatKey } from '../../models/cloud';
+import { translateWithFallback } from '../../i18n/translateWithFallback';
+import { ArchiveSyncStatus, CloudArchivePayload, HandLog, RoomMember } from '../../models/cloud';
 import { parseRules, RulesV1 } from '../../models/rules';
 import { RootStackParamList } from '../../navigation/types';
 import { loadArchivedGame } from '../../services/cloud/archiveRepo';
@@ -16,6 +17,14 @@ import { ensureSession } from '../../services/cloud/authRepo';
 import { deleteArchivedRoomAfterSync, getArchiveSyncStatus, subscribeMembers } from '../../services/cloud/roomRepo';
 import { typography } from '../../styles/typography';
 import theme from '../../theme/theme';
+import {
+  SEAT_GLYPHS,
+  SEAT_KEYS,
+  getCloudRoundLabel,
+  getDealerSeatIndexAfterHand,
+  getLineupForHand,
+  getSeatPlayerIds,
+} from './helpers';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CloudArchiveDetail'>;
 
@@ -58,28 +67,6 @@ type ArchiveDetails = {
 
 type HandFilter = 'all' | 'wins' | 'draws';
 
-const SEAT_KEYS: SeatKey[] = ['0', '1', '2', '3'];
-const SEAT_GLYPHS = ['東', '南', '西', '北'] as const;
-
-function translateWithFallback(
-  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
-  key: string,
-  fallback: string,
-  replacements?: Record<string, string | number>,
-): string {
-  const raw = t(key as TranslationKey, replacements);
-  const base = raw === key ? fallback : raw;
-  if (!replacements) {
-    return base;
-  }
-  return Object.entries(replacements).reduce((result, [token, value]) => {
-    const valueText = String(value);
-    const doublePattern = new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`, 'g');
-    const singlePattern = new RegExp(`\\{${token}\\}`, 'g');
-    return result.replace(doublePattern, valueText).replace(singlePattern, valueText);
-  }, base);
-}
-
 function formatDate(timestamp: number | null | undefined): string {
   if (!timestamp) {
     return '-';
@@ -118,43 +105,6 @@ function formatHighlight(value: { name: string; count: number } | null): string 
     return '—';
   }
   return `${value.name} (${value.count})`;
-}
-
-function getCloudRoundLabel(roundIndex: number, dealerSeatIndex: number): string {
-  const roundWind = SEAT_GLYPHS[(roundIndex - 1) % SEAT_GLYPHS.length] ?? '東';
-  const dealerWind = SEAT_GLYPHS[dealerSeatIndex] ?? '東';
-  return `${roundWind}風${dealerWind}局`;
-}
-
-function getSeatPlayerIds(lineup: RoomLineup | null): Array<string | null> {
-  return SEAT_KEYS.map((seatKey) => lineup?.seats[seatKey] ?? null);
-}
-
-function getDealerSeatIndexAfterHand(
-  dealerSeatIndex: number,
-  hand: HandLog,
-  lineup: RoomLineup | null,
-): number {
-  if (hand.type === 'draw') {
-    return hand.dealerAction === 'pass' ? (dealerSeatIndex + 1) % 4 : dealerSeatIndex;
-  }
-
-  const winnerSeatIndex = getSeatPlayerIds(lineup).findIndex((playerId) => playerId === hand.winnerPlayerId);
-  if (winnerSeatIndex < 0 || winnerSeatIndex === dealerSeatIndex) {
-    return dealerSeatIndex;
-  }
-  return (dealerSeatIndex + 1) % 4;
-}
-
-function getLineupForHand(lineups: RoomLineup[], hand: HandLog): RoomLineup | null {
-  return (
-    lineups.find((lineup) => lineup.lineupVersion === hand.lineupVersion) ??
-    [...lineups]
-      .reverse()
-      .find((lineup) => lineup.effectiveFromHandIndex <= hand.handIndex) ??
-    lineups[0] ??
-    null
-  );
 }
 
 function buildNameMap(payload: CloudArchivePayload): Map<string, string> {

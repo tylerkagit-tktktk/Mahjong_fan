@@ -27,7 +27,6 @@ import {
 } from '../models/currency';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
-import { DEBUG_FLAGS } from '../debug/debugFlags';
 import { isDev } from '../debug/isDev';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddHand'>;
@@ -496,7 +495,6 @@ function AddHandScreen({ navigation, route }: Props) {
           </Card>
         ) : null}
 
-        {DEBUG_FLAGS.enableScrollSpacer ? <View style={styles.debugSpacer} /> : null}
       </ScrollView>
 
       <BottomActionBar
@@ -608,9 +606,6 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: theme.colors.textPrimary,
-  },
-  debugSpacer: {
-    height: 800,
   },
 });
 

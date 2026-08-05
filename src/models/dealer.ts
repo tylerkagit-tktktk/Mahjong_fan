@@ -142,33 +142,3 @@ export function getRoundIndexFromLabel(roundLabel: string | null | undefined): n
   }
   return 1;
 }
-
-export function __devTestDealerCases(): Array<{ name: string; result: number; expected: number; pass: boolean }> {
-  const cases = [
-    {
-      name: 'dealer=0, winner=0, draw=false => 0',
-      input: { dealerSeatIndex: 0, winnerSeatIndex: 0, isDraw: false },
-      expected: 0,
-    },
-    {
-      name: 'dealer=0, draw=true => 0',
-      input: { dealerSeatIndex: 0, winnerSeatIndex: null, isDraw: true },
-      expected: 0,
-    },
-    {
-      name: 'dealer=0, winner=1 => 1',
-      input: { dealerSeatIndex: 0, winnerSeatIndex: 1, isDraw: false },
-      expected: 1,
-    },
-    {
-      name: 'dealer=2, winner=3 => 3',
-      input: { dealerSeatIndex: 2, winnerSeatIndex: 3, isDraw: false },
-      expected: 3,
-    },
-  ] as const;
-
-  return cases.map((item) => {
-    const result = getNextDealerSeatIndex(item.input);
-    return { name: item.name, result, expected: item.expected, pass: result === item.expected };
-  });
-}

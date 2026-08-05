@@ -4,12 +4,23 @@ import { getFirestore } from '../firebase/firebase';
 const profiles = () => getFirestore().collection('profiles');
 const stats = () => getFirestore().collection('profileStats');
 
+export const MAX_PROFILE_DISPLAY_NAME_LENGTH = 10;
+
+export function defaultDisplayName(uid: string): string {
+  return `Player-${uid.slice(-3)}`;
+}
+
+export function normalizeDisplayName(value: string | null | undefined, uid: string): string {
+  const normalized = value?.trim().slice(0, MAX_PROFILE_DISPLAY_NAME_LENGTH) ?? '';
+  return normalized || defaultDisplayName(uid);
+}
+
 function defaultProfile(uid: string, provider: CloudProvider): CloudUserProfile {
   const timestamp = Date.now();
   return {
     uid,
     provider,
-    displayName: `Player-${uid.slice(-4)}`,
+    displayName: defaultDisplayName(uid),
     avatarUrl: null,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -44,8 +55,8 @@ export async function updateProfile(
 ): Promise<CloudUserProfile> {
   const current = await ensureProfile(uid);
   const displayName = input.displayName.trim();
-  if (displayName.length < 1 || displayName.length > 10) {
-    throw new Error('Display name must be between 1 and 10 characters');
+  if (displayName.length < 1 || displayName.length > MAX_PROFILE_DISPLAY_NAME_LENGTH) {
+    throw new Error(`Display name must be between 1 and ${MAX_PROFILE_DISPLAY_NAME_LENGTH} characters`);
   }
   const next: CloudUserProfile = {
     ...current,

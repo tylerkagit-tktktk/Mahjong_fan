@@ -1,5 +1,7 @@
 import { HkSettlementType } from '../../models/hkStakes';
 import { HkStakePreset, RulesV1 } from '../../models/rules';
+import { getHkFullGunHalfSpicyPayoutQ } from './payoutTableFullGunHalfSpicy';
+import { getHkHalfGunHalfSpicyPayoutQ, type HkStakePresetCode } from './payoutTableHalfGunHalfSpicy';
 
 type ComputeSettlementHkV1Input = {
   rules: RulesV1;
@@ -17,66 +19,12 @@ export type HkSettlementResult = {
   zimoPerPlayerQ: number;
 };
 
-type TraditionalHalfGunPay = {
-  selfDraw: number;
-  discardBig: number;
-  discardSmall: number;
-};
-
 type NormalizedFan = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
 
-const TRADITIONAL_HALF_GUN_PAYTABLE: Record<
-  HkStakePreset,
-  Record<NormalizedFan, TraditionalHalfGunPay>
-> = {
-  TWO_FIVE_CHICKEN: {
-    0: { selfDraw: 0.5, discardBig: 0.5, discardSmall: 0.25 },
-    1: { selfDraw: 1, discardBig: 1, discardSmall: 0.5 },
-    2: { selfDraw: 2, discardBig: 2, discardSmall: 1 },
-    3: { selfDraw: 4, discardBig: 4, discardSmall: 2 },
-    4: { selfDraw: 8, discardBig: 8, discardSmall: 4 },
-    5: { selfDraw: 12, discardBig: 12, discardSmall: 6 },
-    6: { selfDraw: 16, discardBig: 16, discardSmall: 8 },
-    7: { selfDraw: 24, discardBig: 24, discardSmall: 12 },
-    8: { selfDraw: 32, discardBig: 32, discardSmall: 16 },
-    9: { selfDraw: 48, discardBig: 48, discardSmall: 24 },
-    10: { selfDraw: 64, discardBig: 64, discardSmall: 32 },
-    11: { selfDraw: 96, discardBig: 96, discardSmall: 48 },
-    12: { selfDraw: 128, discardBig: 128, discardSmall: 64 },
-    13: { selfDraw: 192, discardBig: 192, discardSmall: 96 },
-  },
-  FIVE_ONE: {
-    0: { selfDraw: 1, discardBig: 1, discardSmall: 0.5 },
-    1: { selfDraw: 2, discardBig: 2, discardSmall: 1 },
-    2: { selfDraw: 4, discardBig: 4, discardSmall: 2 },
-    3: { selfDraw: 8, discardBig: 8, discardSmall: 4 },
-    4: { selfDraw: 16, discardBig: 16, discardSmall: 8 },
-    5: { selfDraw: 24, discardBig: 24, discardSmall: 12 },
-    6: { selfDraw: 32, discardBig: 32, discardSmall: 16 },
-    7: { selfDraw: 48, discardBig: 48, discardSmall: 24 },
-    8: { selfDraw: 64, discardBig: 64, discardSmall: 32 },
-    9: { selfDraw: 96, discardBig: 96, discardSmall: 48 },
-    10: { selfDraw: 128, discardBig: 128, discardSmall: 64 },
-    11: { selfDraw: 192, discardBig: 192, discardSmall: 96 },
-    12: { selfDraw: 256, discardBig: 256, discardSmall: 128 },
-    13: { selfDraw: 384, discardBig: 384, discardSmall: 192 },
-  },
-  ONE_TWO: {
-    0: { selfDraw: 2, discardBig: 2, discardSmall: 1 },
-    1: { selfDraw: 4, discardBig: 4, discardSmall: 2 },
-    2: { selfDraw: 8, discardBig: 8, discardSmall: 4 },
-    3: { selfDraw: 16, discardBig: 16, discardSmall: 8 },
-    4: { selfDraw: 32, discardBig: 32, discardSmall: 16 },
-    5: { selfDraw: 48, discardBig: 48, discardSmall: 24 },
-    6: { selfDraw: 64, discardBig: 64, discardSmall: 32 },
-    7: { selfDraw: 96, discardBig: 96, discardSmall: 48 },
-    8: { selfDraw: 128, discardBig: 128, discardSmall: 64 },
-    9: { selfDraw: 192, discardBig: 192, discardSmall: 96 },
-    10: { selfDraw: 256, discardBig: 256, discardSmall: 128 },
-    11: { selfDraw: 384, discardBig: 384, discardSmall: 192 },
-    12: { selfDraw: 512, discardBig: 512, discardSmall: 256 },
-    13: { selfDraw: 768, discardBig: 768, discardSmall: 384 },
-  },
+const STAKE_PRESET_CODES: Record<HkStakePreset, HkStakePresetCode> = {
+  TWO_FIVE_CHICKEN: '25',
+  FIVE_ONE: '51',
+  ONE_TWO: '12',
 };
 
 function assertSeatIndex(name: string, value: number): void {
@@ -92,10 +40,6 @@ function assertZeroSum(deltasQ: [number, number, number, number]): void {
   }
 }
 
-function moneyToQ(value: number): number {
-  return Math.round(value * 4);
-}
-
 export function normalizeTraditionalFan(rawFan: number): NormalizedFan {
   if (rawFan <= 0) {
     return 0;
@@ -104,14 +48,6 @@ export function normalizeTraditionalFan(rawFan: number): NormalizedFan {
     return 13;
   }
   return rawFan as NormalizedFan;
-}
-
-export function getTraditionalHalfGunPaytable(
-  stakePreset: HkStakePreset,
-  rawFan: number,
-): TraditionalHalfGunPay {
-  const normalizedFan = normalizeTraditionalFan(rawFan);
-  return TRADITIONAL_HALF_GUN_PAYTABLE[stakePreset][normalizedFan];
 }
 
 export function computeSettlementHkV1(input: ComputeSettlementHkV1Input): HkSettlementResult {
@@ -144,15 +80,17 @@ export function computeSettlementHkV1(input: ComputeSettlementHkV1Input): HkSett
   const capFan = typeof rawCapFan === 'number' && Number.isInteger(rawCapFan) && rawCapFan > 0 ? rawCapFan : null;
   const cappedFan = capFan !== null ? Math.min(fan, capFan) : fan;
   const effectiveFan = normalizeTraditionalFan(cappedFan);
-  const base = getTraditionalHalfGunPaytable(rules.hk.stakePreset, effectiveFan);
+  const stakePresetCode = STAKE_PRESET_CODES[rules.hk.stakePreset];
+  const halfGunPay = getHkHalfGunHalfSpicyPayoutQ(effectiveFan, stakePresetCode);
+  const fullGunPay = getHkFullGunHalfSpicyPayoutQ(effectiveFan, stakePresetCode);
 
   const deltasQ: [number, number, number, number] = [0, 0, 0, 0];
   const losers = [0, 1, 2, 3].filter((seat) => seat !== winnerSeatIndex);
 
-  const selfDrawQ = moneyToQ(base.selfDraw);
-  const discardBigQ = moneyToQ(base.discardBig);
-  const discardSmallQ = moneyToQ(base.discardSmall);
-  const fullDiscardTotalQ = discardBigQ + discardSmallQ * 2;
+  const selfDrawQ = halfGunPay.discarderPaysQ;
+  const discardBigQ = halfGunPay.discarderPaysQ;
+  const discardSmallQ = halfGunPay.othersPayQ;
+  const fullDiscardTotalQ = fullGunPay.discarderPaysQ;
 
   let discarderPaysQ = discardBigQ;
   let othersPayQ: number | null = discardSmallQ;

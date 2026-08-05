@@ -6,14 +6,17 @@ import { Alert, FlatList, Platform, Pressable, StyleSheet, View } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import ScreenContainer from '../components/ScreenContainer';
+import HeaderIconButton from '../components/HeaderIconButton';
 import { deleteCloudArchive, listCloudArchives } from '../db/cloudArchiveRepo';
 import { deleteGameCascade, listGames } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
+import { translateWithFallback } from '../i18n/translateWithFallback';
 import { Game } from '../models/db';
 import { CloudArchiveSummary } from '../models/cloud';
 import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 import { RootStackParamList } from '../navigation/types';
+import { createCustomHeaderItem } from '../navigation/headerItems';
 import theme from '../theme/theme';
 import { typography } from '../styles/typography';
 
@@ -75,25 +78,6 @@ const FILTER_SHADOW = {
   shadowOffset: { width: 0, height: 2 },
   elevation: 1,
 } as const;
-
-function translateWithFallback(
-  t: (key: TranslationKey) => string,
-  key: string,
-  fallback: string,
-  replacements?: Record<string, string | number>,
-): string {
-  const raw = t(key as TranslationKey);
-  const base = raw === key ? fallback : raw;
-  if (!replacements) {
-    return base;
-  }
-  return Object.entries(replacements).reduce((result, [token, value]) => {
-    const valueText = String(value);
-    const doublePattern = new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`, 'g');
-    const singlePattern = new RegExp(`\\{${token}\\}`, 'g');
-    return result.replace(doublePattern, valueText).replace(singlePattern, valueText);
-  }, base);
-}
 
 function formatDateTime(timestamp: number): string {
   const date = new Date(timestamp);
@@ -203,29 +187,18 @@ function HistoryScreen({ navigation }: Props) {
   const hasLoadedOnceRef = useRef(false);
 
   const renderHeaderLeft = useCallback(
-    () => (
-      <Pressable
-        onPress={() => navigation.goBack()}
-        hitSlop={10}
-        style={({ pressed }) => [styles.headerIconHitArea, pressed && styles.headerIconPressed]}
-      >
-        <AppText style={styles.headerBackIcon}>‹</AppText>
-      </Pressable>
-    ),
-    [navigation],
+    () => <HeaderIconButton icon="‹" onPress={() => navigation.goBack()} accessibilityLabel={t('common.back')} />,
+    [navigation, t],
   );
 
   const renderHeaderRight = useCallback(
     () => (
-      <Pressable
+      <HeaderIconButton
+        icon="⚙︎"
         onPress={() => navigation.navigate('Settings')}
-        accessibilityRole="button"
         accessibilityLabel={t('nav.settings')}
-        hitSlop={10}
-        style={({ pressed }) => [styles.headerIconHitArea, pressed && styles.headerIconPressed]}
-      >
-        <AppText style={styles.headerGearIcon}>⚙︎</AppText>
-      </Pressable>
+        fontSize={30}
+      />
     ),
     [navigation, t],
   );
@@ -240,6 +213,12 @@ function HistoryScreen({ navigation }: Props) {
       },
       headerLeft: renderHeaderLeft,
       headerRight: renderHeaderRight,
+      unstable_headerLeftItems: () => [
+        createCustomHeaderItem(renderHeaderLeft()),
+      ],
+      unstable_headerRightItems: () => [
+        createCustomHeaderItem(renderHeaderRight()),
+      ],
     });
   }, [navigation, renderHeaderLeft, renderHeaderRight]);
 
@@ -652,28 +631,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.sm,
     paddingBottom: theme.spacing.xs,
-  },
-  headerIconHitArea: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 44,
-    height: 44,
-    backgroundColor: 'transparent',
-  },
-  headerIconPressed: {
-    opacity: 0.45,
-  },
-  headerBackIcon: {
-    fontSize: 24,
-    lineHeight: 26,
-    color: theme.colors.textPrimary,
-    fontWeight: '400',
-  },
-  headerGearIcon: {
-    fontSize: 30,
-    lineHeight: 34,
-    fontWeight: '600',
-    color: theme.colors.textPrimary,
   },
   filterWrap: {
     flexDirection: 'row',

@@ -1,6 +1,6 @@
-import { NewHandInput, Hand } from '../models/db';
-import { getRoundLabel } from '../models/dealer';
-import { __testOnly_insertHandWithTx } from './repo';
+import { NewHandInput, Hand } from '../../src/models/db';
+import { getRoundLabel } from '../../src/models/dealer';
+import { __testOnly_insertHandWithTx } from '../../src/db/repo';
 
 type MockGameRow = {
   id: string;

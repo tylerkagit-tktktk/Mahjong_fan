@@ -8,9 +8,8 @@ import AppButton from '../../components/AppButton';
 import Card from '../../components/Card';
 import PillGroup from '../../components/PillGroup';
 import ScreenContainer from '../../components/ScreenContainer';
-import { CurrencyCode } from '../../models/currency';
-import { getCurrencyMeta } from '../../models/currency';
-import { HandLog, ResolvedRoomPlayer, Room, RoomLineup, SeatKey } from '../../models/cloud';
+import { CurrencyCode, getCurrencyMeta } from '../../models/currency';
+import { ResolvedRoomPlayer, Room, RoomLineup, SeatKey } from '../../models/cloud';
 import { parseRules } from '../../models/rules';
 import { RootStackParamList } from '../../navigation/types';
 import { typography } from '../../styles/typography';
@@ -41,6 +40,13 @@ import {
 } from '../../services/cloud/roomRepo';
 import { RoomTimelineCache, syncRoomTimeline } from '../../services/cloud/roomTimelineRepo';
 import {
+  SEAT_GLYPHS,
+  SEAT_KEYS,
+  formatMessage,
+  getCloudRoundLabel,
+  getDealerSeatIndexAfterHand,
+} from './helpers';
+import {
   clearActiveRoomRecoverySnapshot,
   clearActiveJoinedRoomPointer,
   loadActiveRoomRecoverySnapshot,
@@ -50,9 +56,7 @@ import theme from '../../theme/theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MultiplayerGameTable'>;
 
-const SEAT_KEYS: SeatKey[] = ['0', '1', '2', '3'];
 const SEAT_INDEX_ORDER = [2, 1, 0, 3] as const;
-const SEAT_GLYPHS = ['東', '南', '西', '北'] as const;
 const SEAT_COLORS = ['#1A73E8', '#D93025', '#188038', '#5F6368'] as const;
 const SYNC_RETRY_COOLDOWN_MS = 30000;
 type DrawDealerAction = 'stick' | 'pass';
@@ -67,36 +71,6 @@ type WrapCandidate = {
   previousRoundLabelZh: string;
   nextRoundLabelZh: string;
 };
-
-function formatMessage(template: string, values: Record<string, string | number>): string {
-  return Object.entries(values).reduce((acc, [key, value]) => acc.replace(`{${key}}`, String(value)), template);
-}
-
-function getSeatPlayerIds(lineup: RoomLineup | null): Array<string | null> {
-  return SEAT_KEYS.map((seatKey) => lineup?.seats[seatKey] ?? null);
-}
-
-function getDealerSeatIndexAfterHand(
-  dealerSeatIndex: number,
-  hand: HandLog,
-  lineup: RoomLineup | null,
-): number {
-  if (hand.type === 'draw') {
-    return hand.dealerAction === 'pass' ? (dealerSeatIndex + 1) % 4 : dealerSeatIndex;
-  }
-
-  const winnerSeatIndex = getSeatPlayerIds(lineup).findIndex((playerId) => playerId === hand.winnerPlayerId);
-  if (winnerSeatIndex < 0 || winnerSeatIndex === dealerSeatIndex) {
-    return dealerSeatIndex;
-  }
-  return (dealerSeatIndex + 1) % 4;
-}
-
-function getCloudRoundLabel(roundIndex: number, dealerSeatIndex: number): string {
-  const roundWind = SEAT_GLYPHS[(roundIndex - 1) % SEAT_GLYPHS.length] ?? '東';
-  const dealerWind = SEAT_GLYPHS[dealerSeatIndex] ?? '東';
-  return `${roundWind}風${dealerWind}局`;
-}
 
 function MultiplayerGameTableScreen({ route, navigation }: Props) {
   const { t } = useAppLanguage();

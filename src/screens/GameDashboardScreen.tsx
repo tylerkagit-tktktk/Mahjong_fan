@@ -9,6 +9,7 @@ import ScreenContainer from '../components/ScreenContainer';
 import { getGameBundle } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
+import { translateWithFallback } from '../i18n/translateWithFallback';
 import { GameBundle, Hand } from '../models/db';
 import { getRoundLabel } from '../models/dealer';
 import { computeGameStats } from '../models/gameStats';
@@ -52,25 +53,6 @@ const SEAT_KEYS: Array<'seat.east' | 'seat.south' | 'seat.west' | 'seat.north'> 
   'seat.west',
   'seat.north',
 ];
-
-function translateWithFallback(
-  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
-  key: string,
-  fallback: string,
-  replacements?: Record<string, string | number>,
-): string {
-  const raw = t(key as TranslationKey, replacements);
-  const base = raw === key ? fallback : raw;
-  if (!replacements) {
-    return base;
-  }
-  return Object.entries(replacements).reduce((result, [token, value]) => {
-    const valueText = String(value);
-    const doublePattern = new RegExp(`\\{\\{\\s*${token}\\s*\\}\\}`, 'g');
-    const singlePattern = new RegExp(`\\{${token}\\}`, 'g');
-    return result.replace(doublePattern, valueText).replace(singlePattern, valueText);
-  }, base);
-}
 
 function normalizeVariant(value: string): Variant {
   if (value === 'HK' || value === 'TW' || value === 'PMA') {

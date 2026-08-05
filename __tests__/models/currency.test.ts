@@ -1,4 +1,4 @@
-import { formatCurrencyAmount, formatCurrencyUnit } from './currency';
+import { formatCurrencyAmount, formatCurrencyUnit } from '../../src/models/currency';
 
 describe('currency formatting', () => {
   it('uses a concise symbol-first format', () => {

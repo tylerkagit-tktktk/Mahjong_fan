@@ -755,12 +755,6 @@ function RoomLobbyScreen({ navigation, route }: Props) {
             onPress={() => navigation.navigate('MultiplayerGameTable', { roomId })}
             disabled={!room || room.status !== 'active'}
           />
-          <AppButton
-            label={t('roomLobby.viewProfile')}
-            onPress={() => navigation.navigate('Profile', { roomId })}
-            disabled={!room || room.status !== 'open'}
-            variant="secondary"
-          />
         </View>
       </ScrollView>
       <InviteShareModal

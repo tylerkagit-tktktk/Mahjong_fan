@@ -94,6 +94,8 @@ function makeBundle(input: {
   currentRoundLabelZh?: string | null;
   resultSummaryJson?: string | null;
   handsCount?: number;
+  seatBoundaryHistoryMode?: 'legacy_inferred' | 'explicit';
+  seatBoundaries?: GameBundle['seatBoundaries'];
 } = {}): GameBundle {
   const rules = input.rules ?? traditionalRules();
   const hands = clone(input.hands ?? []);
@@ -115,9 +117,17 @@ function makeBundle(input: {
         : input.currentRoundLabelZh,
       resultStatus: input.resultSummaryJson ? 'result' : 'none',
       resultSummaryJson: input.resultSummaryJson ?? null,
+      seatBoundaryHistoryMode: input.seatBoundaryHistoryMode ?? 'explicit',
+      initialSeatMappingJson: JSON.stringify({
+        0: 'player-east',
+        1: 'player-south',
+        2: 'player-west',
+        3: 'player-north',
+      }),
     },
     players: clone(input.players ?? GOLDEN_PLAYERS),
     hands: normalizedHands,
+    seatBoundaries: clone(input.seatBoundaries ?? []),
   };
 }
 
@@ -225,6 +235,7 @@ describe('local GameBundle adapter', () => {
     const bundle = makeBundle({
       hands,
       currentRoundLabelZh: '東風東局',
+      seatBoundaryHistoryMode: 'legacy_inferred',
     });
     const result = adaptLocalGameBundle(bundle);
 
@@ -238,8 +249,144 @@ describe('local GameBundle adapter', () => {
       });
       const replayed = replayLocalGameBundle(bundle);
       expect(replayed.parity?.requiredStatus).toBe('exact');
-      expect(replayed.authoritative).toBe(true);
+      expect(replayed.authoritative).toBe(false);
     }
+  });
+
+  it('uses persisted explicit boundaries for identity totals and final-seat parity', () => {
+    const first = makeHand({
+      id: 'explicit-before',
+      handIndex: 0,
+      dealerSeatIndex: 0,
+      outcome: 'discard',
+      winnerSeatIndex: 1,
+      discarderSeatIndex: 0,
+    });
+    const second = {
+      ...makeHand({
+        id: 'explicit-after',
+        handIndex: 1,
+        dealerSeatIndex: 1,
+        outcome: 'discard',
+        winnerSeatIndex: 0,
+        discarderSeatIndex: 1,
+      }),
+      winnerPlayerId: 'player-north',
+      discarderPlayerId: 'player-east',
+    };
+    const reseatedPlayers = [
+      { id: 'player-north', gameId: EMPTY_GAME_BUNDLE.game.id, name: 'North', seatIndex: 0 },
+      { id: 'player-east', gameId: EMPTY_GAME_BUNDLE.game.id, name: 'East', seatIndex: 1 },
+      { id: 'player-south', gameId: EMPTY_GAME_BUNDLE.game.id, name: 'South', seatIndex: 2 },
+      { id: 'player-west', gameId: EMPTY_GAME_BUNDLE.game.id, name: 'West', seatIndex: 3 },
+    ];
+    const bundle = makeBundle({
+      hands: [first, second],
+      players: reseatedPlayers,
+      seatBoundaryHistoryMode: 'explicit',
+      seatBoundaries: [{
+        id: 'confirmed-boundary-1',
+        gameId: EMPTY_GAME_BUNDLE.game.id,
+        effectiveFromHandIndex: 1,
+        seatMapping: {
+          0: 'player-north',
+          1: 'player-east',
+          2: 'player-south',
+          3: 'player-west',
+        },
+        reason: 'confirmed_reseat',
+        createdAt: FIXED_CREATED_AT + 1_500,
+      }],
+    });
+
+    const result = replayLocalGameBundle(bundle);
+    expect(result.adapter?.ok).toBe(true);
+    expect(result.replay?.isValid).toBe(true);
+    expect(result.parity?.requiredStatus).toBe('exact');
+    expect(result.authoritative).toBe(true);
+    expect(result.replay?.players.find((player) => player.playerId === 'player-north')?.totalQ).toBe(24);
+    expect(result.replay?.finalSeats).toEqual([
+      { seatIndex: 0, playerId: 'player-north' },
+      { seatIndex: 1, playerId: 'player-east' },
+      { seatIndex: 2, playerId: 'player-south' },
+      { seatIndex: 3, playerId: 'player-west' },
+    ]);
+  });
+
+  it('accepts an explicit final boundary at handCount and never infers one from a wind wrap', () => {
+    const finalBoundaryBundle = makeBundle({
+      hands: [makeHand({ id: 'boundary-at-end', handIndex: 0, dealerSeatIndex: 0, outcome: 'draw' })],
+      players: [
+        { id: 'player-north', gameId: EMPTY_GAME_BUNDLE.game.id, name: 'North', seatIndex: 0 },
+        { id: 'player-east', gameId: EMPTY_GAME_BUNDLE.game.id, name: 'East', seatIndex: 1 },
+        { id: 'player-south', gameId: EMPTY_GAME_BUNDLE.game.id, name: 'South', seatIndex: 2 },
+        { id: 'player-west', gameId: EMPTY_GAME_BUNDLE.game.id, name: 'West', seatIndex: 3 },
+      ],
+      seatBoundaries: [{
+        id: 'boundary-at-end',
+        gameId: EMPTY_GAME_BUNDLE.game.id,
+        effectiveFromHandIndex: 1,
+        seatMapping: { 0: 'player-north', 1: 'player-east', 2: 'player-south', 3: 'player-west' },
+        reason: 'confirmed_reseat',
+        createdAt: FIXED_CREATED_AT + 2_000,
+      }],
+    });
+    expect(replayLocalGameBundle(finalBoundaryBundle).authoritative).toBe(true);
+
+    const wrapHands = Array.from({ length: 16 }, (_, handIndex) => makeHand({
+      id: `explicit-wrap-${handIndex}`,
+      handIndex,
+      dealerSeatIndex: handIndex % 4,
+      outcome: 'discard',
+      winnerSeatIndex: (handIndex + 1) % 4,
+      discarderSeatIndex: handIndex % 4,
+    })).map((hand, index, allHands) => ({
+      ...hand,
+      nextRoundLabelZh: getRoundLabel(0, allHands.slice(0, index + 1)).labelZh,
+    }));
+    const explicitWithoutBoundary = adaptLocalGameBundle(makeBundle({ hands: wrapHands }));
+    expect(explicitWithoutBoundary.ok).toBe(true);
+    if (explicitWithoutBoundary.ok) {
+      expect(explicitWithoutBoundary.snapshot.timeline.filter((entry) => entry.entryType === 'seat-boundary')).toEqual([]);
+    }
+  });
+
+  it('rejects malformed, duplicate, and incomplete explicit persisted boundaries without inference fallback', () => {
+    const bundle = makeBundle({
+      hands: [makeHand({ id: 'boundary-validation-hand', handIndex: 0, dealerSeatIndex: 0, outcome: 'draw' })],
+      seatBoundaries: [
+        {
+          id: 'duplicate-a',
+          gameId: EMPTY_GAME_BUNDLE.game.id,
+          effectiveFromHandIndex: 0,
+          seatMapping: { 0: 'player-east', 1: 'player-south', 2: 'player-west', 3: 'player-north' },
+          reason: 'confirmed_reseat',
+          createdAt: FIXED_CREATED_AT,
+        },
+        {
+          id: 'duplicate-b',
+          gameId: EMPTY_GAME_BUNDLE.game.id,
+          effectiveFromHandIndex: 0,
+          seatMapping: { 0: 'player-east', 1: 'player-south', 2: 'player-west', 3: 'player-north' },
+          reason: 'confirmed_reseat',
+          createdAt: FIXED_CREATED_AT + 1,
+        },
+        {
+          id: 'incomplete-c',
+          gameId: EMPTY_GAME_BUNDLE.game.id,
+          effectiveFromHandIndex: 1,
+          seatMapping: { 0: 'player-east', 1: 'player-south', 2: 'player-west' } as Record<number, string>,
+          reason: 'confirmed_reseat',
+          createdAt: FIXED_CREATED_AT + 2,
+        },
+      ],
+    });
+    bundle.game.initialSeatMappingJson = null;
+    const result = adaptLocalGameBundle(bundle);
+    expect(result.ok).toBe(false);
+    expect(diagnosticCodes(result)).toContain('DUPLICATE_PERSISTED_SEAT_BOUNDARY');
+    expect(diagnosticCodes(result)).toContain('INCOMPLETE_BOUNDARY_MAPPING');
+    expect(diagnosticCodes(result)).toContain('MISSING_EXPLICIT_BOUNDARY_HISTORY');
   });
 
   it('adapts an abandoned zero-hand game without inventing a result summary', () => {
@@ -306,7 +453,11 @@ describe('local GameBundle adapter', () => {
       winnerSeatIndex: 1,
       discarderSeatIndex: 0,
     });
-    const result = adaptLocalGameBundle(makeBundle({ players: reseatedPlayers, hands: [hand] }));
+    const result = adaptLocalGameBundle(makeBundle({
+      players: reseatedPlayers,
+      hands: [hand],
+      seatBoundaryHistoryMode: 'legacy_inferred',
+    }));
 
     expect(result.ok).toBe(false);
     expect(diagnosticCodes(result)).toContain('AMBIGUOUS_SEAT_ROTATION_HISTORY');

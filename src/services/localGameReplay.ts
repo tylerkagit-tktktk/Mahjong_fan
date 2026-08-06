@@ -73,10 +73,14 @@ function buildResult(
   parity: LocalReplayParityReport | null,
 ): LocalGameReplayResult {
   const enrichedAdapter = replay && parity ? appendParityDiagnostics(adapter, parity) : adapter;
+  const reliesOnInferredLegacyBoundary = enrichedAdapter.ok &&
+    enrichedAdapter.snapshot.timeline.some((entry) => entry.entryType === 'seat-boundary') &&
+    enrichedAdapter.diagnostics.some((diagnostic) => diagnostic.code === 'LEGACY_INFERRED_BOUNDARY_HISTORY');
   const authoritative = Boolean(
     enrichedAdapter.ok &&
     replay?.isValid &&
     parity?.requiredStatus === 'exact' &&
+    !reliesOnInferredLegacyBoundary &&
     enrichedAdapter.diagnostics.every((diagnostic) => diagnostic.severity === 'info'),
   );
   return {

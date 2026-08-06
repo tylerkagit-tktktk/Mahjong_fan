@@ -20,6 +20,10 @@ export type Game = {
   /** @deprecated Legacy progression snapshot; do not use for runtime round label. */
   maxWindIndex: number;
   seatRotationOffset?: number;
+  /** Schema 301+: whether seat history is complete persisted data or legacy-compatible inference. */
+  seatBoundaryHistoryMode?: 'legacy_inferred' | 'explicit';
+  /** Schema 301+: immutable player identity mapping at game creation, serialized by seat index. */
+  initialSeatMappingJson?: string | null;
   gameState: 'draft' | 'active' | 'ended' | 'abandoned';
   currentRoundLabelZh?: string | null;
   endedAt?: number | null;
@@ -28,6 +32,18 @@ export type Game = {
   resultSummaryJson?: string | null;
   resultUpdatedAt?: number | null;
   languageOverride?: string | null;
+};
+
+export type LocalSeatBoundaryReason = 'confirmed_reseat';
+
+export type LocalSeatBoundary = {
+  id: string;
+  gameId: string;
+  effectiveFromHandIndex: number;
+  /** Complete post-boundary mapping, keyed by canonical seat index 0..3. */
+  seatMapping: Record<number, string>;
+  reason: LocalSeatBoundaryReason;
+  createdAt: number;
 };
 
 export type Player = {
@@ -60,6 +76,8 @@ export type GameBundle = {
   game: Game;
   players: Player[];
   hands: Hand[];
+  /** Optional only for source compatibility; repository reads always provide an ordered array. */
+  seatBoundaries?: LocalSeatBoundary[];
 };
 
 export type NewGameInput = Omit<

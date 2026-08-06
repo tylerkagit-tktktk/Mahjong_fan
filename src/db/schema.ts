@@ -1,9 +1,9 @@
 import { SQLiteDatabase } from 'react-native-sqlite-storage';
 import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 
-export const CURRENT_SCHEMA_VERSION = 300;
+export const CURRENT_SCHEMA_VERSION = 301;
 
-const APP_OWNED_TABLES = ['games', 'players', 'hands', 'cloud_archives'] as const;
+const APP_OWNED_TABLES = ['games', 'players', 'hands', 'cloud_archives', 'game_seat_boundaries'] as const;
 const APP_OWNED_INDEXES = [
   'idx_hands_game_handIndex',
   'idx_games_createdAt',
@@ -11,6 +11,7 @@ const APP_OWNED_INDEXES = [
   'idx_cloud_archives_createdAt',
   'idx_games_endedAt',
   'idx_games_resultStatus',
+  'idx_game_seat_boundaries_game_effective',
 ] as const;
 
 export const APP_OWNED_SCHEMA_OBJECTS = {
@@ -84,6 +85,8 @@ const TABLES = [
     currentRoundNumber INTEGER NOT NULL DEFAULT 1,
     maxWindIndex INTEGER NOT NULL DEFAULT 1,
     seatRotationOffset INTEGER NOT NULL DEFAULT 0,
+    seatBoundaryHistoryMode TEXT NOT NULL DEFAULT 'explicit',
+    initialSeatMappingJson TEXT NULL,
     gameState TEXT NOT NULL DEFAULT 'draft',
     currentRoundLabelZh TEXT NULL,
     languageOverride TEXT NULL
@@ -126,6 +129,16 @@ const TABLES = [
     statsAppliedUid TEXT NULL,
     payloadJson TEXT NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS game_seat_boundaries(
+    id TEXT PRIMARY KEY NOT NULL,
+    gameId TEXT NOT NULL,
+    effectiveFromHandIndex INTEGER NOT NULL,
+    seatMappingJson TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    createdAt INTEGER NOT NULL,
+    FOREIGN KEY (gameId) REFERENCES games(id) ON DELETE CASCADE,
+    UNIQUE (gameId, effectiveFromHandIndex)
+  );`,
 ];
 
 const INDICES = [
@@ -135,6 +148,7 @@ const INDICES = [
   'CREATE INDEX IF NOT EXISTS idx_cloud_archives_createdAt ON cloud_archives(createdAt DESC);',
   'CREATE INDEX IF NOT EXISTS idx_games_endedAt ON games(endedAt);',
   'CREATE INDEX IF NOT EXISTS idx_games_resultStatus ON games(resultStatus);',
+  'CREATE INDEX IF NOT EXISTS idx_game_seat_boundaries_game_effective ON game_seat_boundaries(gameId, effectiveFromHandIndex);',
 ];
 
 type SchemaObjectRow = { name: string; type: string };
@@ -149,8 +163,13 @@ export async function initializeSchema(db: SQLiteDatabase): Promise<void> {
     if (detectedVersion > CURRENT_SCHEMA_VERSION) {
       throw new ForwardSchemaVersionError(detectedVersion);
     }
-    if (detectedVersion > 0 && detectedVersion < CURRENT_SCHEMA_VERSION) {
+    if (detectedVersion > 0 && detectedVersion < 300) {
       throw new UnsupportedOlderSchemaVersionError(detectedVersion);
+    }
+
+    if (detectedVersion === 300) {
+      await migrateSchema300To301(db);
+      return;
     }
 
     const isUnversionedDatabase = detectedVersion === 0;
@@ -168,12 +187,11 @@ export async function initializeSchema(db: SQLiteDatabase): Promise<void> {
       }
 
       await createAndVerifySchema(db);
+      if (isUnversionedDatabase) {
+        // Version is part of the same atomic initialization as tables and backfills.
+        await db.executeSql(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION};`);
+      }
     });
-
-    if (isUnversionedDatabase) {
-      // Stamp only after tables, defensive columns, backfills, indexes, and verification have succeeded.
-      await db.executeSql(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION};`);
-    }
   } catch (error) {
     if (isSchemaInitializationError(error)) {
       throw error;
@@ -193,6 +211,8 @@ async function createAndVerifySchema(db: SQLiteDatabase): Promise<void> {
   await ensureColumn(db, 'games', 'currentRoundNumber', 'INTEGER NOT NULL DEFAULT 1');
   await ensureColumn(db, 'games', 'maxWindIndex', 'INTEGER NOT NULL DEFAULT 1');
   await ensureColumn(db, 'games', 'seatRotationOffset', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn(db, 'games', 'seatBoundaryHistoryMode', "TEXT NOT NULL DEFAULT 'explicit'");
+  await ensureColumn(db, 'games', 'initialSeatMappingJson', 'TEXT NULL');
   await ensureColumn(db, 'games', 'gameState', "TEXT NOT NULL DEFAULT 'draft'");
   await ensureColumn(db, 'games', 'currentRoundLabelZh', 'TEXT NULL');
   await ensureColumn(db, 'games', 'languageOverride', 'TEXT NULL');
@@ -222,6 +242,27 @@ async function createAndVerifySchema(db: SQLiteDatabase): Promise<void> {
   }
 
   await verifyRequiredTables(db);
+  await verifyRequiredColumns(db, 'games', ['seatBoundaryHistoryMode', 'initialSeatMappingJson']);
+  await verifyRequiredIndexes(db);
+}
+
+/**
+ * Version 300 had no persisted seat-boundary history. Keep every historical row intact and
+ * explicitly mark those games as inference-compatible rather than fabricating boundaries.
+ */
+export async function migrateSchema300To301(db: SQLiteDatabase): Promise<void> {
+  await runSchemaTransaction(db, async () => {
+    await ensureColumn(db, 'games', 'seatBoundaryHistoryMode', "TEXT NOT NULL DEFAULT 'explicit'");
+    await ensureColumn(db, 'games', 'initialSeatMappingJson', 'TEXT NULL');
+    await db.executeSql("UPDATE games SET seatBoundaryHistoryMode = 'legacy_inferred';");
+    await db.executeSql(TABLES[TABLES.length - 1]);
+    await db.executeSql(INDICES[INDICES.length - 1]);
+    await verifyRequiredTables(db);
+    await verifyRequiredColumns(db, 'games', ['seatBoundaryHistoryMode', 'initialSeatMappingJson']);
+    await verifyRequiredIndexes(db);
+    // Stamp only after every migration operation and verification succeeds.
+    await db.executeSql(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION};`);
+  });
 }
 
 async function readUserVersion(db: SQLiteDatabase): Promise<number> {
@@ -255,7 +296,7 @@ async function dropAppOwnedSchema(db: SQLiteDatabase): Promise<void> {
   for (const index of APP_OWNED_INDEXES) {
     await db.executeSql(`DROP INDEX IF EXISTS ${index};`);
   }
-  for (const table of ['hands', 'players', 'cloud_archives', 'games'] as const) {
+  for (const table of ['game_seat_boundaries', 'hands', 'players', 'cloud_archives', 'games'] as const) {
     await db.executeSql(`DROP TABLE IF EXISTS ${table};`);
   }
 }
@@ -272,6 +313,36 @@ async function verifyRequiredTables(db: SQLiteDatabase): Promise<void> {
   const missingTables = APP_OWNED_TABLES.filter((table) => !existingTables.has(table));
   if (missingTables.length > 0) {
     throw new Error(`Required SQLite tables are missing: ${missingTables.join(', ')}.`);
+  }
+}
+
+async function verifyRequiredColumns(
+  db: SQLiteDatabase,
+  table: string,
+  requiredColumns: readonly string[],
+): Promise<void> {
+  const [result] = await db.executeSql(`PRAGMA table_info(${table});`);
+  const existingColumns = new Set<string>();
+  for (let index = 0; index < result.rows.length; index += 1) {
+    existingColumns.add(String((result.rows.item(index) as { name: string }).name));
+  }
+  const missingColumns = requiredColumns.filter((column) => !existingColumns.has(column));
+  if (missingColumns.length > 0) {
+    throw new Error(`Required SQLite columns are missing from ${table}: ${missingColumns.join(', ')}.`);
+  }
+}
+
+async function verifyRequiredIndexes(db: SQLiteDatabase): Promise<void> {
+  const [result] = await db.executeSql(
+    "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%';",
+  );
+  const existingIndexes = new Set<string>();
+  for (let index = 0; index < result.rows.length; index += 1) {
+    existingIndexes.add(String((result.rows.item(index) as { name: string }).name));
+  }
+  const missingIndexes = APP_OWNED_INDEXES.filter((index) => !existingIndexes.has(index));
+  if (missingIndexes.length > 0) {
+    throw new Error(`Required SQLite indexes are missing: ${missingIndexes.join(', ')}.`);
   }
 }
 

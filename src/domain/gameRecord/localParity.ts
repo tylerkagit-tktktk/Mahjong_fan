@@ -109,6 +109,107 @@ function orderedHands(bundle: GameBundle): Hand[] {
   return bundle.hands.slice().sort((left, right) => left.handIndex - right.handIndex);
 }
 
+type SeatMapping = Record<number, string>;
+
+function mappingFromPlayers(players: readonly Player[]): SeatMapping | null {
+  if (players.length !== 4) {
+    return null;
+  }
+  const mapping: SeatMapping = {};
+  for (const player of players) {
+    if (!Number.isInteger(player.seatIndex) || player.seatIndex < 0 || player.seatIndex > 3 || !player.id) {
+      return null;
+    }
+    if (Object.prototype.hasOwnProperty.call(mapping, player.seatIndex)) {
+      return null;
+    }
+    mapping[player.seatIndex] = player.id;
+  }
+  return Object.keys(mapping).length === 4 ? mapping : null;
+}
+
+function parseSeatMapping(raw: unknown): SeatMapping | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null;
+  }
+  const mapping = raw as Record<string, unknown>;
+  const output: SeatMapping = {};
+  const playerIds = new Set<string>();
+  for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
+    const playerId = mapping[String(seatIndex)];
+    if (typeof playerId !== 'string' || playerId.length === 0 || playerIds.has(playerId)) {
+      return null;
+    }
+    playerIds.add(playerId);
+    output[seatIndex] = playerId;
+  }
+  return Object.keys(mapping).length === 4 ? output : null;
+}
+
+function initialExplicitSeatMapping(bundle: GameBundle): SeatMapping | null {
+  const raw = bundle.game.initialSeatMappingJson;
+  if (typeof raw !== 'string') {
+    return mappingFromPlayers(bundle.players);
+  }
+  try {
+    return parseSeatMapping(JSON.parse(raw) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function explicitBoundaries(bundle: GameBundle): Array<{ effectiveFromHandIndex: number; seatMapping: SeatMapping }> {
+  return (bundle.seatBoundaries ?? [])
+    .map((boundary) => ({
+      effectiveFromHandIndex: boundary.effectiveFromHandIndex,
+      seatMapping: parseSeatMapping(boundary.seatMapping),
+    }))
+    .filter((boundary): boundary is { effectiveFromHandIndex: number; seatMapping: SeatMapping } =>
+      Number.isInteger(boundary.effectiveFromHandIndex) && boundary.effectiveFromHandIndex >= 0 && boundary.seatMapping !== null,
+    )
+    .sort((left, right) => left.effectiveFromHandIndex - right.effectiveFromHandIndex);
+}
+
+function buildExplicitPlayerTotals(bundle: GameBundle, hands: readonly Hand[]): Map<string, number> | null {
+  let mapping = initialExplicitSeatMapping(bundle);
+  if (!mapping) {
+    return null;
+  }
+  const totals = new Map<string, number>(bundle.players.map((player) => [player.id, 0]));
+  const boundaries = explicitBoundaries(bundle);
+  let boundaryIndex = 0;
+  hands.forEach((hand) => {
+    while (boundaries[boundaryIndex]?.effectiveFromHandIndex <= hand.handIndex) {
+      mapping = boundaries[boundaryIndex].seatMapping;
+      boundaryIndex += 1;
+    }
+    const deltasQ = resolveDeltasQ(hand.deltasJson);
+    if (!deltasQ) {
+      return;
+    }
+    for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
+      const playerId = mapping?.[seatIndex];
+      if (playerId) {
+        totals.set(playerId, (totals.get(playerId) ?? 0) + Number(deltasQ[seatIndex] ?? 0));
+      }
+    }
+  });
+  return totals;
+}
+
+function finalExplicitSeatMapping(bundle: GameBundle, handsCount: number): SeatMapping | null {
+  let mapping = initialExplicitSeatMapping(bundle);
+  if (!mapping) {
+    return null;
+  }
+  explicitBoundaries(bundle).forEach((boundary) => {
+    if (boundary.effectiveFromHandIndex <= handsCount) {
+      mapping = boundary.seatMapping;
+    }
+  });
+  return mapping;
+}
+
 function buildLegacyPlayerTotals(bundle: GameBundle, hands: readonly Hand[]): Map<string, number> {
   return aggregatePlayerTotalsQByTimeline(
     bundle.players,
@@ -119,6 +220,13 @@ function buildLegacyPlayerTotals(bundle: GameBundle, hands: readonly Hand[]): Ma
     INITIAL_ROUND_LABEL_ZH,
     0,
   );
+}
+
+function buildLocalPlayerTotals(bundle: GameBundle, hands: readonly Hand[]): Map<string, number> {
+  if (bundle.game.seatBoundaryHistoryMode === 'explicit') {
+    return buildExplicitPlayerTotals(bundle, hands) ?? buildLegacyPlayerTotals(bundle, hands);
+  }
+  return buildLegacyPlayerTotals(bundle, hands);
 }
 
 function buildLegacySummary(
@@ -240,7 +348,13 @@ function normalizeSummary(summary: LegacySummaryProjection | null): LegacySummar
   };
 }
 
-function buildCurrentSeatMapping(bundle: GameBundle): readonly { seatIndex: number; playerId: string }[] {
+function buildCurrentSeatMapping(bundle: GameBundle, handsCount: number): readonly { seatIndex: number; playerId: string }[] {
+  if (bundle.game.seatBoundaryHistoryMode === 'explicit') {
+    const explicit = finalExplicitSeatMapping(bundle, handsCount);
+    if (explicit) {
+      return [0, 1, 2, 3].map((seatIndex) => ({ seatIndex, playerId: explicit[seatIndex] ?? '' }));
+    }
+  }
   const effective = getEffectivePlayersBySeat(
     bundle.players,
     normalizeSeatRotationOffset(bundle.game.seatRotationOffset ?? 0),
@@ -251,13 +365,20 @@ function buildCurrentSeatMapping(bundle: GameBundle): readonly { seatIndex: numb
   }));
 }
 
+function rankPlayerTotals(bundle: GameBundle, totals: ReadonlyMap<string, number>) {
+  return bundle.players
+    .map((player) => ({ playerId: player.id, displayName: player.name, totalQ: totals.get(player.id) ?? 0 }))
+    .sort((left, right) => right.totalQ - left.totalQ || left.displayName.localeCompare(right.displayName))
+    .map(({ playerId, totalQ }) => ({ playerId, totalQ }));
+}
+
 export function compareLocalReplayParity(
   bundle: GameBundle,
   replay: ReplayResult,
 ): LocalReplayParityReport {
   const hands = orderedHands(bundle);
   const stats = computeGameStats(bundle);
-  const legacyPlayerTotalsQ = buildLegacyPlayerTotals(bundle, hands);
+  const legacyPlayerTotalsQ = buildLocalPlayerTotals(bundle, hands);
   const legacySummary = buildLegacySummary(bundle, hands, legacyPlayerTotalsQ);
   const required: LocalReplayParityItem[] = [];
   const informational: LocalReplayParityItem[] = [];
@@ -332,7 +453,7 @@ export function compareLocalReplayParity(
   required.push(compareValues(
     'required',
     'ranking',
-    stats.ranking.map((entry) => ({ playerId: entry.playerId, totalQ: entry.totalMoney * 4 })),
+    rankPlayerTotals(bundle, legacyPlayerTotalsQ),
     replay.ranking.map((entry) => ({ playerId: entry.playerId, totalQ: entry.totalQ })),
     {},
     replay.ranking.length === bundle.players.length,
@@ -426,7 +547,7 @@ export function compareLocalReplayParity(
   informational.push(compareValues(
     'informational',
     'finalEffectiveSeatMapping',
-    buildCurrentSeatMapping(bundle),
+    buildCurrentSeatMapping(bundle, hands.length),
     replay.finalSeats ?? null,
     {},
     replay.finalSeats !== null,

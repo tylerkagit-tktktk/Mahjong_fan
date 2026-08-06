@@ -41,7 +41,14 @@ export type LocalAdapterDiagnosticCode =
   | 'PERSISTED_CURRENT_ROUND_LABEL_MISMATCH'
   | 'MALFORMED_RESULT_SUMMARY_JSON'
   | 'PERSISTED_RESULT_SUMMARY_MISMATCH'
-  | 'CURRENT_SEAT_ROTATION_OFFSET_SOURCE_ONLY';
+  | 'CURRENT_SEAT_ROTATION_OFFSET_SOURCE_ONLY'
+  | 'MALFORMED_PERSISTED_SEAT_BOUNDARY'
+  | 'DUPLICATE_PERSISTED_SEAT_BOUNDARY'
+  | 'INVALID_PERSISTED_SEAT_BOUNDARY_INDEX'
+  | 'UNKNOWN_BOUNDARY_PLAYER'
+  | 'INCOMPLETE_BOUNDARY_MAPPING'
+  | 'MISSING_EXPLICIT_BOUNDARY_HISTORY'
+  | 'LEGACY_INFERRED_BOUNDARY_HISTORY';
 
 export type LocalAdapterDiagnostic = {
   code: LocalAdapterDiagnosticCode;
@@ -647,7 +654,205 @@ function getPlayerIdAtSeat(
   return seats.find((seat) => seat.seatIndex === seatIndex)?.playerId ?? null;
 }
 
-function buildBoundaries(
+function sameSeatAssignments(
+  left: readonly CanonicalSeatAssignment[],
+  right: readonly CanonicalSeatAssignment[],
+): boolean {
+  return left.length === right.length && left.every(
+    (seat, index) => seat.seatIndex === right[index]?.seatIndex && seat.playerId === right[index]?.playerId,
+  );
+}
+
+function isBoundaryMappingRecord(value: unknown): value is Record<string, unknown> {
+  return isRecord(value);
+}
+
+function mapPersistedSeatMapping(
+  mapping: unknown,
+  playerIds: ReadonlySet<string>,
+  diagnostics: LocalAdapterDiagnostic[],
+  gameId: string,
+  sourceField: string,
+  handIndex?: number,
+): CanonicalSeatAssignment[] | null {
+  if (!isBoundaryMappingRecord(mapping)) {
+    addDiagnostic(diagnostics, gameId, 'INCOMPLETE_BOUNDARY_MAPPING', 'error', {
+      handIndex,
+      sourceField,
+      detail: 'seat mapping must be an object containing all four canonical seats',
+    });
+    return null;
+  }
+  const keys = Object.keys(mapping);
+  const expectedKeys = ['0', '1', '2', '3'];
+  if (keys.length !== expectedKeys.length || expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(mapping, key))) {
+    addDiagnostic(diagnostics, gameId, 'INCOMPLETE_BOUNDARY_MAPPING', 'error', {
+      handIndex,
+      sourceField,
+      detail: 'seat mapping must contain exactly seats 0, 1, 2, and 3',
+    });
+    return null;
+  }
+  const seenPlayerIds = new Set<string>();
+  const seats: CanonicalSeatAssignment[] = [];
+  for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
+    const playerId = mapping[String(seatIndex)];
+    if (typeof playerId !== 'string' || playerId.length === 0) {
+      addDiagnostic(diagnostics, gameId, 'MALFORMED_PERSISTED_SEAT_BOUNDARY', 'error', {
+        handIndex,
+        sourceField,
+        detail: `seat ${seatIndex} must contain a player identity`,
+      });
+      return null;
+    }
+    if (!playerIds.has(playerId)) {
+      addDiagnostic(diagnostics, gameId, 'UNKNOWN_BOUNDARY_PLAYER', 'error', {
+        handIndex,
+        sourceField,
+        detail: `seat ${seatIndex} references unknown player ${playerId}`,
+      });
+      return null;
+    }
+    if (seenPlayerIds.has(playerId)) {
+      addDiagnostic(diagnostics, gameId, 'INCOMPLETE_BOUNDARY_MAPPING', 'error', {
+        handIndex,
+        sourceField,
+        detail: `player ${playerId} appears in more than one seat`,
+      });
+      return null;
+    }
+    seenPlayerIds.add(playerId);
+    seats.push({ seatIndex: seatIndex as SeatIndex, playerId });
+  }
+  return seats;
+}
+
+function resolveHistoryMode(
+  bundle: GameBundle,
+  diagnostics: LocalAdapterDiagnostic[],
+): 'legacy_inferred' | 'explicit' | null {
+  const gameId = getGameId(bundle);
+  // Bundles built before schema 301 are source-compatible legacy input, never implicit explicit history.
+  const mode = bundle.game.seatBoundaryHistoryMode ?? 'legacy_inferred';
+  if (mode === 'legacy_inferred' || mode === 'explicit') {
+    return mode;
+  }
+  addDiagnostic(diagnostics, gameId, 'INVALID_GAME_BUNDLE', 'error', {
+    sourceField: 'game.seatBoundaryHistoryMode',
+    detail: `unsupported seat boundary history mode ${String(mode)}`,
+  });
+  return null;
+}
+
+function resolveExplicitInitialSeats(
+  bundle: GameBundle,
+  fallbackSeats: readonly CanonicalSeatAssignment[],
+  playerIds: ReadonlySet<string>,
+  hasPersistedBoundaries: boolean,
+  diagnostics: LocalAdapterDiagnostic[],
+): CanonicalSeatAssignment[] | null {
+  const raw = bundle.game.initialSeatMappingJson;
+  if (raw === null || raw === undefined || (typeof raw === 'string' && raw.trim().length === 0)) {
+    if (hasPersistedBoundaries) {
+      addDiagnostic(diagnostics, getGameId(bundle), 'MISSING_EXPLICIT_BOUNDARY_HISTORY', 'error', {
+        sourceField: 'game.initialSeatMappingJson',
+        detail: 'explicit reseat history requires the original identity-to-seat baseline',
+      });
+      return null;
+    }
+    return fallbackSeats.slice();
+  }
+  if (typeof raw !== 'string') {
+    addDiagnostic(diagnostics, getGameId(bundle), 'MALFORMED_PERSISTED_SEAT_BOUNDARY', 'error', {
+      sourceField: 'game.initialSeatMappingJson',
+      detail: 'initial seat mapping must be JSON',
+    });
+    return null;
+  }
+  try {
+    return mapPersistedSeatMapping(
+      JSON.parse(raw) as unknown,
+      playerIds,
+      diagnostics,
+      getGameId(bundle),
+      'game.initialSeatMappingJson',
+    );
+  } catch {
+    addDiagnostic(diagnostics, getGameId(bundle), 'MALFORMED_PERSISTED_SEAT_BOUNDARY', 'error', {
+      sourceField: 'game.initialSeatMappingJson',
+      detail: 'initial seat mapping JSON parsing failed',
+    });
+    return null;
+  }
+}
+
+function buildPersistedBoundaries(
+  bundle: GameBundle,
+  handsCount: number,
+  playerIds: ReadonlySet<string>,
+  diagnostics: LocalAdapterDiagnostic[],
+): CanonicalSeatBoundary[] {
+  const gameId = getGameId(bundle);
+  if (bundle.seatBoundaries !== undefined && !Array.isArray(bundle.seatBoundaries)) {
+    addDiagnostic(diagnostics, gameId, 'MALFORMED_PERSISTED_SEAT_BOUNDARY', 'error', {
+      sourceField: 'seatBoundaries',
+      detail: 'persisted boundaries must be an array',
+    });
+    return [];
+  }
+  const boundaries = (bundle.seatBoundaries ?? []).slice().sort((left, right) =>
+    left.effectiveFromHandIndex - right.effectiveFromHandIndex || compareText(left.id, right.id),
+  );
+  const seenIndexes = new Set<number>();
+  const output: CanonicalSeatBoundary[] = [];
+  boundaries.forEach((boundary, rowIndex) => {
+    const sourceField = `seatBoundaries[${rowIndex}]`;
+    if (!boundary || typeof boundary !== 'object' || boundary.gameId !== gameId || typeof boundary.id !== 'string' || boundary.id.length === 0 || boundary.reason !== 'confirmed_reseat' || !Number.isFinite(boundary.createdAt)) {
+      addDiagnostic(diagnostics, gameId, 'MALFORMED_PERSISTED_SEAT_BOUNDARY', 'error', {
+        sourceField,
+        detail: 'boundary row is missing its stable identity, game ownership, reason, or timestamp',
+      });
+      return;
+    }
+    if (!isNonNegativeInteger(boundary.effectiveFromHandIndex) || boundary.effectiveFromHandIndex > handsCount) {
+      addDiagnostic(diagnostics, gameId, 'INVALID_PERSISTED_SEAT_BOUNDARY_INDEX', 'error', {
+        sourceField: `${sourceField}.effectiveFromHandIndex`,
+        detail: `boundary index must be within 0..${handsCount}`,
+      });
+      return;
+    }
+    if (seenIndexes.has(boundary.effectiveFromHandIndex)) {
+      addDiagnostic(diagnostics, gameId, 'DUPLICATE_PERSISTED_SEAT_BOUNDARY', 'error', {
+        handIndex: boundary.effectiveFromHandIndex,
+        sourceField: `${sourceField}.effectiveFromHandIndex`,
+        detail: 'more than one persisted boundary has the same effective hand index',
+      });
+      return;
+    }
+    seenIndexes.add(boundary.effectiveFromHandIndex);
+    const seats = mapPersistedSeatMapping(
+      boundary.seatMapping,
+      playerIds,
+      diagnostics,
+      gameId,
+      `${sourceField}.seatMapping`,
+      boundary.effectiveFromHandIndex,
+    );
+    if (!seats) {
+      return;
+    }
+    output.push({
+      entryType: 'seat-boundary',
+      id: boundary.id,
+      effectiveFromHandIndex: boundary.effectiveFromHandIndex,
+      occurredAt: boundary.createdAt,
+      seats,
+    });
+  });
+  return output;
+}
+
+function buildLegacyInferredBoundaries(
   bundle: GameBundle,
   parsedHands: readonly ParsedLocalHand[],
   initialSeats: readonly CanonicalSeatAssignment[],
@@ -751,13 +956,15 @@ function buildTimeline(
 ): CanonicalTimelineEntry[] {
   const boundariesByIndex = new Map(boundaries.map((boundary) => [boundary.effectiveFromHandIndex, boundary]));
   const timeline: CanonicalTimelineEntry[] = [];
-  hands.forEach((hand, index) => {
-    timeline.push(hand.canonical);
-    const boundary = boundariesByIndex.get(index + 1);
+  for (let handIndex = 0; handIndex <= hands.length; handIndex += 1) {
+    const boundary = boundariesByIndex.get(handIndex);
     if (boundary) {
       timeline.push(boundary);
     }
-  });
+    if (handIndex < hands.length) {
+      timeline.push(hands[handIndex].canonical);
+    }
+  }
   return timeline;
 }
 
@@ -867,14 +1074,55 @@ export function adaptLocalGameBundle(bundle: GameBundle): LocalGameRecordAdapter
   }
 
   let boundaries: CanonicalSeatBoundary[] = [];
+  let initialSeats = playerMapping?.initialSeats ?? [];
+  const historyMode = resolveHistoryMode(bundle, diagnostics);
   if (playerMapping && parsedHands.length === sortedSourceHands.length && isSeatIndex(startingDealerSeatIndex)) {
-    boundaries = buildBoundaries(
+    const persistedBoundaries = buildPersistedBoundaries(
       bundle,
-      parsedHands,
-      playerMapping.initialSeats,
+      parsedHands.length,
       playerMapping.playerIds,
       diagnostics,
     );
+    if (historyMode === 'explicit') {
+      const explicitInitialSeats = resolveExplicitInitialSeats(
+        bundle,
+        playerMapping.initialSeats,
+        playerMapping.playerIds,
+        persistedBoundaries.length > 0,
+        diagnostics,
+      );
+      if (explicitInitialSeats) {
+        initialSeats = explicitInitialSeats;
+        boundaries = persistedBoundaries;
+        const finalPersistedSeats = boundaries[boundaries.length - 1]?.seats ?? initialSeats;
+        if (!sameSeatAssignments(finalPersistedSeats, playerMapping.initialSeats)) {
+          addDiagnostic(diagnostics, gameId, 'MISSING_EXPLICIT_BOUNDARY_HISTORY', 'error', {
+            sourceField: 'players.seatIndex',
+            detail: 'current player seats do not match the final explicit persisted mapping',
+          });
+        }
+      }
+    } else if (historyMode === 'legacy_inferred') {
+      addDiagnostic(diagnostics, gameId, 'LEGACY_INFERRED_BOUNDARY_HISTORY', 'info', {
+        sourceField: 'game.seatBoundaryHistoryMode',
+        detail: 'legacy local data may infer historical seat boundaries from round labels without writing them back',
+      });
+      const inferredBoundaries = buildLegacyInferredBoundaries(
+        bundle,
+        parsedHands,
+        playerMapping.initialSeats,
+        playerMapping.playerIds,
+        diagnostics,
+      );
+      const byIndex = new Map<number, CanonicalSeatBoundary>();
+      inferredBoundaries.forEach((boundary) => byIndex.set(boundary.effectiveFromHandIndex, boundary));
+      // Persisted confirmations on a migrated game are preferred where they exist, while earlier
+      // unknown history remains legacy-only and cannot become authoritative through inference.
+      persistedBoundaries.forEach((boundary) => byIndex.set(boundary.effectiveFromHandIndex, boundary));
+      boundaries = Array.from(byIndex.values()).sort(
+        (left, right) => left.effectiveFromHandIndex - right.effectiveFromHandIndex || compareText(left.id, right.id),
+      );
+    }
 
     try {
       const expectedRoundLabelZh = getRoundLabel(
@@ -899,6 +1147,8 @@ export function adaptLocalGameBundle(bundle: GameBundle): LocalGameRecordAdapter
     hasError(diagnostics) ||
     !rules ||
     !playerMapping ||
+    !historyMode ||
+    initialSeats.length !== 4 ||
     !isSeatIndex(startingDealerSeatIndex) ||
     parsedHands.length !== sortedSourceHands.length
   ) {
@@ -911,7 +1161,7 @@ export function adaptLocalGameBundle(bundle: GameBundle): LocalGameRecordAdapter
     lifecycle,
     rules,
     players: playerMapping.players,
-    initialSeats: playerMapping.initialSeats,
+    initialSeats,
     startingDealerSeatIndex,
     timeline: buildTimeline(parsedHands, boundaries),
   };

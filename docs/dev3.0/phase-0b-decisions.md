@@ -135,20 +135,20 @@ A hand is correctable only if no later effective timeline event exists. Seat rot
 
 The current local representation infers player remapping at completed wind cycles from `nextRoundLabelZh` (`src/models/seatRotation.ts:35-69`); the canonical contract makes a future explicit boundary possible without changing present behavior.
 
-## SQLite version 300/reset policy
+## SQLite version 300 foundation/reset policy (historical)
 
 Future schema policy:
 
-- fresh 3.0 DB: initialize schema, then set `PRAGMA user_version = 300`;
+- the Phase 0B foundation schema was version `300`; Phase 1C supersedes it with current schema `301`;
 - `user_version = 0` with legacy 2.1 tables: TestFlight policy permits an explicit rebuild/reset; no 2.1 test data migration is required;
-- `user_version > 300`: safely refuse; never downgrade or automatically clear;
+- a version newer than the supported current schema is safely refused; never downgrade or automatically clear;
 - this checkpoint does not add `PRAGMA user_version`, reset code, or schema changes.
 
 The integration hook is `initializeSchema` in `src/db/schema.ts`, reached through `openDb` in `src/db/sqlite.ts`.
 
-## Schema Version 300 Implementation Outcome
+## Schema Version 300 Foundation Outcome (historical)
 
-- `src/db/schema.ts` now exports `CURRENT_SCHEMA_VERSION = 300`, the storage-layer typed errors `UnsupportedOlderSchemaVersionError`, `ForwardSchemaVersionError`, and `SchemaInitializationError`, plus the explicit app-owned object manifest.
+- The foundation introduced the typed errors `UnsupportedOlderSchemaVersionError`, `ForwardSchemaVersionError`, and `SchemaInitializationError`, plus the explicit app-owned object manifest. Current schema version is now `301`; version `300` is a supported non-destructive migration source.
 - The owned SQLite objects are tables `games`, `players`, `hands`, `cloud_archives`; indexes `idx_hands_game_handIndex`, `idx_games_createdAt`, `idx_players_game`, `idx_cloud_archives_createdAt`, `idx_games_endedAt`, `idx_games_resultStatus`; there are currently no app-owned triggers or views.
 - Initialization reads `PRAGMA user_version` before any destructive work. Version `0` with an owned table logs a clearly labelled pre-launch TestFlight warning, drops only the hard-coded owned objects in a transaction, recreates/verifies the schema, then stamps `300` last. Version `0` without owned tables is fresh and is created/stamped without a reset.
 - Version `300` performs idempotent create/column/index verification without deleting rows or restamping. Versions `1...299` reject with the older-version error; versions above `300` reject with the forward-version error. Neither branch drops, creates, backfills, or changes the version.
@@ -232,14 +232,25 @@ Informational items report settlement directions, final effective seat mapping, 
 
 `__tests__/services/localGameReplay.test.ts` uses `ActualSqliteDatabase` and the real repository write/read path only to construct a temporary local game. It then loads the bundle through `getGameBundle`, runs adapter/replay/parity, and asserts games, players and hands rows are byte-for-byte equal before and after the read. Missing games return `LocalGameReplayReadError('NOT_FOUND')`; schema initialization errors continue to pass through as the existing typed schema errors.
 
-`GameTableScreen`, `GameDashboardScreen`, `HistoryScreen`, `endGame`, result snapshot writes, SQLite schema/version 300, Firestore, Cloud adapters, navigation, undo, replace, remove, reopen and startup reconciliation are unchanged. Phase 1B is a dormant read-only projection path; production screens and mutation paths do not consume it.
+`GameTableScreen`, `GameDashboardScreen`, `HistoryScreen`, `endGame`, result snapshot writes, Firestore, Cloud adapters, navigation, undo, replace, remove, reopen and startup reconciliation remain outside the Phase 1B read-only projection path.
 
 ### Local data limitations carried into Phase 1C
 
 - SQLite has no first-class historical reseat event. A manual reseat cannot be uniquely reconstructed when stored identity/seat constraints do not expose the change; the adapter reports ambiguity instead of fabricating a boundary.
 - Legacy winning rows without a strict `fan` source or draw rows without explicit `dealerAction` cannot safely be converted. They remain readable by existing production code but are not authoritative under this adapter.
 - Persisted `handsCount`, `currentRoundLabelZh`, and ended result summary are caches. Stale values are surfaced as diagnostics; no repair or rewrite is attempted.
-- Phase 1C still needs to decide whether to persist explicit local boundaries, how to migrate/flag old rows, and when any local read projection may replace the current screen/statistics calculations.
+- Phase 1C now persists confirmed local boundaries and flags old rows; screen/statistics projection replacement remains out of scope.
+
+## Phase 1C Persisted Local Boundary Outcome
+
+- Current SQLite schema is `301`. Fresh databases create `game_seat_boundaries`, the `idx_game_seat_boundaries_game_effective` index, `games.seatBoundaryHistoryMode`, and `games.initialSeatMappingJson`, then stamp `301` only inside the successful initialization transaction. The owned-object manifest now names the boundary table and index; legacy reset still drops only hard-coded app-owned objects and preserves unknown/system SQLite objects.
+- `300 → 301` is a dedicated non-destructive transaction: it adds the two game columns, creates/verifies the boundary table/index, backfills every existing game as `legacy_inferred`, then writes `PRAGMA user_version = 301` last. Games, players, hands, cloud archives, and unknown objects are retained. A failure rolls back columns/table/index/version so the same database can retry.
+- A new local game is explicitly marked `explicit` and saves an immutable initial identity→seat baseline in `games`. A boundary row stores a complete canonical seat→player-ID mapping, `effectiveFromHandIndex`, `confirmed_reseat`, and creation time. The baseline is required because the existing confirmed reseat flow updates `players.seatIndex`; without it, pre-reseat identity mapping cannot be reconstructed.
+- `updateGamePlayerSeats` is the confirmed local reseat transaction. It checks the game is mutable, verifies persisted versus actual hand count and four unique player identities/seats, updates player seats and offset, then inserts/upserts the one pending `(gameId, handsCount)` boundary. Any failure rolls back player seats, offset, and boundary. A second confirmation before another hand safely replaces that pending mapping; normal `insertHand`, cancellation, and the North→East prompt alone do not write a boundary.
+- The adapter uses only persisted boundaries for `explicit` games. It validates complete mappings, player ownership, indexes, duplicate boundaries, reason, and the original baseline; it never scans a North→East label to fill an explicit gap. Relevant stable diagnostics are `MALFORMED_PERSISTED_SEAT_BOUNDARY`, `DUPLICATE_PERSISTED_SEAT_BOUNDARY`, `INVALID_PERSISTED_SEAT_BOUNDARY_INDEX`, `UNKNOWN_BOUNDARY_PLAYER`, `INCOMPLETE_BOUNDARY_MAPPING`, and `MISSING_EXPLICIT_BOUNDARY_HISTORY`.
+- Migrated `legacy_inferred` games retain the Phase 1B label-inference compatibility path without database writes or silent upgrades. They emit informational `LEGACY_INFERRED_BOUNDARY_HISTORY`; any replay that actually relies on an inferred boundary is not authoritative, even if required parity is otherwise exact. Persisted confirmations after migration can be used where present, but they cannot prove earlier missing history.
+- Parity now attributes stored deltas using explicit boundary mappings, including a final boundary at `handCount`, and compares the persisted final mapping with replay. Read-only replay continues to write nothing. Production behavior changes only for fresh-game history mode, confirmed reseat persistence, and safe 300→301 migration; Dashboard/GameTable projection, scoring, hand mutation/correction/reopen, result-summary rewrite, Firestore/Cloud, navigation, and UI copy remain unchanged.
+- Real SQLite coverage in `__tests__/db/schema.version300.test.ts` covers fresh/current/legacy reset, 300 preservation and backfill, migration rollback/retry, 299/302 rejection, boundary objects, cascade, WAL/foreign keys, and unknown/system preservation. `__tests__/db/repo.seatBoundaries.test.ts` covers explicit creation, confirmed write/upsert, ordinary hand non-write, invalid/terminal guards, transaction rollback, and cascade. Adapter/service tests cover explicit persisted boundaries, end-of-timeline boundaries, legacy compatibility, no explicit fallback inference, malformed boundaries, deterministic input, and read-only replay.
 
 ## Characterization fixtures
 

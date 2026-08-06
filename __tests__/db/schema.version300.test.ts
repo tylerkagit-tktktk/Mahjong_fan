@@ -40,7 +40,28 @@ async function tableNames(db: ActualSqliteDatabase): Promise<string[]> {
   return rows.map((row) => String(row.name));
 }
 
-describe('SQLite schema version 300 bootstrap', () => {
+async function createVersion300Database(db: ActualSqliteDatabase): Promise<void> {
+  await db.executeSql(`CREATE TABLE games(
+    id TEXT PRIMARY KEY,
+    title TEXT,
+    createdAt INTEGER,
+    endedAt INTEGER,
+    resultStatus TEXT,
+    seatRotationOffset INTEGER NOT NULL DEFAULT 0
+  );`);
+  await db.executeSql('CREATE TABLE players(id TEXT PRIMARY KEY, gameId TEXT, name TEXT, seatIndex INTEGER);');
+  await db.executeSql('CREATE TABLE hands(id TEXT PRIMARY KEY, gameId TEXT, handIndex INTEGER);');
+  await db.executeSql('CREATE TABLE cloud_archives(roomId TEXT PRIMARY KEY, createdAt INTEGER);');
+  await db.executeSql('CREATE INDEX idx_hands_game_handIndex ON hands(gameId, handIndex);');
+  await db.executeSql('CREATE INDEX idx_games_createdAt ON games(createdAt);');
+  await db.executeSql('CREATE INDEX idx_players_game ON players(gameId);');
+  await db.executeSql('CREATE INDEX idx_cloud_archives_createdAt ON cloud_archives(createdAt DESC);');
+  await db.executeSql('CREATE INDEX idx_games_endedAt ON games(endedAt);');
+  await db.executeSql('CREATE INDEX idx_games_resultStatus ON games(resultStatus);');
+  await db.executeSql('PRAGMA user_version = 300;');
+}
+
+describe('SQLite schema version 301 bootstrap', () => {
   let databases: ActualSqliteDatabase[] = [];
 
   beforeEach(() => {
@@ -57,7 +78,7 @@ describe('SQLite schema version 300 bootstrap', () => {
     return db;
   }
 
-  it('creates a fresh database, required tables, WAL, foreign keys, and version 300', async () => {
+  it('creates a fresh database, required tables, WAL, foreign keys, and version 301', async () => {
     const db = await createDatabase();
 
     expect(await userVersion(db)).toBe(0);
@@ -106,6 +127,76 @@ describe('SQLite schema version 300 bootstrap', () => {
     ]);
   });
 
+  it('migrates version 300 to 301 non-destructively and backfills legacy history mode', async () => {
+    const db = await createDatabase();
+    await createVersion300Database(db);
+    await db.executeSql("INSERT INTO games(id, title, createdAt) VALUES ('g300', 'Version 300', 100);");
+    await db.executeSql("INSERT INTO players(id, gameId, name, seatIndex) VALUES ('p300', 'g300', 'Player', 0);");
+    await db.executeSql("INSERT INTO hands(id, gameId, handIndex) VALUES ('h300', 'g300', 0);");
+    await db.executeSql("INSERT INTO cloud_archives(roomId, createdAt) VALUES ('archive300', 200);");
+
+    await initializeSchema(db as unknown as SQLiteDatabase);
+
+    expect(await userVersion(db)).toBe(301);
+    expect(await queryRows(db, 'SELECT id, title FROM games;')).toEqual([{ id: 'g300', title: 'Version 300' }]);
+    expect(await queryRows(db, 'SELECT id, gameId FROM players;')).toEqual([{ id: 'p300', gameId: 'g300' }]);
+    expect(await queryRows(db, 'SELECT id, gameId FROM hands;')).toEqual([{ id: 'h300', gameId: 'g300' }]);
+    expect(await queryRows(db, 'SELECT roomId FROM cloud_archives;')).toEqual([{ roomId: 'archive300' }]);
+    expect(await queryRows(db, "SELECT seatBoundaryHistoryMode FROM games WHERE id = 'g300';")).toEqual([
+      { seatBoundaryHistoryMode: 'legacy_inferred' },
+    ]);
+    expect(await queryRows(db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_seat_boundaries';")).toEqual([
+      { name: 'game_seat_boundaries' },
+    ]);
+    expect(await queryRows(db, "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_game_seat_boundaries_game_effective';")).toEqual([
+      { name: 'idx_game_seat_boundaries_game_effective' },
+    ]);
+
+    await initializeSchema(db as unknown as SQLiteDatabase);
+    expect(await userVersion(db)).toBe(301);
+    expect(await queryRows(db, "SELECT seatBoundaryHistoryMode FROM games WHERE id = 'g300';")).toEqual([
+      { seatBoundaryHistoryMode: 'legacy_inferred' },
+    ]);
+  });
+
+  it('rolls back a failed 300 to 301 migration and can retry without data loss', async () => {
+    const db = await createDatabase();
+    await createVersion300Database(db);
+    await db.executeSql("INSERT INTO games(id, title) VALUES ('rollback-300', 'Keep me');");
+    const originalExecuteSql = db.executeSql.bind(db);
+    let failOnce = true;
+    db.executeSql = async (sql, params) => {
+      if (failOnce && sql.includes('CREATE TABLE IF NOT EXISTS game_seat_boundaries')) {
+        failOnce = false;
+        throw new Error('Injected migration failure');
+      }
+      return originalExecuteSql(sql, params);
+    };
+
+    await expect(initializeSchema(db as unknown as SQLiteDatabase)).rejects.toBeInstanceOf(SchemaInitializationError);
+    expect(await userVersion(db)).toBe(300);
+    expect(await queryRows(db, 'SELECT id, title FROM games;')).toEqual([{ id: 'rollback-300', title: 'Keep me' }]);
+    expect(await queryRows(db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_seat_boundaries';")).toEqual([]);
+    expect(await queryRows(db, 'PRAGMA table_info(games);')).not.toContainEqual(
+      expect.objectContaining({ name: 'seatBoundaryHistoryMode' }),
+    );
+
+    await initializeSchema(db as unknown as SQLiteDatabase);
+    expect(await userVersion(db)).toBe(301);
+    expect(await queryRows(db, 'SELECT id, title FROM games;')).toEqual([{ id: 'rollback-300', title: 'Keep me' }]);
+  });
+
+  it('cascades boundary rows when their game is deleted', async () => {
+    const db = await createDatabase();
+    await initializeSchema(db as unknown as SQLiteDatabase);
+    await db.executeSql("INSERT INTO games(id, title) VALUES ('cascade-game', 'Cascade');");
+    await db.executeSql(
+      "INSERT INTO game_seat_boundaries(id, gameId, effectiveFromHandIndex, seatMappingJson, reason, createdAt) VALUES ('b1', 'cascade-game', 0, '{\"0\":\"p0\",\"1\":\"p1\",\"2\":\"p2\",\"3\":\"p3\"}', 'confirmed_reseat', 1);",
+    );
+    await db.executeSql("DELETE FROM games WHERE id = 'cascade-game';");
+    expect(await queryRows(db, 'SELECT id FROM game_seat_boundaries;')).toEqual([]);
+  });
+
   it('rejects unsupported older schema versions without changing rows or version', async () => {
     const db = await createDatabase();
     await db.executeSql('CREATE TABLE games(id TEXT PRIMARY KEY, title TEXT);');
@@ -123,12 +214,12 @@ describe('SQLite schema version 300 bootstrap', () => {
     const db = await createDatabase();
     await db.executeSql('CREATE TABLE games(id TEXT PRIMARY KEY, title TEXT);');
     await db.executeSql("INSERT INTO games(id, title) VALUES ('forward-game', 'Forward');");
-    await db.executeSql('PRAGMA user_version = 301;');
+    await db.executeSql('PRAGMA user_version = 302;');
 
     await expect(initializeSchema(db as unknown as SQLiteDatabase)).rejects.toBeInstanceOf(
       ForwardSchemaVersionError,
     );
-    expect(await userVersion(db)).toBe(301);
+    expect(await userVersion(db)).toBe(302);
     expect(await queryRows(db, 'SELECT id, title FROM games;')).toEqual([{ id: 'forward-game', title: 'Forward' }]);
   });
 

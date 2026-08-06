@@ -3,6 +3,7 @@ import {
   Game,
   GameBundle,
   Hand,
+  LocalSeatBoundary,
   NewGameInput,
   NewHandInput,
   NewPlayerInput,
@@ -38,6 +39,52 @@ function normalizeHands(result: ResultSet): Hand[] {
     ...hand,
     isDraw: Boolean(hand.isDraw),
   }));
+}
+
+function parseSeatMappingJson(raw: string, context: string): Record<number, string> {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('seat mapping must be an object');
+    }
+    return parsed as Record<number, string>;
+  } catch (error) {
+    throw new Error(`Invalid persisted seat mapping for ${context}: ${error instanceof Error ? error.message : 'JSON parsing failed'}`);
+  }
+}
+
+function normalizeSeatBoundaries(result: ResultSet): LocalSeatBoundary[] {
+  return rowsToArray<Omit<LocalSeatBoundary, 'seatMapping'> & { seatMappingJson: string }>(result).map((row) => ({
+    id: row.id,
+    gameId: row.gameId,
+    effectiveFromHandIndex: Number(row.effectiveFromHandIndex),
+    seatMapping: parseSeatMappingJson(row.seatMappingJson, `boundary ${row.id}`),
+    reason: row.reason,
+    createdAt: Number(row.createdAt),
+  }));
+}
+
+function buildSeatMapping(players: readonly Pick<Player, 'id' | 'seatIndex'>[]): Record<number, string> {
+  if (players.length !== REQUIRED_PLAYER_COUNT) {
+    throw new Error('Invalid player count for seat mapping');
+  }
+  const mapping: Record<number, string> = {};
+  const playerIds = new Set<string>();
+  for (const player of players) {
+    if (!player.id || !Number.isInteger(player.seatIndex) || player.seatIndex < 0 || player.seatIndex >= REQUIRED_PLAYER_COUNT) {
+      throw new Error('Invalid player seat mapping');
+    }
+    if (playerIds.has(player.id) || Object.prototype.hasOwnProperty.call(mapping, player.seatIndex)) {
+      throw new Error('Invalid player seat mapping');
+    }
+    playerIds.add(player.id);
+    mapping[player.seatIndex] = player.id;
+  }
+  return mapping;
+}
+
+function serializeSeatMapping(players: readonly Pick<Player, 'id' | 'seatIndex'>[]): string {
+  return JSON.stringify(buildSeatMapping(players));
 }
 
 function resolveDeltasQ(deltasJson?: string | null): number[] | null {
@@ -343,8 +390,8 @@ export async function importActiveGameBundle(bundle: GameBundle): Promise<{ crea
 
       await executeTx(
         `INSERT INTO games
-         (id, title, createdAt, endedAt, currencySymbol, variant, rulesJson, startingDealerSeatIndex, handsCount, resultStatus, resultSummaryJson, resultUpdatedAt, progressIndex, currentWindIndex, currentRoundNumber, maxWindIndex, seatRotationOffset, gameState, currentRoundLabelZh, languageOverride)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+         (id, title, createdAt, endedAt, currencySymbol, variant, rulesJson, startingDealerSeatIndex, handsCount, resultStatus, resultSummaryJson, resultUpdatedAt, progressIndex, currentWindIndex, currentRoundNumber, maxWindIndex, seatRotationOffset, seatBoundaryHistoryMode, initialSeatMappingJson, gameState, currentRoundLabelZh, languageOverride)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           game.id,
           game.title,
@@ -363,6 +410,8 @@ export async function importActiveGameBundle(bundle: GameBundle): Promise<{ crea
           game.currentRoundNumber ?? 1,
           game.maxWindIndex ?? 1,
           normalizeSeatRotationOffset(game.seatRotationOffset ?? 0),
+          game.seatBoundaryHistoryMode === 'legacy_inferred' ? 'legacy_inferred' : 'explicit',
+          game.initialSeatMappingJson ?? serializeSeatMapping(players),
           hands.length > 0 ? 'active' : 'draft',
           game.currentRoundLabelZh ?? INITIAL_ROUND_LABEL_ZH,
           game.languageOverride ?? null,
@@ -404,6 +453,32 @@ export async function importActiveGameBundle(bundle: GameBundle): Promise<{ crea
         );
       }
 
+      for (const boundary of bundle.seatBoundaries ?? []) {
+        if (
+          boundary.gameId !== game.id ||
+          !boundary.id ||
+          !Number.isInteger(boundary.effectiveFromHandIndex) ||
+          boundary.effectiveFromHandIndex < 0 ||
+          boundary.effectiveFromHandIndex > hands.length ||
+          boundary.reason !== 'confirmed_reseat'
+        ) {
+          throw new Error('Imported seat boundary is invalid');
+        }
+        await executeTx(
+          `INSERT INTO game_seat_boundaries
+           (id, gameId, effectiveFromHandIndex, seatMappingJson, reason, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?);`,
+          [
+            boundary.id,
+            boundary.gameId,
+            boundary.effectiveFromHandIndex,
+            JSON.stringify(boundary.seatMapping),
+            boundary.reason,
+            boundary.createdAt,
+          ],
+        );
+      }
+
       return { created: true };
     });
 
@@ -429,8 +504,8 @@ export async function __testOnly_createGameWithPlayersWithTx(
   const persistedVariant = 'HK';
   await executeTx(
     `INSERT INTO games
-     (id, title, createdAt, currencySymbol, variant, rulesJson, startingDealerSeatIndex, progressIndex, currentWindIndex, currentRoundNumber, maxWindIndex, seatRotationOffset, gameState, currentRoundLabelZh, languageOverride)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+     (id, title, createdAt, currencySymbol, variant, rulesJson, startingDealerSeatIndex, progressIndex, currentWindIndex, currentRoundNumber, maxWindIndex, seatRotationOffset, gameState, currentRoundLabelZh, languageOverride, seatBoundaryHistoryMode, initialSeatMappingJson)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     [
       game.id,
       game.title,
@@ -447,6 +522,8 @@ export async function __testOnly_createGameWithPlayersWithTx(
       'draft',
       INITIAL_ROUND_LABEL_ZH,
       game.languageOverride ?? null,
+      'explicit',
+      serializeSeatMapping(players),
     ],
   );
 
@@ -517,11 +594,16 @@ export async function getGameBundle(gameId: string): Promise<GameBundle> {
     const handsResult = await executeSql('SELECT * FROM hands WHERE gameId = ? ORDER BY handIndex ASC;', [
       gameId,
     ]);
+    const boundariesResult = await executeSql(
+      'SELECT * FROM game_seat_boundaries WHERE gameId = ? ORDER BY effectiveFromHandIndex ASC, id ASC;',
+      [gameId],
+    );
 
     return {
       game: games[0],
       players: rowsToArray<Player>(playersResult),
       hands: normalizeHands(handsResult),
+      seatBoundaries: normalizeSeatBoundaries(boundariesResult),
     };
   } catch (error) {
     const wrapped = normalizeError(error, 'getGameBundle failed');
@@ -569,15 +651,32 @@ export async function updateGamePlayerSeats(
       setBreadcrumb('Repo: updateGamePlayerSeats', { gameId, seatByPlayerId });
     }
     await runExplicitWriteTransaction('updateGamePlayerSeats', async (executeTx) => {
-      const gameResult = await executeTx('SELECT endedAt, gameState FROM games WHERE id = ? LIMIT 1;', [gameId]);
+      const gameResult = await executeTx(
+        'SELECT endedAt, gameState, handsCount FROM games WHERE id = ? LIMIT 1;',
+        [gameId],
+      );
       if (gameResult.rows.length === 0) {
         throw new Error(`Game not found: ${gameId}`);
       }
       const gameRow = gameResult.rows.item(0) as {
         endedAt?: number | null;
         gameState?: string | null;
+        handsCount?: number | null;
       };
       assertGameMutable(gameRow.gameState ?? null, gameRow.endedAt ?? null);
+      if (gameRow.gameState !== 'active') {
+        throw new Error('Reseat requires an active game');
+      }
+
+      const persistedHandsCount = Number(gameRow.handsCount ?? 0);
+      if (!Number.isInteger(persistedHandsCount) || persistedHandsCount < 0) {
+        throw new Error('Invalid persisted hands count for reseat');
+      }
+      const handsResult = await executeTx('SELECT COUNT(*) AS count FROM hands WHERE gameId = ?;', [gameId]);
+      const actualHandsCount = Number((handsResult.rows.item(0) as { count?: number } | undefined)?.count ?? 0);
+      if (actualHandsCount !== persistedHandsCount) {
+        throw new Error('Reseat rejected because persisted hands count is stale');
+      }
 
       const playersResult = await executeTx('SELECT id FROM players WHERE gameId = ? ORDER BY seatIndex ASC;', [gameId]);
       const playerRows = rowsToArray<{ id: string }>(playersResult);
@@ -600,6 +699,19 @@ export async function updateGamePlayerSeats(
         usedSeats.add(seatIndex);
       }
 
+      const seatMappingJson = JSON.stringify(
+        playerIds.reduce<Record<number, string>>((mapping, playerId) => {
+          mapping[Number(seatByPlayerId[playerId])] = playerId;
+          return mapping;
+        }, {}),
+      );
+
+      const maxHandResult = await executeTx('SELECT MAX(handIndex) AS maxIndex FROM hands WHERE gameId = ?;', [gameId]);
+      const maxIndex = (maxHandResult.rows.item(0) as { maxIndex?: number | null } | undefined)?.maxIndex ?? null;
+      if (maxIndex !== null && Number(maxIndex) >= persistedHandsCount) {
+        throw new Error('Reseat rejected because a later hand already exists');
+      }
+
       for (const playerId of playerIds) {
         await executeTx('UPDATE players SET seatIndex = ? WHERE id = ? AND gameId = ?;', [
           seatByPlayerId[playerId],
@@ -608,6 +720,23 @@ export async function updateGamePlayerSeats(
         ]);
       }
 
+      await executeTx(
+        `INSERT INTO game_seat_boundaries
+         (id, gameId, effectiveFromHandIndex, seatMappingJson, reason, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(gameId, effectiveFromHandIndex) DO UPDATE SET
+           seatMappingJson = excluded.seatMappingJson,
+           reason = excluded.reason,
+           createdAt = excluded.createdAt;`,
+        [
+          `${gameId}:seat-boundary:${persistedHandsCount}`,
+          gameId,
+          persistedHandsCount,
+          seatMappingJson,
+          'confirmed_reseat',
+          Date.now(),
+        ],
+      );
       await executeTx('UPDATE games SET seatRotationOffset = 0 WHERE id = ?;', [gameId]);
     });
   } catch (error) {

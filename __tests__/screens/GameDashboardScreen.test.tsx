@@ -6,6 +6,9 @@ import GameDashboardScreen from '../../src/screens/GameDashboardScreen';
 import { getGameBundle } from '../../src/db/repo';
 import { aggregatePlayerTotalsQByTimeline } from '../../src/models/seatRotation';
 import { computeGameStats } from '../../src/models/gameStats';
+import { computeHkSettlement } from '../../src/domain/hk/settlement';
+import { replayLocalGameBundle } from '../../src/services/localGameReplay';
+import { traditionalRules } from '../../test-support/gameRecord/fixtures';
 
 jest.mock('../../src/db/repo', () => ({
   getGameBundle: jest.fn(),
@@ -138,6 +141,50 @@ function createUnknownRulesBundle() {
         },
       }),
     },
+  };
+}
+
+function createAuthoritativeCanonicalBundle() {
+  const base = createEndedBundle();
+  const rules = traditionalRules({ gunMode: 'halfGun' });
+  const deltasQ = computeHkSettlement({
+    rules,
+    fan: 4,
+    settlementType: 'discard',
+    winnerSeatIndex: 1,
+    discarderSeatIndex: 0,
+  }).deltasQ;
+  return {
+    ...base,
+    game: {
+      ...base.game,
+      id: 'g-canonical-dashboard',
+      title: 'Canonical Dashboard Match',
+      rulesJson: JSON.stringify(rules),
+      seatBoundaryHistoryMode: 'explicit',
+      initialSeatMappingJson: JSON.stringify({ 0: 'p0', 1: 'p1', 2: 'p2', 3: 'p3' }),
+      resultSummaryJson: JSON.stringify({
+        seatTotalsQ: deltasQ,
+        playerTotalsQ: { p0: deltasQ[0], p1: deltasQ[1], p2: deltasQ[2], p3: deltasQ[3] },
+        playersCount: 4,
+      }),
+    },
+    hands: [
+      {
+        ...base.hands[0],
+        gameId: 'g-canonical-dashboard',
+        deltasJson: JSON.stringify({ unit: 'Q', values: deltasQ }),
+        computedJson: JSON.stringify({ settlementType: 'discard', fan: 4 }),
+      },
+      {
+        ...base.hands[1],
+        gameId: 'g-canonical-dashboard',
+        deltasJson: JSON.stringify({ unit: 'Q', values: [0, 0, 0, 0] }),
+        computedJson: JSON.stringify({ settlementType: 'draw', dealerAction: 'stick' }),
+      },
+    ],
+    players: base.players.map((player) => ({ ...player, gameId: 'g-canonical-dashboard' })),
+    seatBoundaries: [],
   };
 }
 
@@ -359,6 +406,67 @@ describe('GameDashboardScreen', () => {
 
     await act(async () => {
       (tree! as renderer.ReactTestRenderer).unmount();
+    });
+  });
+
+  it('renders an authoritative explicit game through the canonical read projection without another bundle load', async () => {
+    const bundle = createAuthoritativeCanonicalBundle();
+    expect(replayLocalGameBundle(bundle as any).authoritative).toBe(true);
+    mockedGetGameBundle.mockResolvedValueOnce(bundle as any);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'canonical', name: 'GameDashboard', params: { gameId: bundle.game.id } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const root = tree!.root;
+    const text = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(text).toContain('Canonical Dashboard Match');
+    expect(text).toContain('Bob');
+    expect(text).toContain('流局');
+    expect(mockedGetGameBundle).toHaveBeenCalledTimes(1);
+
+    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' as never });
+    const shareButton = root.findAllByType(AppButton).find((button) => button.props.label === '分享');
+    await act(async () => {
+      await shareButton?.props.onPress();
+    });
+    const payload = shareSpy.mock.calls[0][0] as { message: string };
+    expect(payload.message).toContain('Alice → Bob HK$8');
+    shareSpy.mockRestore();
+
+    await act(async () => {
+      root.findByProps({ testID: 'wind-section-東風' }).props.onPress();
+    });
+    expect(root.findByProps({ testID: 'hand-row-h1' })).toBeTruthy();
+    expect(root.findByProps({ testID: 'hand-row-h2' })).toBeTruthy();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('shows the repository read error without substituting a legacy dashboard', async () => {
+    mockedGetGameBundle.mockRejectedValueOnce(new Error('database unavailable'));
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'read-error', name: 'GameDashboard', params: { gameId: 'missing' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const text = tree!.root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(text).toContain('database unavailable');
+    expect(text).not.toContain('玩家排名');
+    expect(mockedGetGameBundle).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      tree!.unmount();
     });
   });
 

@@ -10,10 +10,13 @@ import { getGameBundle } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { translateWithFallback } from '../i18n/translateWithFallback';
-import { GameBundle, Hand } from '../models/db';
-import { getRoundLabel } from '../models/dealer';
-import { computeGameStats } from '../models/gameStats';
-import { parseRules, RulesV1, Variant } from '../models/rules';
+import { GameBundle } from '../models/db';
+import {
+  buildLocalDashboardProjection,
+  type DashboardHandRow,
+  type DashboardSettlementDirection,
+} from '../domain/gameRecord/localDashboardProjection';
+import { replayLocalGameBundle } from '../services/localGameReplay';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
 import { typography } from '../styles/typography';
@@ -33,7 +36,7 @@ type SettlementTransfer = {
 };
 
 type HandDisplay = {
-  hand: Hand;
+  hand: DashboardHandRow;
   index: number;
   roundLabel: string;
   windLabel: string;
@@ -53,16 +56,6 @@ const SEAT_KEYS: Array<'seat.east' | 'seat.south' | 'seat.west' | 'seat.north'> 
   'seat.west',
   'seat.north',
 ];
-
-function normalizeVariant(value: string): Variant {
-  if (value === 'HK' || value === 'TW' || value === 'PMA') {
-    return value;
-  }
-  if (value === 'TW_SIMPLE') {
-    return 'TW';
-  }
-  return 'HK';
-}
 
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp);
@@ -95,11 +88,11 @@ function getRankPrefix(index: number): string {
   return `${index + 1}.`;
 }
 
-function formatHighlight(value: { name: string; count: number } | null): string {
+function formatHighlight(value: { displayName: string; count: number } | null): string {
   if (!value) {
     return '—';
   }
-  return `${value.name} (${value.count})`;
+  return `${value.displayName} (${value.count})`;
 }
 
 function buildShareRankingLines(
@@ -147,8 +140,15 @@ function buildSettlementDirectionLines(
   rankedPlayers: SeatSummary[],
   symbol: string,
   t: (key: TranslationKey) => string,
+  canonicalDirections?: readonly DashboardSettlementDirection[],
 ): string[] {
-  const transfers = buildSettlementTransfers(rankedPlayers);
+  const transfers = canonicalDirections
+    ? canonicalDirections.map((direction) => ({
+        fromPlayerId: direction.fromPlayerId,
+        toPlayerId: direction.toPlayerId,
+        amount: direction.amountQ / 4,
+      }))
+    : buildSettlementTransfers(rankedPlayers);
   if (transfers.length === 0) {
     return ['—'];
   }
@@ -172,100 +172,20 @@ function buildSettlementDirectionLines(
     });
 }
 
-function resolveDeltasQ(deltasJson?: string | null): number[] | null {
-  if (!deltasJson) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(deltasJson) as number[] | { values?: number[]; deltasQ?: number[] };
-    if (Array.isArray(parsed)) {
-      return parsed;
-    }
-    if (Array.isArray(parsed.values)) {
-      return parsed.values;
-    }
-    if (Array.isArray(parsed.deltasQ)) {
-      return parsed.deltasQ;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function parseDealerAction(computedJson: string | null | undefined): 'stick' | 'pass' | null {
-  if (!computedJson) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(computedJson) as { dealerAction?: unknown };
-    if (parsed.dealerAction === 'stick' || parsed.dealerAction === 'pass') {
-      return parsed.dealerAction;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function parseSettlementType(computedJson: string | null | undefined): 'zimo' | 'discard' | 'draw' | null {
-  if (!computedJson) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(computedJson) as { settlementType?: unknown };
-    if (parsed.settlementType === 'zimo' || parsed.settlementType === 'discard' || parsed.settlementType === 'draw') {
-      return parsed.settlementType;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function parseHandFan(computedJson: string | null | undefined): number | null {
-  if (!computedJson) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(computedJson) as { fan?: unknown; effectiveFan?: unknown };
-    const coerceNumber = (value: unknown): number | null => {
-      if (typeof value === 'number' && Number.isFinite(value)) {
-        return value;
-      }
-      if (typeof value === 'string') {
-        const parsedValue = Number(value);
-        if (Number.isFinite(parsedValue)) {
-          return parsedValue;
-        }
-      }
-      return null;
-    };
-    const effectiveFan = coerceNumber(parsed.effectiveFan);
-    if (effectiveFan !== null) {
-      return effectiveFan;
-    }
-    return coerceNumber(parsed.fan);
-  } catch {
-    return null;
-  }
-}
-
 function getHandSummary(
-  hand: Hand,
+  hand: DashboardHandRow,
   winnerName: string,
   discarderName: string | null,
   t: (key: TranslationKey) => string,
 ): string {
-  const settlementType = parseSettlementType(hand.computedJson);
-  const isDraw = hand.isDraw || hand.type === 'draw' || settlementType === 'draw';
+  const isDraw = hand.outcome === 'draw';
   if (isDraw) {
     return translateWithFallback(t, 'game.detail.hand.summary.draw', '流局');
   }
 
-  const fanValueRaw = parseHandFan(hand.computedJson);
+  const fanValueRaw = hand.fan;
   const fanValue = fanValueRaw === null || fanValueRaw === undefined ? '—' : String(fanValueRaw);
-  const isZimo = hand.type === 'zimo' || settlementType === 'zimo';
+  const isZimo = hand.outcome === 'zimo';
   if (isZimo) {
     return translateWithFallback(t, 'game.detail.hand.summary.zimo', '{name} 自摸 {fan} 番', {
       name: winnerName || '—',
@@ -285,7 +205,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
   const { t } = useAppLanguage();
 
   const [bundle, setBundle] = useState<GameBundle | null>(null);
-  const [rules, setRules] = useState<RulesV1 | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedHands, setExpandedHands] = useState<Record<string, boolean>>({});
@@ -299,7 +218,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
     setError(null);
     const data = await getGameBundle(gameId);
     setBundle(data);
-    setRules(parseRules(data.game.rulesJson, normalizeVariant(data.game.variant)));
     setCollapsedSections({});
     setHandFilter('all');
     setLoading(false);
@@ -345,44 +263,48 @@ function GameDashboardScreen({ navigation, route }: Props) {
     );
   }, [bundle, isEnded, navigation, t]);
 
-  const orderedHands = useMemo(() => {
+  const dashboardProjection = useMemo(() => {
     if (!bundle) {
-      return [] as Hand[];
+      return null;
     }
-    return bundle.hands.slice().sort((a, b) => a.handIndex - b.handIndex);
+    const localReplayResult = bundle.game.gameState === 'ended'
+      ? replayLocalGameBundle(bundle)
+      : null;
+    return buildLocalDashboardProjection({ bundle, localReplayResult });
   }, [bundle]);
 
-  const gameStats = useMemo(() => (bundle ? computeGameStats(bundle) : null), [bundle]);
+  const gameStats = dashboardProjection?.projection.statistics ?? null;
+  const ruleSummary = dashboardProjection?.projection.ruleSummary ?? null;
 
   const rankedPlayers = useMemo(() => {
-    if (!bundle || !gameStats) {
+    if (!dashboardProjection) {
       return [] as SeatSummary[];
     }
-    return gameStats.ranking.map((entry) => ({
+    return dashboardProjection.projection.players.map((entry) => ({
       playerId: entry.playerId,
-      name: entry.name,
-      total: entry.totalMoney,
+      name: entry.displayName,
+      total: entry.totalQ / 4,
     }));
-  }, [bundle, gameStats]);
+  }, [dashboardProjection]);
 
   const handDisplayList = useMemo(() => {
-    if (!bundle) {
+    if (!dashboardProjection) {
       return [] as HandDisplay[];
     }
-    const progressiveHands: Hand[] = [];
-    return orderedHands.map((hand, index) => {
-      progressiveHands.push(hand);
-      const roundLabel = getRoundLabel(bundle.game.startingDealerSeatIndex, progressiveHands).labelZh;
-      return { hand, index, roundLabel, windLabel: roundLabel.slice(0, 2) };
-    });
-  }, [bundle, orderedHands]);
+    return dashboardProjection.projection.hands.map((hand, index) => ({
+      hand,
+      index,
+      roundLabel: hand.roundLabelZh,
+      windLabel: hand.windLabelZh,
+    }));
+  }, [dashboardProjection]);
 
   const filteredHandDisplayList = useMemo(() => {
     if (handFilter === 'wins') {
-      return handDisplayList.filter((entry) => !entry.hand.isDraw);
+      return handDisplayList.filter((entry) => entry.hand.outcome !== 'draw');
     }
     if (handFilter === 'draws') {
-      return handDisplayList.filter((entry) => entry.hand.isDraw);
+      return handDisplayList.filter((entry) => entry.hand.outcome === 'draw');
     }
     return handDisplayList;
   }, [handDisplayList, handFilter]);
@@ -409,10 +331,10 @@ function GameDashboardScreen({ navigation, route }: Props) {
     }));
   }, [filteredHandDisplayList, totalCountByWind]);
 
-  const handsCount = bundle?.game.handsCount ?? orderedHands.length;
+  const handsCount = gameStats?.handsCount ?? bundle?.game.handsCount ?? 0;
 
   const localizedScoringPreset = useMemo(() => {
-    const preset = rules?.hk?.scoringPreset;
+    const preset = ruleSummary?.scoringPreset;
     if (!preset) {
       return '—';
     }
@@ -423,10 +345,10 @@ function GameDashboardScreen({ navigation, route }: Props) {
       return translateWithFallback(t, 'game.detail.rules.mode.custom', '自訂番數（價錢表）');
     }
     return '—';
-  }, [rules?.hk?.scoringPreset, t]);
+  }, [ruleSummary?.scoringPreset, t]);
 
   const localizedGunMode = useMemo(() => {
-    const mode = rules?.hk?.gunMode;
+    const mode = ruleSummary?.gunMode;
     if (!mode) {
       return '—';
     }
@@ -437,10 +359,10 @@ function GameDashboardScreen({ navigation, route }: Props) {
       return translateWithFallback(t, 'game.detail.rules.hkGunMode.halfGun', '半銃');
     }
     return '—';
-  }, [rules?.hk?.gunMode, t]);
+  }, [ruleSummary?.gunMode, t]);
 
   const localizedStakePreset = useMemo(() => {
-    const stakePreset = rules?.hk?.stakePreset;
+    const stakePreset = ruleSummary?.stakePreset;
     if (!stakePreset) {
       return '—';
     }
@@ -454,18 +376,18 @@ function GameDashboardScreen({ navigation, route }: Props) {
       return translateWithFallback(t, 'game.detail.rules.hkStake.oneTwo', '一二蚊');
     }
     return '—';
-  }, [rules?.hk?.stakePreset, t]);
+  }, [ruleSummary?.stakePreset, t]);
 
   const customUnitPerFanLine = useMemo(() => {
-    if (rules?.variant !== 'HK' || rules?.hk?.scoringPreset !== 'customTable') {
+    if (ruleSummary?.variant !== 'HK' || ruleSummary.scoringPreset !== 'customTable') {
       return null;
     }
     const amountLabel = translateWithFallback(t, 'game.detail.rules.custom.unitPerFanLabel', '每番金額');
-    return `${amountLabel}：HK$${String(rules.hk.unitPerFan ?? 1)}`;
-  }, [rules, t]);
+    return `${amountLabel}：${ruleSummary.currencySymbol}${String(ruleSummary.unitPerFan ?? 1)}`;
+  }, [ruleSummary, t]);
 
   const customMultiplierSummary = useMemo(() => {
-    if (rules?.variant !== 'HK' || rules?.hk?.scoringPreset !== 'customTable') {
+    if (ruleSummary?.variant !== 'HK' || ruleSummary.scoringPreset !== 'customTable') {
       return null;
     }
     return translateWithFallback(
@@ -473,20 +395,20 @@ function GameDashboardScreen({ navigation, route }: Props) {
       'game.detail.rules.custom.multiplierSummary',
       '自摸：3 份；出銃：2 份',
     );
-  }, [rules, t]);
+  }, [ruleSummary, t]);
 
   const localizedVariant = useMemo(() => {
-    if (bundle?.game.variant === 'HK') {
+    if (ruleSummary?.variant === 'HK') {
       return translateWithFallback(t, 'newGame.variant.hk', '香港牌');
     }
-    if (bundle?.game.variant === 'TW' || bundle?.game.variant === 'TW_SIMPLE') {
+    if (ruleSummary?.variant === 'TW' || ruleSummary?.variant === 'TW_SIMPLE') {
       return translateWithFallback(t, 'newGame.variant.twSimple', '台牌');
     }
-    if (bundle?.game.variant === 'PMA') {
+    if (ruleSummary?.variant === 'PMA') {
       return translateWithFallback(t, 'newGame.variant.pma', '跑馬仔');
     }
     return '—';
-  }, [bundle?.game.variant, t]);
+  }, [ruleSummary?.variant, t]);
 
   const seatLabels = useMemo(
     () =>
@@ -519,7 +441,14 @@ function GameDashboardScreen({ navigation, route }: Props) {
       return;
     }
     const rankingLines = buildShareRankingLines(rankedPlayers, bundle.game.currencySymbol ?? '');
-    const settlementLines = buildSettlementDirectionLines(rankedPlayers, bundle.game.currencySymbol ?? '', t);
+    const settlementLines = buildSettlementDirectionLines(
+      rankedPlayers,
+      bundle.game.currencySymbol ?? '',
+      t,
+      dashboardProjection?.source === 'canonical'
+        ? dashboardProjection.projection.settlementDirections
+        : undefined,
+    );
     const playerStatsLines = rankedPlayers.map(
       (player) =>
         `${player.name}：${translateWithFallback(t, 'game.detail.stats.wins', '食糊')} ${
@@ -549,7 +478,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
       `${translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}: ${formatHighlight(gameStats?.mostZimo ?? null)}`,
     ].join('\n');
     await Share.share({ title: bundle.game.title, message: summaryText });
-  }, [bundle, gameStats, handsCount, isEnded, rankedPlayers, t]);
+  }, [bundle, dashboardProjection, gameStats, handsCount, isEnded, rankedPlayers, t]);
 
   const toggleExpand = useCallback((handId: string) => {
     setExpandedHands((prev) => ({ ...prev, [handId]: !prev[handId] }));
@@ -578,8 +507,8 @@ function GameDashboardScreen({ navigation, route }: Props) {
       }
       const hand = item.hand;
       const handRoundLabel = item.roundLabel;
-      const dealerAction = parseDealerAction(hand.computedJson);
-      const deltasQ = resolveDeltasQ(hand.deltasJson);
+      const dealerAction = hand.drawDealerAction;
+      const deltasQ = hand.deltasQ;
       const expanded = Boolean(expandedHands[hand.id]);
       const winnerName = hand.winnerPlayerId
         ? bundle.players.find((player) => player.id === hand.winnerPlayerId)?.name ?? '—'
@@ -588,13 +517,11 @@ function GameDashboardScreen({ navigation, route }: Props) {
         ? bundle.players.find((player) => player.id === hand.discarderPlayerId)?.name ?? '—'
         : null;
 
-      const outcomeLabel = hand.isDraw
+      const outcomeLabel = hand.outcome === 'draw'
         ? translateWithFallback(t, 'game.detail.hand.draw', '流局')
-        : hand.type === 'zimo'
+        : hand.outcome === 'zimo'
           ? translateWithFallback(t, 'game.detail.hand.zimo', '自摸')
-          : hand.type === 'discard'
-            ? translateWithFallback(t, 'game.detail.hand.discard', '點炮')
-            : translateWithFallback(t, 'game.detail.hand.win', '食糊');
+          : translateWithFallback(t, 'game.detail.hand.discard', '點炮');
 
       return (
         <Pressable
@@ -609,9 +536,9 @@ function GameDashboardScreen({ navigation, route }: Props) {
           </View>
 
           <View style={styles.handOutcomeRow}>
-            <AppText style={styles.handOutcomeIcon}>{hand.isDraw ? '⦿' : hand.type === 'zimo' ? '◎' : '•'}</AppText>
+            <AppText style={styles.handOutcomeIcon}>{hand.outcome === 'draw' ? '⦿' : hand.outcome === 'zimo' ? '◎' : '•'}</AppText>
             <AppText style={styles.handOutcomeText}>{outcomeLabel}</AppText>
-            {hand.isDraw && dealerAction ? (
+            {hand.outcome === 'draw' && dealerAction ? (
               <View style={styles.dealerActionBadge}>
                 <AppText style={styles.dealerActionText}>
                   {dealerAction === 'stick'
@@ -645,12 +572,12 @@ function GameDashboardScreen({ navigation, route }: Props) {
               <AppText style={styles.expandedText}>
                 {translateWithFallback(t, 'game.detail.hand.field.winner', '贏家')}：{winnerName}
               </AppText>
-              {!hand.isDraw && discarderName ? (
+              {hand.outcome !== 'draw' && discarderName ? (
                 <AppText style={styles.expandedText}>
                   {translateWithFallback(t, 'game.detail.hand.field.discarder', '點炮者')}：{discarderName}
                 </AppText>
               ) : null}
-              {hand.isDraw && dealerAction ? (
+              {hand.outcome === 'draw' && dealerAction ? (
                 <AppText style={styles.expandedText}>
                   {translateWithFallback(t, 'game.detail.hand.field.dealerAction', '莊家處理')}：
                   {dealerAction === 'stick'
@@ -810,19 +737,19 @@ function GameDashboardScreen({ navigation, route }: Props) {
               </AppText>
               <AppText style={styles.metaText}>
                 {translateWithFallback(t, 'game.detail.rules.currency', '幣別')}：
-                {bundle.game.currencySymbol || '—'}
+                {ruleSummary?.currencySymbol || '—'}
               </AppText>
-              {typeof rules?.minFanToWin === 'number' ? (
+              {typeof ruleSummary?.minFanToWin === 'number' ? (
                 <AppText style={styles.metaText}>
-                  {translateWithFallback(t, 'game.detail.rules.minFan', '最低番數')}：{rules.minFanToWin}
+                  {translateWithFallback(t, 'game.detail.rules.minFan', '最低番數')}：{ruleSummary.minFanToWin}
                 </AppText>
               ) : null}
-              {rules?.variant === 'HK' ? (
+              {ruleSummary?.variant === 'HK' ? (
                 <>
                   <AppText style={styles.metaText}>
                     {translateWithFallback(t, 'game.detail.rules.hkPreset', '計分模式')}：{localizedScoringPreset}
                   </AppText>
-                  {rules.hk?.scoringPreset === 'traditionalFan' ? (
+                  {ruleSummary.scoringPreset === 'traditionalFan' ? (
                     <>
                       <AppText style={styles.metaText}>
                         {translateWithFallback(t, 'game.detail.rules.hkGunMode', '銃制')}：{localizedGunMode}
@@ -840,7 +767,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
                   ) : null}
                   <AppText style={styles.metaText}>
                     {translateWithFallback(t, 'game.detail.rules.hkCapFan', '爆棚')}：
-                    {rules.hk?.capFan == null ? '∞' : rules.hk.capFan}
+                    {ruleSummary.capFan == null ? '∞' : ruleSummary.capFan}
                   </AppText>
                 </>
               ) : null}
@@ -865,11 +792,11 @@ function GameDashboardScreen({ navigation, route }: Props) {
               ))}
               <AppText style={styles.statsHighlightLine}>
                 {translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}：
-                {gameStats?.mostDiscarder ? `${gameStats.mostDiscarder.name} (${gameStats.mostDiscarder.count})` : '—'}
+                {gameStats?.mostDiscarder ? `${gameStats.mostDiscarder.displayName} (${gameStats.mostDiscarder.count})` : '—'}
               </AppText>
               <AppText style={styles.statsHighlightLine}>
                 {translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}：
-                {gameStats?.mostZimo ? `${gameStats.mostZimo.name} (${gameStats.mostZimo.count})` : '—'}
+                {gameStats?.mostZimo ? `${gameStats.mostZimo.displayName} (${gameStats.mostZimo.count})` : '—'}
               </AppText>
             </Card>
 

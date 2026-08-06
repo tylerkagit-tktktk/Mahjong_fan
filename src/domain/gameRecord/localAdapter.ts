@@ -426,6 +426,9 @@ function comparePersistedResultSummary(
   parsedHands: readonly ParsedLocalHand[],
   parsedSummary: RawRecord | null,
   diagnostics: LocalAdapterDiagnostic[],
+  historyMode: 'legacy_inferred' | 'explicit',
+  initialSeats: readonly CanonicalSeatAssignment[],
+  boundaries: readonly CanonicalSeatBoundary[],
 ): void {
   if (!parsedSummary) {
     return;
@@ -440,17 +443,34 @@ function comparePersistedResultSummary(
       seatTotalsQ[seatIndex] += Number(deltasQ[seatIndex] ?? 0);
     }
   });
-  const playerTotalsQ = aggregatePlayerTotalsQByTimeline(
-    bundle.players,
-    sortedSourceHands.map((hand, index) => ({
-      nextRoundLabelZh: hand.nextRoundLabelZh ?? null,
-      deltasQ: parsedHands[index]?.canonical.persistedDeltasQ
-        ? [...(parsedHands[index].canonical.persistedDeltasQ as readonly number[])]
-        : null,
-    })),
-    INITIAL_ROUND_LABEL_ZH,
-    0,
-  );
+  const playerTotalsQ = historyMode === 'explicit'
+    ? (() => {
+        const totals = new Map<string, number>(bundle.players.map((player) => [player.id, 0]));
+        const boundariesByIndex = new Map(boundaries.map((boundary) => [boundary.effectiveFromHandIndex, boundary]));
+        let effectiveSeats = initialSeats.slice();
+        parsedHands.forEach((entry) => {
+          const boundary = boundariesByIndex.get(entry.canonical.handIndex);
+          if (boundary) effectiveSeats = boundary.seats.slice();
+          const deltasQ = entry.canonical.persistedDeltasQ;
+          if (!deltasQ) return;
+          for (let seatIndex = 0; seatIndex < 4; seatIndex += 1) {
+            const playerId = effectiveSeats.find((seat) => seat.seatIndex === seatIndex)?.playerId;
+            if (playerId) totals.set(playerId, (totals.get(playerId) ?? 0) + Number(deltasQ[seatIndex] ?? 0));
+          }
+        });
+        return totals;
+      })()
+    : aggregatePlayerTotalsQByTimeline(
+        bundle.players,
+        sortedSourceHands.map((hand, index) => ({
+          nextRoundLabelZh: hand.nextRoundLabelZh ?? null,
+          deltasQ: parsedHands[index]?.canonical.persistedDeltasQ
+            ? [...(parsedHands[index].canonical.persistedDeltasQ as readonly number[])]
+            : null,
+        })),
+        INITIAL_ROUND_LABEL_ZH,
+        0,
+      );
   const expectedPlayerTotalsQ = bundle.players.reduce<Record<string, number>>((totals, player) => {
     totals[player.id] = playerTotalsQ.get(player.id) ?? 0;
     return totals;
@@ -1069,10 +1089,6 @@ export function adaptLocalGameBundle(bundle: GameBundle): LocalGameRecordAdapter
     );
   }
 
-  if (parsedSummary && playerMapping && parsedHands.length === sortedSourceHands.length) {
-    comparePersistedResultSummary(bundle, sortedSourceHands, parsedHands, parsedSummary, diagnostics);
-  }
-
   let boundaries: CanonicalSeatBoundary[] = [];
   let initialSeats = playerMapping?.initialSeats ?? [];
   const historyMode = resolveHistoryMode(bundle, diagnostics);
@@ -1141,6 +1157,25 @@ export function adaptLocalGameBundle(bundle: GameBundle): LocalGameRecordAdapter
         detail: 'current round label could not be derived from local hand progression',
       });
     }
+  }
+
+  if (
+    parsedSummary &&
+    playerMapping &&
+    historyMode &&
+    initialSeats.length === 4 &&
+    parsedHands.length === sortedSourceHands.length
+  ) {
+    comparePersistedResultSummary(
+      bundle,
+      sortedSourceHands,
+      parsedHands,
+      parsedSummary,
+      diagnostics,
+      historyMode,
+      initialSeats,
+      boundaries,
+    );
   }
 
   if (

@@ -296,6 +296,18 @@ Phase 1 must not begin undo UI until all of the following are true:
 4. repository mutation can roll back transactionally;
 5. Cloud adapter semantics are specified.
 
+## Phase 1D Dashboard Canonical Read Projection
+
+`src/domain/gameRecord/localDashboardProjection.ts` is the single presentation-neutral selector for the local finished-game Dashboard. It accepts the already-loaded `GameBundle` and the read-only `LocalGameReplayResult`, returns exactly one immutable-shaped `LocalDashboardProjection`, and never invokes SQLite, repository writers, or UI APIs.
+
+- The selector chooses `canonical` only where `gameState === 'ended'`, the local replay is valid, parity is exact, and `authoritative === true`. It exposes canonical player totals/ranking, statistics, final seats, effective per-hand seats, outcome/fan/dealer action, rule summary, and replay settlement directions.
+- Every other row remains `legacy`, with the previous `computeGameStats` / progressive round-label presentation behaviour. The result carries a stable reason: `NOT_DASHBOARD_LIFECYCLE`, `ADAPTER_NOT_OK`, `REPLAY_INVALID`, `PARITY_MISMATCH`, `LEGACY_INFERRED_HISTORY`, or `NOT_AUTHORITATIVE`. There is no user-visible source badge.
+- `GameDashboardScreen` reads the bundle once, computes the replay once from that in-memory bundle, and renders/filter/groups/ranks from the selected projection only. Its canonical share payload uses the canonical settlement directions; its legacy share payload keeps the prior net-final-total formatting. A repository read error remains an error screen and is never converted into a legacy dashboard.
+- Phase 1C summary parity now attributes stored totals using persisted explicit boundaries before comparing the result summary. This makes an explicit boundary at `effectiveFromHandIndex === handsCount` valid: it changes the final current-seat mapping while leaving all prior hands untouched. Legacy-inferred aggregation is retained unchanged.
+- Tests cover authoritative explicit canonical projection, final-boundary attribution, non-authoritative and active fallbacks, immutable input, canonical Dashboard rendering/single read, and repository-read failure. Existing Dashboard and replay characterization coverage remains the legacy compatibility check.
+
+This phase is read-only. It does not change `GameTableScreen`, hand/result writes, `endGame`, database schema/migrations, Firestore/cloud/multiplayer, navigation contracts, or undo/replace/remove/reopen flows. Phase 1E remains responsible for any mutation and recovery work.
+
 ## Explicitly out of scope
 
 - replay implementation (completed in Phase 1A);

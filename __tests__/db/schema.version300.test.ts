@@ -61,7 +61,7 @@ async function createVersion300Database(db: ActualSqliteDatabase): Promise<void>
   await db.executeSql('PRAGMA user_version = 300;');
 }
 
-describe('SQLite schema version 302 bootstrap', () => {
+describe('SQLite schema version 303 bootstrap', () => {
   let databases: ActualSqliteDatabase[] = [];
 
   beforeEach(() => {
@@ -78,7 +78,7 @@ describe('SQLite schema version 302 bootstrap', () => {
     return db;
   }
 
-  it('creates a fresh database, required tables, WAL, foreign keys, and version 302', async () => {
+  it('creates a fresh database, required tables, WAL, foreign keys, and version 303', async () => {
     const db = await createDatabase();
 
     expect(await userVersion(db)).toBe(0);
@@ -127,7 +127,7 @@ describe('SQLite schema version 302 bootstrap', () => {
     ]);
   });
 
-  it('migrates version 300 through 301 to 302 non-destructively and backfills legacy history mode', async () => {
+  it('migrates version 300 through 301/302 to 303 non-destructively and backfills legacy history mode', async () => {
     const db = await createDatabase();
     await createVersion300Database(db);
     await db.executeSql("INSERT INTO games(id, title, createdAt) VALUES ('g300', 'Version 300', 100);");
@@ -137,7 +137,7 @@ describe('SQLite schema version 302 bootstrap', () => {
 
     await initializeSchema(db as unknown as SQLiteDatabase);
 
-    expect(await userVersion(db)).toBe(302);
+    expect(await userVersion(db)).toBe(303);
     expect(await queryRows(db, 'SELECT id, title FROM games;')).toEqual([{ id: 'g300', title: 'Version 300' }]);
     expect(await queryRows(db, 'SELECT id, gameId FROM players;')).toEqual([{ id: 'p300', gameId: 'g300' }]);
     expect(await queryRows(db, 'SELECT id, gameId FROM hands;')).toEqual([{ id: 'h300', gameId: 'g300' }]);
@@ -159,13 +159,13 @@ describe('SQLite schema version 302 bootstrap', () => {
     ]);
 
     await initializeSchema(db as unknown as SQLiteDatabase);
-    expect(await userVersion(db)).toBe(302);
+    expect(await userVersion(db)).toBe(303);
     expect(await queryRows(db, "SELECT seatBoundaryHistoryMode FROM games WHERE id = 'g300';")).toEqual([
       { seatBoundaryHistoryMode: 'legacy_inferred' },
     ]);
   });
 
-  it('migrates a version-301 database to revision storage without changing its game rows', async () => {
+  it('migrates a version-301 database through revision and lifecycle storage without changing game rows', async () => {
     const db = await createDatabase();
     await initializeSchema(db as unknown as SQLiteDatabase);
     await db.executeSql("INSERT INTO games(id, title) VALUES ('g301', 'Version 301');");
@@ -175,14 +175,14 @@ describe('SQLite schema version 302 bootstrap', () => {
 
     await initializeSchema(db as unknown as SQLiteDatabase);
 
-    expect(await userVersion(db)).toBe(302);
+    expect(await userVersion(db)).toBe(303);
     expect(await queryRows(db, "SELECT id, title FROM games WHERE id = 'g301';")).toEqual([{ id: 'g301', title: 'Version 301' }]);
     expect(await queryRows(db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_hand_revisions';")).toEqual([
       { name: 'game_hand_revisions' },
     ]);
   });
 
-  it('rolls back a failed 300 to 301 migration and can retry through 302 without data loss', async () => {
+  it('rolls back a failed 300 to 301 migration and can retry through 303 without data loss', async () => {
     const db = await createDatabase();
     await createVersion300Database(db);
     await db.executeSql("INSERT INTO games(id, title) VALUES ('rollback-300', 'Keep me');");
@@ -205,7 +205,7 @@ describe('SQLite schema version 302 bootstrap', () => {
     );
 
     await initializeSchema(db as unknown as SQLiteDatabase);
-    expect(await userVersion(db)).toBe(302);
+    expect(await userVersion(db)).toBe(303);
     expect(await queryRows(db, 'SELECT id, title FROM games;')).toEqual([{ id: 'rollback-300', title: 'Keep me' }]);
   });
 
@@ -241,12 +241,12 @@ describe('SQLite schema version 302 bootstrap', () => {
     const db = await createDatabase();
     await db.executeSql('CREATE TABLE games(id TEXT PRIMARY KEY, title TEXT);');
     await db.executeSql("INSERT INTO games(id, title) VALUES ('forward-game', 'Forward');");
-    await db.executeSql('PRAGMA user_version = 303;');
+    await db.executeSql('PRAGMA user_version = 304;');
 
     await expect(initializeSchema(db as unknown as SQLiteDatabase)).rejects.toBeInstanceOf(
       ForwardSchemaVersionError,
     );
-    expect(await userVersion(db)).toBe(303);
+    expect(await userVersion(db)).toBe(304);
     expect(await queryRows(db, 'SELECT id, title FROM games;')).toEqual([{ id: 'forward-game', title: 'Forward' }]);
   });
 

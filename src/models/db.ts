@@ -24,6 +24,8 @@ export type Game = {
   seatBoundaryHistoryMode?: 'legacy_inferred' | 'explicit';
   /** Schema 301+: immutable player identity mapping at game creation, serialized by seat index. */
   initialSeatMappingJson?: string | null;
+  /** Schema 303+: shared committed order for local hand and lifecycle record mutations. */
+  recordMutationVersion?: number;
   gameState: 'draft' | 'active' | 'ended' | 'abandoned';
   currentRoundLabelZh?: string | null;
   endedAt?: number | null;
@@ -63,6 +65,28 @@ export type LocalHandRevision = {
   targetHandIndex: number;
   before: LocalHandRevisionSnapshotV1;
   after: LocalHandRevisionSnapshotV1 | null;
+  actorType: 'local_user';
+  actorId: string | null;
+  reason: string | null;
+  createdAt: number;
+  recordMutationVersion: number;
+};
+
+export type LocalGameLifecycleRevisionAction = 'reopen';
+
+export type LocalGameLifecycleSnapshotV1 = {
+  version: 1;
+  game: Game;
+};
+
+export type LocalGameLifecycleRevision = {
+  id: string;
+  gameId: string;
+  lifecycleRevisionIndex: number;
+  recordMutationVersion: number;
+  action: LocalGameLifecycleRevisionAction;
+  before: LocalGameLifecycleSnapshotV1;
+  after: LocalGameLifecycleSnapshotV1;
   actorType: 'local_user';
   actorId: string | null;
   reason: string | null;
@@ -117,6 +141,7 @@ export type NewGameInput = Omit<
   | 'resultStatus'
   | 'resultSummaryJson'
   | 'resultUpdatedAt'
+  | 'recordMutationVersion'
 > & {
   createdAt?: number;
   progressIndex?: number;

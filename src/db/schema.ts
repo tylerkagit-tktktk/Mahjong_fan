@@ -2,7 +2,8 @@ import { SQLiteDatabase } from 'react-native-sqlite-storage';
 import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 
 const SCHEMA_VERSION_301 = 301;
-export const CURRENT_SCHEMA_VERSION = 302;
+const SCHEMA_VERSION_302 = 302;
+export const CURRENT_SCHEMA_VERSION = 303;
 
 const APP_OWNED_TABLES = [
   'games',
@@ -11,6 +12,7 @@ const APP_OWNED_TABLES = [
   'cloud_archives',
   'game_seat_boundaries',
   'game_hand_revisions',
+  'game_lifecycle_revisions',
 ] as const;
 const APP_OWNED_INDEXES = [
   'idx_hands_game_handIndex',
@@ -21,6 +23,8 @@ const APP_OWNED_INDEXES = [
   'idx_games_resultStatus',
   'idx_game_seat_boundaries_game_effective',
   'idx_game_hand_revisions_game_revision',
+  'idx_game_hand_revisions_game_mutation_version',
+  'idx_game_lifecycle_revisions_game_revision',
 ] as const;
 
 export const APP_OWNED_SCHEMA_OBJECTS = {
@@ -96,6 +100,7 @@ const TABLES = [
     seatRotationOffset INTEGER NOT NULL DEFAULT 0,
     seatBoundaryHistoryMode TEXT NOT NULL DEFAULT 'explicit',
     initialSeatMappingJson TEXT NULL,
+    recordMutationVersion INTEGER NOT NULL DEFAULT 0,
     gameState TEXT NOT NULL DEFAULT 'draft',
     currentRoundLabelZh TEXT NULL,
     languageOverride TEXT NULL
@@ -161,8 +166,25 @@ const TABLES = [
     actorId TEXT NULL,
     reason TEXT NULL,
     createdAt INTEGER NOT NULL,
+    recordMutationVersion INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (gameId) REFERENCES games(id) ON DELETE CASCADE,
     UNIQUE (gameId, revisionIndex)
+  );`,
+  `CREATE TABLE IF NOT EXISTS game_lifecycle_revisions(
+    id TEXT PRIMARY KEY NOT NULL,
+    gameId TEXT NOT NULL,
+    lifecycleRevisionIndex INTEGER NOT NULL,
+    recordMutationVersion INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    beforeGameJson TEXT NOT NULL,
+    afterGameJson TEXT NOT NULL,
+    actorType TEXT NOT NULL,
+    actorId TEXT NULL,
+    reason TEXT NULL,
+    createdAt INTEGER NOT NULL,
+    FOREIGN KEY (gameId) REFERENCES games(id) ON DELETE CASCADE,
+    UNIQUE (gameId, lifecycleRevisionIndex),
+    UNIQUE (gameId, recordMutationVersion)
   );`,
 ];
 
@@ -175,6 +197,8 @@ const INDICES = [
   'CREATE INDEX IF NOT EXISTS idx_games_resultStatus ON games(resultStatus);',
   'CREATE INDEX IF NOT EXISTS idx_game_seat_boundaries_game_effective ON game_seat_boundaries(gameId, effectiveFromHandIndex);',
   'CREATE INDEX IF NOT EXISTS idx_game_hand_revisions_game_revision ON game_hand_revisions(gameId, revisionIndex);',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_game_hand_revisions_game_mutation_version ON game_hand_revisions(gameId, recordMutationVersion);',
+  'CREATE INDEX IF NOT EXISTS idx_game_lifecycle_revisions_game_revision ON game_lifecycle_revisions(gameId, lifecycleRevisionIndex);',
 ];
 
 type SchemaObjectRow = { name: string; type: string };
@@ -199,6 +223,10 @@ export async function initializeSchema(db: SQLiteDatabase): Promise<void> {
     }
     if (detectedVersion === SCHEMA_VERSION_301) {
       await migrateSchema301To302(db);
+      detectedVersion = SCHEMA_VERSION_302;
+    }
+    if (detectedVersion === SCHEMA_VERSION_302) {
+      await migrateSchema302To303(db);
       return;
     }
 
@@ -243,6 +271,7 @@ async function createAndVerifySchema(db: SQLiteDatabase): Promise<void> {
   await ensureColumn(db, 'games', 'seatRotationOffset', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'games', 'seatBoundaryHistoryMode', "TEXT NOT NULL DEFAULT 'explicit'");
   await ensureColumn(db, 'games', 'initialSeatMappingJson', 'TEXT NULL');
+  await ensureColumn(db, 'games', 'recordMutationVersion', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'games', 'gameState', "TEXT NOT NULL DEFAULT 'draft'");
   await ensureColumn(db, 'games', 'currentRoundLabelZh', 'TEXT NULL');
   await ensureColumn(db, 'games', 'languageOverride', 'TEXT NULL');
@@ -265,6 +294,7 @@ async function createAndVerifySchema(db: SQLiteDatabase): Promise<void> {
   await ensureColumn(db, 'cloud_archives', 'statsAppliedArchiveVersion', 'INTEGER NULL');
   await ensureColumn(db, 'cloud_archives', 'statsAppliedUid', 'TEXT NULL');
   await ensureColumn(db, 'cloud_archives', 'payloadJson', 'TEXT NOT NULL DEFAULT "{}"');
+  await ensureColumn(db, 'game_hand_revisions', 'recordMutationVersion', 'INTEGER NOT NULL DEFAULT 0');
   await ensureBackfillDefaults(db);
 
   for (const statement of INDICES) {
@@ -272,7 +302,7 @@ async function createAndVerifySchema(db: SQLiteDatabase): Promise<void> {
   }
 
   await verifyRequiredTables(db);
-  await verifyRequiredColumns(db, 'games', ['seatBoundaryHistoryMode', 'initialSeatMappingJson']);
+  await verifyRequiredColumns(db, 'games', ['seatBoundaryHistoryMode', 'initialSeatMappingJson', 'recordMutationVersion']);
   await verifyRequiredIndexes(db);
 }
 
@@ -287,9 +317,9 @@ export async function migrateSchema300To301(db: SQLiteDatabase): Promise<void> {
     await db.executeSql("UPDATE games SET seatBoundaryHistoryMode = 'legacy_inferred';");
     await db.executeSql(TABLES[4]);
     await db.executeSql(INDICES[6]);
-    await verifyRequiredTables(db, APP_OWNED_TABLES.filter((table) => table !== 'game_hand_revisions'));
+    await verifyRequiredTables(db, APP_OWNED_TABLES.filter((table) => table !== 'game_hand_revisions' && table !== 'game_lifecycle_revisions'));
     await verifyRequiredColumns(db, 'games', ['seatBoundaryHistoryMode', 'initialSeatMappingJson']);
-    await verifyRequiredIndexes(db, APP_OWNED_INDEXES.filter((index) => index !== 'idx_game_hand_revisions_game_revision'));
+    await verifyRequiredIndexes(db, APP_OWNED_INDEXES.filter((index) => !index.startsWith('idx_game_hand_revisions') && index !== 'idx_game_lifecycle_revisions_game_revision'));
     // Stamp only after every migration operation and verification succeeds.
     await db.executeSql(`PRAGMA user_version = ${SCHEMA_VERSION_301};`);
   });
@@ -300,9 +330,30 @@ export async function migrateSchema301To302(db: SQLiteDatabase): Promise<void> {
   await runSchemaTransaction(db, async () => {
     await db.executeSql(TABLES[5]);
     await db.executeSql(INDICES[7]);
-    await verifyRequiredTables(db);
-    await verifyRequiredIndexes(db);
+    await verifyRequiredTables(db, APP_OWNED_TABLES.filter((table) => table !== 'game_lifecycle_revisions'));
+    await verifyRequiredIndexes(db, APP_OWNED_INDEXES.filter((index) => index !== 'idx_game_hand_revisions_game_mutation_version' && index !== 'idx_game_lifecycle_revisions_game_revision'));
     // Stamp only after revision storage and its index have both been verified.
+    await db.executeSql(`PRAGMA user_version = ${SCHEMA_VERSION_302};`);
+  });
+}
+
+/** Version 303 establishes one committed mutation sequence shared by hand and lifecycle audits. */
+export async function migrateSchema302To303(db: SQLiteDatabase): Promise<void> {
+  await runSchemaTransaction(db, async () => {
+    await ensureColumn(db, 'games', 'recordMutationVersion', 'INTEGER NOT NULL DEFAULT 0');
+    await ensureColumn(db, 'game_hand_revisions', 'recordMutationVersion', 'INTEGER NOT NULL DEFAULT 0');
+    await db.executeSql('UPDATE game_hand_revisions SET recordMutationVersion = revisionIndex + 1;');
+    await db.executeSql(
+      `UPDATE games SET recordMutationVersion = COALESCE(
+        (SELECT MAX(recordMutationVersion) FROM game_hand_revisions WHERE gameId = games.id), 0
+      );`,
+    );
+    await db.executeSql(TABLES[6]);
+    await db.executeSql(INDICES[8]);
+    await db.executeSql(INDICES[9]);
+    await verifyRequiredTables(db);
+    await verifyRequiredColumns(db, 'games', ['recordMutationVersion']);
+    await verifyRequiredIndexes(db);
     await db.executeSql(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION};`);
   });
 }
@@ -338,7 +389,7 @@ async function dropAppOwnedSchema(db: SQLiteDatabase): Promise<void> {
   for (const index of APP_OWNED_INDEXES) {
     await db.executeSql(`DROP INDEX IF EXISTS ${index};`);
   }
-  for (const table of ['game_hand_revisions', 'game_seat_boundaries', 'hands', 'players', 'cloud_archives', 'games'] as const) {
+  for (const table of ['game_lifecycle_revisions', 'game_hand_revisions', 'game_seat_boundaries', 'hands', 'players', 'cloud_archives', 'games'] as const) {
     await db.executeSql(`DROP TABLE IF EXISTS ${table};`);
   }
 }

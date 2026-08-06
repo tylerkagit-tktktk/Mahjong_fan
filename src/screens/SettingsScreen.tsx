@@ -48,8 +48,6 @@ function SettingsScreen({ navigation }: Props) {
   return (
     <ScreenContainer style={styles.container} horizontalPadding={0} includeTopInset={false}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <AppText style={styles.title}>{t('settings.title')}</AppText>
-
         <Card style={styles.card}>
           <AppText style={styles.sectionTitle}>{t('settings.language')}</AppText>
           <View style={styles.languageList}>
@@ -135,13 +133,6 @@ function SettingsScreen({ navigation }: Props) {
         </Card>
 
         <AppButton
-          label={t('common.back')}
-          onPress={() => navigation.goBack()}
-          variant="secondary"
-          style={styles.backButton}
-        />
-
-        <AppButton
           label={t('settings.about')}
           onPress={() => navigation.push('About')}
           variant="secondary"
@@ -162,13 +153,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     paddingTop: theme.spacing.lg,
     paddingBottom: theme.spacing.xl,
-  },
-  title: {
-    ...typography.title,
-    fontSize: theme.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.md,
   },
   card: {
     marginBottom: theme.spacing.md,
@@ -274,9 +258,6 @@ const styles = StyleSheet.create({
     ...typography.body,
     fontWeight: '600',
     color: theme.colors.textSecondary,
-  },
-  backButton: {
-    marginTop: theme.spacing.sm,
   },
   aboutButton: {
     marginTop: theme.spacing.sm,

@@ -13,7 +13,7 @@ import { DEBUG_FLAGS } from '../debug/debugFlags';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { translateWithFallback } from '../i18n/translateWithFallback';
-import { DEFAULT_CURRENCY_CODE, CurrencyCode, formatCurrencyUnit, getCurrencyMeta } from '../models/currency';
+import { CurrencyCode, getCurrencyMeta } from '../models/currency';
 import { useAppPreferences } from '../settings/useAppPreferences';
 import { getDefaultRules, HkGunMode, HkScoringPreset, HkStakePreset, parseRules, RulesV1, serializeRules } from '../models/rules';
 import { ResolvedRoomPlayer, Room, SeatKey } from '../models/cloud';
@@ -66,7 +66,6 @@ import {
 } from './newGameStepper/helpers';
 import CreateConfirmModal from './newGameStepper/sections/CreateConfirmModal';
 import HostNameConfirmModal from './newGameStepper/sections/HostNameConfirmModal';
-import CurrencySection from './newGameStepper/sections/CurrencySection';
 import GameTitleSection from './newGameStepper/sections/GameTitleSection';
 import PlayersSection from './newGameStepper/sections/PlayersSection';
 import ScoringSection from './newGameStepper/sections/ScoringSection';
@@ -112,11 +111,10 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const { defaultCurrencyCode } = useAppPreferences();
   const insets = useSafeAreaInsets();
   const prefill = route.params?.prefill;
-  const currencyManuallyChangedRef = useRef(false);
 
   const [title, setTitle] = useState(prefill?.title ?? '');
   const [seatMode, setSeatMode] = useState<SeatMode>('manual');
-  const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(prefill?.currencyCode ?? DEFAULT_CURRENCY_CODE);
+  const [currencyCode, setCurrencyCode] = useState<CurrencyCode>(prefill?.currencyCode ?? defaultCurrencyCode);
   const [hkScoringPreset, setHkScoringPreset] = useState<HkScoringPreset>('traditionalFan');
   const [hkGunMode, setHkGunMode] = useState<HkGunMode>('fullGun');
   const [hkStakePreset, setHkStakePreset] = useState<HkStakePreset>('TWO_FIVE_CHICKEN');
@@ -167,7 +165,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const recoveryStartedRef = useRef(false);
 
   useEffect(() => {
-    if (!prefill && !currencyManuallyChangedRef.current) {
+    if (!prefill) {
       setCurrencyCode(defaultCurrencyCode);
     }
   }, [defaultCurrencyCode, prefill]);
@@ -1349,7 +1347,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             : t('newGame.creationMode.local'),
       },
       { label: t('newGame.confirmModal.field.mode'), value: modeLabel },
-      { label: t('newGame.confirmModal.field.currency'), value: formatCurrencyUnit(context.rules.currencyCode) },
     ];
 
     const scoringFields: ConfirmField[] = [];
@@ -1512,18 +1509,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             disabled={setupLocked || loading}
           />
         </View>
-
-        <CurrencySection
-          title={t('newGame.currencyTitle')}
-          value={currencyCode}
-          onChange={(nextCurrencyCode) => {
-            currencyManuallyChangedRef.current = true;
-            setCurrencyCode(nextCurrencyCode);
-          }}
-          disabled={loading || setupLocked}
-          labels={{ hkd: t('currency.hkd'), twd: t('currency.twd'), cny: t('currency.cny') }}
-          helperText={`${t('newGame.currencySelectedPrefix')}${formatCurrencyUnit(currencyCode)}`}
-        />
 
         <View
           onLayout={(event) => {
@@ -1811,17 +1796,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
                   ) : null}
                   <Pressable
                     onPress={() => {
-                      if (draftRoom) navigation.navigate('Profile', { roomId: draftRoom.roomId });
-                    }}
-                    disabled={draftRoom?.status !== 'open' || syncBusy}
-                    style={styles.syncToolbarButton}
-                  >
-                    <AppText style={styles.syncToolbarButtonText}>
-                      {translateWithFallback(t, 'roomLobby.viewProfile', '修改我的名稱')}
-                    </AppText>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
                       handleOpenInviteShare().catch((error) => {
                         console.error('[NewGame] share invite failed', error);
                       });
@@ -1879,7 +1853,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             placeholder: translateWithFallback(t, 'newGame.sync.hostNamePlaceholder', '輸入 1–10 個字'),
             cancel: translateWithFallback(t, 'common.cancel', '取消'),
             confirm: translateWithFallback(t, 'newGame.sync.hostNameConfirm', '確認並建立房間'),
-            confirming: translateWithFallback(t, 'newGame.sync.enabling', '建立同步房中...'),
+            confirming: translateWithFallback(t, 'newGame.sync.enabling', '建立中...'),
           }}
           onChange={(value) => {
             setHostDisplayName(value);

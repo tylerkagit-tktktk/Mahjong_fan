@@ -175,6 +175,72 @@ The integration hook is `initializeSchema` in `src/db/schema.ts`, reached throug
 - Contract gap resolved: the previous snapshot could not derive an empty game or non-East starting dealer, so `startingDealerSeatIndex` is now required. A Phase 1B local adapter must also make the existing implicit wind-wrap rotation explicit as canonical boundaries. Some legacy fixture rows intentionally demonstrate why source deltas cannot be authoritative when they disagree with their rule snapshot; adapters must surface that as a mismatch instead of silently preserving it.
 - This checkpoint does not call replay from repositories, GameTable, GameDashboard, Cloud, archive, SQLite, or Firestore. Phase 1B remains responsible for read-only local adapter/parity integration.
 
+## Phase 1B Local Adapter Outcome
+
+Phase 1B adds a read-only bridge from the current local `GameBundle` to the Phase 1A contract:
+
+- `src/domain/gameRecord/localAdapter.ts` exports `adaptLocalGameBundle(bundle)`. It is pure and storage-independent: no SQLite query, write, React/React Native, Firebase, clock, random value, console output, or UI copy.
+- `src/domain/gameRecord/localParity.ts` exports `compareLocalReplayParity(bundle, replay)`. It compares current local projections with canonical replay and returns item-level `exact`, `mismatch`, or `notComparable` results rather than a boolean.
+- `src/services/localGameReplay.ts` exports `replayLocalGameBundle(bundle)` and the unused-by-production `loadAndReplayLocalGame(gameId)` read entrypoint. The latter delegates loading to `getGameBundle`; it does not duplicate SQL, reconcile, update result snapshots, or scan games.
+
+### Local mapping decisions
+
+- `Game.players[].id` is the permanent canonical identity and `name` becomes `displayName`. The current stored `seatIndex` values become the initial/base seat assignment; identity and seat are never merged into one canonical player field.
+- Local `hands[].handIndex` is already canonical zero-based. The adapter sorts a copied hand array for deterministic output and rejects duplicates, gaps, negative values, or non-zero-based indexes; it never adds or subtracts one.
+- `winnerPlayerId` and `discarderPlayerId` are copied as identity fields. `winnerSeatIndex` is retained only as a source consistency constraint: if it does not point to the stored winner identity under the inferred historical mapping, the adapter returns `AMBIGUOUS_SEAT_ROTATION_HISTORY` and `ok: false` rather than guessing.
+- Rules JSON is parsed strictly. Only local HK `RulesV1` with `traditionalFan`/`customTable`, supported half/full gun modes, supported stake presets, explicit minimum fan, unit-per-fan, cap and currency symbol is normalized. The adapter does not call fallback-based `parseRules`, infer missing values, or open TW/PMA.
+- `computedJson.settlementType`, `fan`, and explicit draw `dealerAction` provide the hand input. `createdAt` is source metadata only. Stored deltas are parsed as source evidence and passed to replay for validation; they never replace derived settlement.
+
+### Implicit rotation boundary algorithm
+
+The current local model does not persist a historical reseat/boundary event. To preserve `aggregatePlayerTotalsQByTimeline` exactly, the adapter starts with the current stored player seat mapping and offset `0`, then scans copied hands in canonical order:
+
+1. Use the previous next-hand label, initially `東風東局`.
+2. When the current hand's `nextRoundLabelZh` changes from `北風…` to `東風…`, increment the inferred offset after that hand.
+3. Emit one `CanonicalSeatBoundary` with `effectiveFromHandIndex = handIndex + 1`, using the rotated identity mapping. A final wind wrap therefore emits a boundary at `handCount`; no dealer, wind, round, or total is reset.
+4. Never emit a second boundary for the same effective hand index.
+
+`game.seatRotationOffset` is retained as current-state source metadata only. It is not treated as proof of historical boundaries because a manual reseat resets it and the database has no event history. A mismatch between the stored winner identity/effective seat and the label-derived mapping is therefore non-authoritative instead of being repaired. The final current-seat mapping is an informational parity item, not a required proof of historical identity.
+
+### Adapter diagnostics
+
+Diagnostics are deterministic, storage-specific records with `code`, `severity`, `gameId`, optional `handIndex`, `sourceField`, and stable detail data. They contain no translated messages. The implemented coverage includes:
+
+- `MALFORMED_RULES_JSON`, `UNSUPPORTED_LOCAL_RULE_VARIANT`, `CORRUPTED_RULES_SNAPSHOT`;
+- `MISSING_STARTING_DEALER`, `INVALID_STARTING_DEALER`, `INVALID_LOCAL_PLAYER`, `DUPLICATE_LOCAL_PLAYER`, `DUPLICATE_LOCAL_SEAT`;
+- `INVALID_LOCAL_HAND`, `DUPLICATE_HAND_INDEX`, `NON_CONTIGUOUS_HAND_INDEX`, `MALFORMED_HAND_INPUT_JSON`, `MALFORMED_DELTA_JSON`, `MISSING_HAND_PLAYER_IDENTITY`;
+- `AMBIGUOUS_SEAT_ROTATION_HISTORY`, `PERSISTED_HANDS_COUNT_MISMATCH`, `PERSISTED_CURRENT_ROUND_LABEL_MISMATCH`, `MALFORMED_RESULT_SUMMARY_JSON`, and `PERSISTED_RESULT_SUMMARY_MISMATCH`;
+- `CURRENT_SEAT_ROTATION_OFFSET_SOURCE_ONLY` as an informational note when the current offset cannot be proven to be historical evidence.
+
+Structural/rules/identity ambiguity returns `ok: false` with no snapshot. Stale persisted count, label, or result cache data can still be replayed for diagnostics, but prevents an authoritative result.
+
+### Parity and authoritative policy
+
+Required parity items compare:
+
+- hand count and every zero-based hand index;
+- persisted delta versus replay-derived delta per hand;
+- player totals `Q`, ranking, wins, zimo count, discard count and draw count;
+- next dealer, current next-hand round label and zero-sum totals;
+- ended result summary structure, including source-cache versus existing local projection and existing local projection versus replay.
+
+Informational items report settlement directions, final effective seat mapping, and rules normalization. Stored `winnerText`/`loserText` are intentionally not copied into the report because they are UI-formatted; numeric/identity summary fields are compared instead. The report exposes `requiredStatus`, `informationalStatus`, overall `status`, and all item records.
+
+`authoritative` is true only when the adapter is `ok`, all adapter diagnostics are informational, replay `isValid` is true, and every required parity item is `exact`. A legacy row with a valid stored delta shape but a rules mismatch therefore remains source-preserved, produces `STORED_SETTLEMENT_MISMATCH`, marks the delta parity item `mismatch`, and cannot be used as an authoritative projection. No SQLite summary or source row is changed.
+
+### Read-only repository verification and restrictions
+
+`__tests__/services/localGameReplay.test.ts` uses `ActualSqliteDatabase` and the real repository write/read path only to construct a temporary local game. It then loads the bundle through `getGameBundle`, runs adapter/replay/parity, and asserts games, players and hands rows are byte-for-byte equal before and after the read. Missing games return `LocalGameReplayReadError('NOT_FOUND')`; schema initialization errors continue to pass through as the existing typed schema errors.
+
+`GameTableScreen`, `GameDashboardScreen`, `HistoryScreen`, `endGame`, result snapshot writes, SQLite schema/version 300, Firestore, Cloud adapters, navigation, undo, replace, remove, reopen and startup reconciliation are unchanged. Phase 1B is a dormant read-only projection path; production screens and mutation paths do not consume it.
+
+### Local data limitations carried into Phase 1C
+
+- SQLite has no first-class historical reseat event. A manual reseat cannot be uniquely reconstructed when stored identity/seat constraints do not expose the change; the adapter reports ambiguity instead of fabricating a boundary.
+- Legacy winning rows without a strict `fan` source or draw rows without explicit `dealerAction` cannot safely be converted. They remain readable by existing production code but are not authoritative under this adapter.
+- Persisted `handsCount`, `currentRoundLabelZh`, and ended result summary are caches. Stale values are surfaced as diagnostics; no repair or rewrite is attempted.
+- Phase 1C still needs to decide whether to persist explicit local boundaries, how to migrate/flag old rows, and when any local read projection may replace the current screen/statistics calculations.
+
 ## Characterization fixtures
 
 `test-support/gameRecord/fixtures.ts` is deterministic: fixed IDs, players and timestamps only. It records the following existing 2.1 scenarios:

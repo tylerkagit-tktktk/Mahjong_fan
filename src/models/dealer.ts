@@ -66,6 +66,26 @@ export type RoundLabel = {
 
 const WIND_LABELS: Array<'東' | '南' | '西' | '北'> = ['東', '南', '西', '北'];
 
+/**
+ * Builds the next-hand round label from already-derived dealer state.
+ * Keeping this separate lets pure timeline replay stay O(n) while sharing the app's label rule.
+ */
+export function getRoundLabelFromDealerState(dealerSeatIndex: number, dealerAdvanceCount: number): RoundLabel {
+  assertSeatIndex(dealerSeatIndex, 'dealerSeatIndex');
+  if (!Number.isInteger(dealerAdvanceCount) || dealerAdvanceCount < 0) {
+    throw new Error('[Dealer] dealerAdvanceCount must be a non-negative integer');
+  }
+  const roundIndex = Math.floor(dealerAdvanceCount / 4) + 1;
+  const roundWind = WIND_LABELS[(roundIndex - 1) % 4];
+  const dealerWind = WIND_LABELS[dealerSeatIndex];
+  return {
+    wind: roundWind,
+    dealerWind,
+    labelZh: `${roundWind}風${dealerWind}局`,
+    roundIndex,
+  };
+}
+
 function parseDrawDealerAction(hand: Hand): 'stick' | 'pass' | null {
   if (!hand.computedJson) {
     return null;
@@ -113,15 +133,7 @@ export function getRoundLabel(startingDealerSeatIndex: number, hands: Hand[]): R
     dealer = nextDealer;
   }
 
-  const roundIndex = Math.floor(dealerAdvanceCount / 4) + 1;
-  const roundWind = WIND_LABELS[(roundIndex - 1) % 4];
-  const dealerWind = WIND_LABELS[dealer];
-  return {
-    wind: roundWind,
-    dealerWind,
-    labelZh: `${roundWind}風${dealerWind}局`,
-    roundIndex,
-  };
+  return getRoundLabelFromDealerState(dealer, dealerAdvanceCount);
 }
 
 export function getRoundIndexFromLabel(roundLabel: string | null | undefined): number {

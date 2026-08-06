@@ -1,6 +1,76 @@
 import { SQLiteDatabase } from 'react-native-sqlite-storage';
 import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 
+export const CURRENT_SCHEMA_VERSION = 300;
+
+const APP_OWNED_TABLES = ['games', 'players', 'hands', 'cloud_archives'] as const;
+const APP_OWNED_INDEXES = [
+  'idx_hands_game_handIndex',
+  'idx_games_createdAt',
+  'idx_players_game',
+  'idx_cloud_archives_createdAt',
+  'idx_games_endedAt',
+  'idx_games_resultStatus',
+] as const;
+
+export const APP_OWNED_SCHEMA_OBJECTS = {
+  tables: APP_OWNED_TABLES,
+  indexes: APP_OWNED_INDEXES,
+  triggers: [] as const,
+  views: [] as const,
+};
+
+export type SchemaInitializationErrorCode =
+  | 'UNSUPPORTED_OLDER_SCHEMA_VERSION'
+  | 'FORWARD_SCHEMA_VERSION'
+  | 'SCHEMA_INITIALIZATION_FAILED';
+
+export class SchemaVersionError extends Error {
+  readonly detectedVersion: number;
+  readonly code: SchemaInitializationErrorCode;
+
+  constructor(message: string, code: SchemaInitializationErrorCode, detectedVersion: number) {
+    super(message);
+    this.name = 'SchemaVersionError';
+    this.code = code;
+    this.detectedVersion = detectedVersion;
+  }
+}
+
+export class UnsupportedOlderSchemaVersionError extends SchemaVersionError {
+  constructor(detectedVersion: number) {
+    super(
+      `Unsupported older local schema version: ${detectedVersion}.`,
+      'UNSUPPORTED_OLDER_SCHEMA_VERSION',
+      detectedVersion,
+    );
+    this.name = 'UnsupportedOlderSchemaVersionError';
+  }
+}
+
+export class ForwardSchemaVersionError extends SchemaVersionError {
+  constructor(detectedVersion: number) {
+    super(
+      `Local schema version ${detectedVersion} is newer than supported version ${CURRENT_SCHEMA_VERSION}.`,
+      'FORWARD_SCHEMA_VERSION',
+      detectedVersion,
+    );
+    this.name = 'ForwardSchemaVersionError';
+  }
+}
+
+export class SchemaInitializationError extends SchemaVersionError {
+  constructor(detectedVersion: number, cause?: unknown) {
+    super('Unable to initialize local database schema.', 'SCHEMA_INITIALIZATION_FAILED', detectedVersion);
+    this.name = 'SchemaInitializationError';
+    (this as SchemaInitializationError & { cause?: unknown }).cause = cause;
+  }
+}
+
+export function isSchemaInitializationError(error: unknown): error is SchemaVersionError {
+  return error instanceof SchemaVersionError;
+}
+
 const TABLES = [
   `CREATE TABLE IF NOT EXISTS games(
     id TEXT PRIMARY KEY,
@@ -63,12 +133,56 @@ const INDICES = [
   'CREATE INDEX IF NOT EXISTS idx_games_createdAt ON games(createdAt);',
   'CREATE INDEX IF NOT EXISTS idx_players_game ON players(gameId);',
   'CREATE INDEX IF NOT EXISTS idx_cloud_archives_createdAt ON cloud_archives(createdAt DESC);',
+  'CREATE INDEX IF NOT EXISTS idx_games_endedAt ON games(endedAt);',
+  'CREATE INDEX IF NOT EXISTS idx_games_resultStatus ON games(resultStatus);',
 ];
 
-export async function initializeSchema(db: SQLiteDatabase): Promise<void> {
-  await tryPragma(db, 'PRAGMA foreign_keys = ON;');
-  await tryPragma(db, 'PRAGMA journal_mode = WAL;');
+type SchemaObjectRow = { name: string; type: string };
 
+export async function initializeSchema(db: SQLiteDatabase): Promise<void> {
+  let detectedVersion = 0;
+  try {
+    await tryPragma(db, 'PRAGMA foreign_keys = ON;');
+    await tryPragma(db, 'PRAGMA journal_mode = WAL;');
+    detectedVersion = await readUserVersion(db);
+
+    if (detectedVersion > CURRENT_SCHEMA_VERSION) {
+      throw new ForwardSchemaVersionError(detectedVersion);
+    }
+    if (detectedVersion > 0 && detectedVersion < CURRENT_SCHEMA_VERSION) {
+      throw new UnsupportedOlderSchemaVersionError(detectedVersion);
+    }
+
+    const isUnversionedDatabase = detectedVersion === 0;
+    const legacyObjects = isUnversionedDatabase ? await findAppOwnedSchemaObjects(db) : [];
+    const isLegacyTestFlightDatabase = legacyObjects.some((object) => object.type === 'table');
+
+    await runSchemaTransaction(db, async () => {
+      if (isLegacyTestFlightDatabase) {
+        // Pre-launch TestFlight policy: version-0 app data is intentionally reset, never migrated.
+        console.warn('[DB] Resetting pre-launch TestFlight legacy SQLite schema', {
+          detectedVersion,
+          objects: legacyObjects.map((object) => `${object.type}:${object.name}`),
+        });
+        await dropAppOwnedSchema(db);
+      }
+
+      await createAndVerifySchema(db);
+    });
+
+    if (isUnversionedDatabase) {
+      // Stamp only after tables, defensive columns, backfills, indexes, and verification have succeeded.
+      await db.executeSql(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION};`);
+    }
+  } catch (error) {
+    if (isSchemaInitializationError(error)) {
+      throw error;
+    }
+    throw new SchemaInitializationError(detectedVersion, error);
+  }
+}
+
+async function createAndVerifySchema(db: SQLiteDatabase): Promise<void> {
   for (const statement of TABLES) {
     await db.executeSql(statement);
   }
@@ -107,8 +221,73 @@ export async function initializeSchema(db: SQLiteDatabase): Promise<void> {
     await db.executeSql(statement);
   }
 
-  await db.executeSql('CREATE INDEX IF NOT EXISTS idx_games_endedAt ON games(endedAt);');
-  await db.executeSql('CREATE INDEX IF NOT EXISTS idx_games_resultStatus ON games(resultStatus);');
+  await verifyRequiredTables(db);
+}
+
+async function readUserVersion(db: SQLiteDatabase): Promise<number> {
+  const [result] = await db.executeSql('PRAGMA user_version;');
+  const version = Number((result.rows.item(0) as { user_version?: number } | undefined)?.user_version ?? 0);
+  return Number.isInteger(version) && version >= 0 ? version : 0;
+}
+
+async function findAppOwnedSchemaObjects(db: SQLiteDatabase): Promise<SchemaObjectRow[]> {
+  const [result] = await db.executeSql(
+    "SELECT type, name FROM sqlite_master WHERE type IN ('table', 'index', 'trigger', 'view') AND name NOT LIKE 'sqlite_%';",
+  );
+  const appOwnedNames = new Set<string>([
+    ...APP_OWNED_TABLES,
+    ...APP_OWNED_INDEXES,
+    ...APP_OWNED_SCHEMA_OBJECTS.triggers,
+    ...APP_OWNED_SCHEMA_OBJECTS.views,
+  ]);
+  const objects: SchemaObjectRow[] = [];
+  for (let index = 0; index < result.rows.length; index += 1) {
+    const row = result.rows.item(index) as SchemaObjectRow;
+    if (appOwnedNames.has(row.name)) {
+      objects.push(row);
+    }
+  }
+  return objects;
+}
+
+async function dropAppOwnedSchema(db: SQLiteDatabase): Promise<void> {
+  // Every identifier below is a hard-coded app-owned object. Never enumerate-and-drop sqlite_master results.
+  for (const index of APP_OWNED_INDEXES) {
+    await db.executeSql(`DROP INDEX IF EXISTS ${index};`);
+  }
+  for (const table of ['hands', 'players', 'cloud_archives', 'games'] as const) {
+    await db.executeSql(`DROP TABLE IF EXISTS ${table};`);
+  }
+}
+
+async function verifyRequiredTables(db: SQLiteDatabase): Promise<void> {
+  const [result] = await db.executeSql(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';",
+  );
+  const existingTables = new Set<string>();
+  for (let index = 0; index < result.rows.length; index += 1) {
+    const row = result.rows.item(index) as { name: string };
+    existingTables.add(row.name);
+  }
+  const missingTables = APP_OWNED_TABLES.filter((table) => !existingTables.has(table));
+  if (missingTables.length > 0) {
+    throw new Error(`Required SQLite tables are missing: ${missingTables.join(', ')}.`);
+  }
+}
+
+async function runSchemaTransaction(db: SQLiteDatabase, work: () => Promise<void>): Promise<void> {
+  await db.executeSql('BEGIN IMMEDIATE;');
+  try {
+    await work();
+    await db.executeSql('COMMIT;');
+  } catch (error) {
+    try {
+      await db.executeSql('ROLLBACK;');
+    } catch (rollbackError) {
+      console.warn('[DB] schema initialization rollback failed', rollbackError);
+    }
+    throw error;
+  }
 }
 
 async function ensureColumn(
@@ -136,33 +315,29 @@ async function tryPragma(db: SQLiteDatabase, statement: string) {
 }
 
 async function ensureBackfillDefaults(db: SQLiteDatabase) {
-  try {
-    // Safety net for legacy rows. Idempotent and safe on repeated launches.
-    await db.executeSql('UPDATE games SET startingDealerSeatIndex = 0 WHERE startingDealerSeatIndex IS NULL;');
-    await db.executeSql('UPDATE games SET progressIndex = 0 WHERE progressIndex IS NULL;');
-    await db.executeSql('UPDATE games SET currentWindIndex = 0 WHERE currentWindIndex IS NULL;');
-    await db.executeSql('UPDATE games SET currentRoundNumber = 1 WHERE currentRoundNumber IS NULL;');
-    await db.executeSql('UPDATE games SET maxWindIndex = 1 WHERE maxWindIndex IS NULL;');
-    await db.executeSql('UPDATE games SET seatRotationOffset = 0 WHERE seatRotationOffset IS NULL;');
-    await db.executeSql("UPDATE games SET gameState = 'draft' WHERE gameState IS NULL OR gameState = '';");
-    await db.executeSql(
-      `UPDATE games SET currentRoundLabelZh = '${INITIAL_ROUND_LABEL_ZH}' WHERE currentRoundLabelZh IS NULL;`,
-    );
-    await db.executeSql('UPDATE games SET handsCount = 0 WHERE handsCount IS NULL;');
-    await db.executeSql(`
-      UPDATE games
-      SET gameState = CASE
-        WHEN endedAt IS NOT NULL AND COALESCE(handsCount, 0) = 0 THEN 'abandoned'
-        WHEN endedAt IS NOT NULL AND COALESCE(handsCount, 0) > 0 THEN 'ended'
-        WHEN endedAt IS NULL AND COALESCE(handsCount, 0) > 0 THEN 'active'
-        ELSE 'draft'
-      END;
-    `);
-    await db.executeSql('UPDATE hands SET dealerSeatIndex = 0 WHERE dealerSeatIndex IS NULL;');
-    await db.executeSql('UPDATE hands SET windIndex = 0 WHERE windIndex IS NULL;');
-    await db.executeSql('UPDATE hands SET roundNumber = 1 WHERE roundNumber IS NULL;');
-    await db.executeSql('UPDATE hands SET isDraw = 0 WHERE isDraw IS NULL;');
-  } catch (error) {
-    console.warn('[DB] backfill defaults skipped', error);
-  }
+  // A failed required backfill must abort initialization before the version stamp is written.
+  await db.executeSql('UPDATE games SET startingDealerSeatIndex = 0 WHERE startingDealerSeatIndex IS NULL;');
+  await db.executeSql('UPDATE games SET progressIndex = 0 WHERE progressIndex IS NULL;');
+  await db.executeSql('UPDATE games SET currentWindIndex = 0 WHERE currentWindIndex IS NULL;');
+  await db.executeSql('UPDATE games SET currentRoundNumber = 1 WHERE currentRoundNumber IS NULL;');
+  await db.executeSql('UPDATE games SET maxWindIndex = 1 WHERE maxWindIndex IS NULL;');
+  await db.executeSql('UPDATE games SET seatRotationOffset = 0 WHERE seatRotationOffset IS NULL;');
+  await db.executeSql("UPDATE games SET gameState = 'draft' WHERE gameState IS NULL OR gameState = '';");
+  await db.executeSql(
+    `UPDATE games SET currentRoundLabelZh = '${INITIAL_ROUND_LABEL_ZH}' WHERE currentRoundLabelZh IS NULL;`,
+  );
+  await db.executeSql('UPDATE games SET handsCount = 0 WHERE handsCount IS NULL;');
+  await db.executeSql(`
+    UPDATE games
+    SET gameState = CASE
+      WHEN endedAt IS NOT NULL AND COALESCE(handsCount, 0) = 0 THEN 'abandoned'
+      WHEN endedAt IS NOT NULL AND COALESCE(handsCount, 0) > 0 THEN 'ended'
+      WHEN endedAt IS NULL AND COALESCE(handsCount, 0) > 0 THEN 'active'
+      ELSE 'draft'
+    END;
+  `);
+  await db.executeSql('UPDATE hands SET dealerSeatIndex = 0 WHERE dealerSeatIndex IS NULL;');
+  await db.executeSql('UPDATE hands SET windIndex = 0 WHERE windIndex IS NULL;');
+  await db.executeSql('UPDATE hands SET roundNumber = 1 WHERE roundNumber IS NULL;');
+  await db.executeSql('UPDATE hands SET isDraw = 0 WHERE isDraw IS NULL;');
 }

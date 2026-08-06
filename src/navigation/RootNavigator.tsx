@@ -3,7 +3,6 @@ import {
   type NativeStackHeaderBackProps,
   type NativeStackHeaderItemProps,
 } from '@react-navigation/native-stack';
-import AddHandScreen from '../screens/AddHandScreen';
 import AboutScreen from '../screens/AboutScreen';
 import GameDashboardScreen from '../screens/GameDashboardScreen';
 import GameTableScreen from '../screens/GameTableScreen';
@@ -12,7 +11,6 @@ import HistoryScreen from '../screens/HistoryScreen';
 import theme from '../theme/theme';
 import NewGameStepperScreen from '../screens/NewGameStepperScreen';
 import SettingsScreen from '../screens/SettingsScreen';
-import SummaryScreen from '../screens/SummaryScreen';
 import ProfileScreen from '../screens/cloud/ProfileScreen';
 import RoomLobbyScreen from '../screens/cloud/RoomLobbyScreen';
 import MultiplayerGameTableScreen from '../screens/cloud/MultiplayerGameTableScreen';
@@ -94,8 +92,6 @@ function RootNavigator() {
         component={GameTableScreen}
         options={{ title: t('nav.dashboard') }}
       />
-      <Stack.Screen name="AddHand" component={AddHandScreen} options={{ title: t('nav.addHand') }} />
-      <Stack.Screen name="Summary" component={SummaryScreen} options={{ title: t('nav.summary') }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: t('nav.settings') }} />
       <Stack.Screen name="About" component={AboutScreen} options={{ title: t('about.title') }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('nav.profile') }} />

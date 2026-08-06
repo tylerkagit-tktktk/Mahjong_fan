@@ -14,8 +14,6 @@ export type RootStackParamList = {
     | undefined;
   GameTable: { gameId: string };
   GameDashboard: { gameId: string };
-  AddHand: { gameId: string };
-  Summary: { gameId: string };
   Settings: undefined;
   About: undefined;
   Profile: { roomId?: string } | undefined;

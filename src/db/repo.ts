@@ -1483,53 +1483,7 @@ export async function updateGameResultSnapshot(gameId: string): Promise<void> {
       return;
     }
 
-    const orderedHands = bundle.hands.slice().sort((a, b) => a.handIndex - b.handIndex);
-    const seatTotalsQ: number[] = [0, 0, 0, 0];
-    orderedHands.forEach((hand) => {
-      const deltasQ = resolveDeltasQ(hand.deltasJson);
-      if (!deltasQ) {
-        return;
-      }
-      for (let i = 0; i < Math.min(4, deltasQ.length); i += 1) {
-        seatTotalsQ[i] += Number(deltasQ[i] ?? 0);
-      }
-    });
-    const playerTotalsQ = aggregatePlayerTotalsQByTimeline(
-      bundle.players,
-      orderedHands.map((hand) => ({
-        nextRoundLabelZh: hand.nextRoundLabelZh ?? null,
-        deltasQ: resolveDeltasQ(hand.deltasJson),
-      })),
-      INITIAL_ROUND_LABEL_ZH,
-      0,
-    );
-
-    let winnerPlayer = bundle.players[0] ?? null;
-    let loserPlayer = bundle.players[0] ?? null;
-    bundle.players.forEach((player) => {
-      if (!winnerPlayer || (playerTotalsQ.get(player.id) ?? 0) > (playerTotalsQ.get(winnerPlayer.id) ?? 0)) {
-        winnerPlayer = player;
-      }
-      if (!loserPlayer || (playerTotalsQ.get(player.id) ?? 0) < (playerTotalsQ.get(loserPlayer.id) ?? 0)) {
-        loserPlayer = player;
-      }
-    });
-
-    const symbol = bundle.game.currencySymbol ?? '';
-    const winnerName = winnerPlayer?.name ?? '—';
-    const loserName = loserPlayer?.name ?? '—';
-    const winnerMoney = winnerPlayer ? (playerTotalsQ.get(winnerPlayer.id) ?? 0) / 4 : 0;
-    const loserMoney = loserPlayer ? (playerTotalsQ.get(loserPlayer.id) ?? 0) / 4 : 0;
-    const summaryJson = JSON.stringify({
-      winnerText: `${winnerName} ${formatSignedMoney(winnerMoney, symbol)}`,
-      loserText: `${loserName} ${formatSignedMoney(loserMoney, symbol)}`,
-      seatTotalsQ,
-      playerTotalsQ: bundle.players.reduce<Record<string, number>>((acc, player) => {
-        acc[player.id] = playerTotalsQ.get(player.id) ?? 0;
-        return acc;
-      }, {}),
-      playersCount: bundle.players.length,
-    });
+    const summaryJson = JSON.stringify(buildGameResultSummarySnapshot(bundle));
 
     await runExplicitWriteTransaction('updateGameResultSnapshot', async (executeTx) => {
       await executeTx(
@@ -1547,6 +1501,65 @@ export async function updateGameResultSnapshot(gameId: string): Promise<void> {
     console.error('[DB]', wrapped);
     throw wrapped;
   }
+}
+
+export type GameResultSummarySnapshot = {
+  winnerText: string;
+  loserText: string;
+  seatTotalsQ: number[];
+  playerTotalsQ: Record<string, number>;
+  playersCount: number;
+};
+
+/** Pure extraction of the existing ended-game summary calculation for characterization tests. */
+export function buildGameResultSummarySnapshot(bundle: GameBundle): GameResultSummarySnapshot {
+  const orderedHands = bundle.hands.slice().sort((a, b) => a.handIndex - b.handIndex);
+  const seatTotalsQ: number[] = [0, 0, 0, 0];
+  orderedHands.forEach((hand) => {
+    const deltasQ = resolveDeltasQ(hand.deltasJson);
+    if (!deltasQ) {
+      return;
+    }
+    for (let i = 0; i < Math.min(4, deltasQ.length); i += 1) {
+      seatTotalsQ[i] += Number(deltasQ[i] ?? 0);
+    }
+  });
+  const playerTotalsQ = aggregatePlayerTotalsQByTimeline(
+    bundle.players,
+    orderedHands.map((hand) => ({
+      nextRoundLabelZh: hand.nextRoundLabelZh ?? null,
+      deltasQ: resolveDeltasQ(hand.deltasJson),
+    })),
+    INITIAL_ROUND_LABEL_ZH,
+    0,
+  );
+
+  let winnerPlayer = bundle.players[0] ?? null;
+  let loserPlayer = bundle.players[0] ?? null;
+  bundle.players.forEach((player) => {
+    if (!winnerPlayer || (playerTotalsQ.get(player.id) ?? 0) > (playerTotalsQ.get(winnerPlayer.id) ?? 0)) {
+      winnerPlayer = player;
+    }
+    if (!loserPlayer || (playerTotalsQ.get(player.id) ?? 0) < (playerTotalsQ.get(loserPlayer.id) ?? 0)) {
+      loserPlayer = player;
+    }
+  });
+
+  const symbol = bundle.game.currencySymbol ?? '';
+  const winnerName = winnerPlayer?.name ?? '—';
+  const loserName = loserPlayer?.name ?? '—';
+  const winnerMoney = winnerPlayer ? (playerTotalsQ.get(winnerPlayer.id) ?? 0) / 4 : 0;
+  const loserMoney = loserPlayer ? (playerTotalsQ.get(loserPlayer.id) ?? 0) / 4 : 0;
+  return {
+    winnerText: `${winnerName} ${formatSignedMoney(winnerMoney, symbol)}`,
+    loserText: `${loserName} ${formatSignedMoney(loserMoney, symbol)}`,
+    seatTotalsQ,
+    playerTotalsQ: bundle.players.reduce<Record<string, number>>((acc, player) => {
+      acc[player.id] = playerTotalsQ.get(player.id) ?? 0;
+      return acc;
+    }, {}),
+    playersCount: bundle.players.length,
+  };
 }
 
 function normalizeError(error: unknown, context: string): Error {

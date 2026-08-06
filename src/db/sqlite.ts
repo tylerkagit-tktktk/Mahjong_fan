@@ -1,5 +1,5 @@
 import SQLite, { ResultSet, SQLiteDatabase } from 'react-native-sqlite-storage';
-import { initializeSchema } from './schema';
+import { initializeSchema, isSchemaInitializationError } from './schema';
 import { dumpBreadcrumbs, setBreadcrumb } from '../debug/breadcrumbs';
 import { isDev } from '../debug/isDev';
 
@@ -12,6 +12,9 @@ let schemaReady = false;
 let writeQueue: Promise<void> = Promise.resolve();
 
 export function normalizeError(error: unknown, context: string): Error {
+  if (isSchemaInitializationError(error)) {
+    return error;
+  }
   const fallback = new Error('Unable to access local data. Please try again.');
   if (error instanceof Error) {
     if (isDev) {
@@ -51,7 +54,13 @@ async function openDb(): Promise<SQLiteDatabase> {
       });
     }
 
-    const db = await dbPromise;
+    let db: SQLiteDatabase;
+    try {
+      db = await dbPromise;
+    } catch (error) {
+      dbPromise = null;
+      throw error;
+    }
     if (!schemaReady) {
       await initializeSchema(db);
       schemaReady = true;

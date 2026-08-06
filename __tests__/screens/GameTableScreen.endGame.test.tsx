@@ -3,12 +3,17 @@ import renderer, { act } from 'react-test-renderer';
 import { Alert } from 'react-native';
 import AppButton from '../../src/components/AppButton';
 import GameTableScreen from '../../src/screens/GameTableScreen';
-import { endGame, getGameBundle } from '../../src/db/repo';
+import { endGame, getGameBundle, replaceLastHand } from '../../src/db/repo';
+import { computeHkSettlement } from '../../src/domain/hk/settlement';
+import { traditionalRules } from '../../test-support/gameRecord/fixtures';
 
 jest.mock('../../src/db/repo', () => ({
   endGame: jest.fn(),
   getGameBundle: jest.fn(),
   insertHand: jest.fn(),
+  removeLastHand: jest.fn(),
+  replaceLastHand: jest.fn(),
+  updateGamePlayerSeats: jest.fn(),
 }));
 
 jest.mock('../../src/i18n/useAppLanguage', () => ({
@@ -39,6 +44,7 @@ jest.mock('react-native-safe-area-context', () => {
 
 const mockedGetGameBundle = getGameBundle as jest.MockedFunction<typeof getGameBundle>;
 const mockedEndGame = endGame as jest.MockedFunction<typeof endGame>;
+const mockedReplaceLastHand = replaceLastHand as jest.MockedFunction<typeof replaceLastHand>;
 
 function createBundle() {
   return {
@@ -87,6 +93,33 @@ function createBundle() {
       { id: 'p3', gameId: 'game-1', name: 'D', seatIndex: 3 },
     ],
     hands: [],
+    seatBoundaries: [],
+  };
+}
+
+function createBundleWithHand() {
+  const bundle = createBundle();
+  const rules = traditionalRules({ gunMode: 'halfGun' });
+  const deltasQ = computeHkSettlement({
+    rules, fan: 3, settlementType: 'discard', winnerSeatIndex: 1, discarderSeatIndex: 0,
+  }).deltasQ;
+  return {
+    ...bundle,
+    game: {
+      ...bundle.game,
+      rulesJson: JSON.stringify(rules),
+      handsCount: 1,
+      currentRoundLabelZh: '東風南局',
+      seatBoundaryHistoryMode: 'explicit',
+      initialSeatMappingJson: JSON.stringify({ 0: 'p0', 1: 'p1', 2: 'p2', 3: 'p3' }),
+    },
+    hands: [{
+      id: 'h0', gameId: 'game-1', handIndex: 0, dealerSeatIndex: 0, windIndex: 0, roundNumber: 1,
+      isDraw: false, winnerSeatIndex: 1, type: 'discard', winnerPlayerId: 'p1', discarderPlayerId: 'p0',
+      inputValue: deltasQ[1] / 4, deltasJson: JSON.stringify({ unit: 'Q', values: deltasQ }),
+      nextRoundLabelZh: '東風南局', computedJson: JSON.stringify({ settlementType: 'discard', fan: 3, effectiveFan: 3 }),
+      createdAt: 1735689600001,
+    }],
   };
 }
 
@@ -95,6 +128,7 @@ describe('GameTableScreen end game flow', () => {
     jest.clearAllMocks();
     mockedGetGameBundle.mockResolvedValue(createBundle() as any);
     mockedEndGame.mockResolvedValue();
+    mockedReplaceLastHand.mockResolvedValue({ ok: true } as any);
   });
 
   it('replaces to GameDashboard after end game confirm', async () => {
@@ -137,6 +171,41 @@ describe('GameTableScreen end game flow', () => {
     expect(mockedEndGame).toHaveBeenCalled();
     expect(navigation.replace).toHaveBeenCalledWith('GameDashboard', { gameId: 'game-1' });
 
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('sends only a guarded correction intent and reloads the canonical local table', async () => {
+    const bundle = createBundleWithHand();
+    mockedGetGameBundle.mockResolvedValue(bundle as any);
+    const navigation = { setOptions: jest.fn(), replace: jest.fn(), navigate: jest.fn(), goBack: jest.fn() } as any;
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameTableScreen navigation={navigation} route={{ key: 'correction', name: 'GameTable', params: { gameId: 'game-1' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'local-last-hand-correction' }).props.onPress();
+      await Promise.resolve();
+    });
+    expect(tree!.root.findByProps({ testID: 'local-last-hand-correction-modal' })).toBeTruthy();
+
+    await act(async () => {
+      await tree!.root.findByProps({ testID: 'local-last-hand-save' }).props.onPress();
+    });
+
+    expect(mockedReplaceLastHand).toHaveBeenCalledWith({
+      action: 'replace', gameId: 'game-1', expectedHandId: 'h0', expectedHandIndex: 0, expectedHandsCount: 1,
+      outcome: 'discard', fan: 3, winnerPlayerId: 'p1', discarderPlayerId: 'p0',
+    });
+    expect(mockedGetGameBundle).toHaveBeenCalledTimes(2);
     alertSpy.mockRestore();
     await act(async () => {
       tree!.unmount();

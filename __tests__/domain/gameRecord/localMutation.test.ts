@@ -1,5 +1,5 @@
 import { computeHkSettlement } from '../../../src/domain/hk/settlement';
-import { planLocalLastHandMutation } from '../../../src/domain/gameRecord/localMutation';
+import { getLocalLastHandCorrectionAvailability, planLocalLastHandMutation } from '../../../src/domain/gameRecord/localMutation';
 import type { GameBundle } from '../../../src/models/db';
 import { traditionalRules } from '../../../test-support/gameRecord/fixtures';
 
@@ -38,6 +38,20 @@ function guard() {
 }
 
 describe('local last-hand mutation planner', () => {
+  it('only exposes correction for an authoritative active game without a final seat boundary', () => {
+    const bundle = activeBundle();
+    expect(getLocalLastHandCorrectionAvailability({ bundle, authoritative: true })).toEqual({ code: 'AVAILABLE', available: true });
+    expect(getLocalLastHandCorrectionAvailability({ bundle, authoritative: false })).toEqual({ code: 'NOT_AUTHORITATIVE', available: false });
+
+    bundle.seatBoundaries = [{
+      id: 'after', gameId: bundle.game.id, effectiveFromHandIndex: 1,
+      seatMapping: { 0: 'p3', 1: 'p0', 2: 'p1', 3: 'p2' }, reason: 'confirmed_reseat', createdAt: 2,
+    }];
+    expect(getLocalLastHandCorrectionAvailability({ bundle, authoritative: true })).toEqual({
+      code: 'LAST_EFFECTIVE_EVENT_IS_BOUNDARY', available: false,
+    });
+  });
+
   it('replaces a discard with canonical zimo persistence without mutating input', () => {
     const bundle = activeBundle();
     const before = JSON.parse(JSON.stringify(bundle));

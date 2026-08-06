@@ -3,7 +3,7 @@ import renderer, { act } from 'react-test-renderer';
 import { Alert, Share, Text } from 'react-native';
 import AppButton from '../../src/components/AppButton';
 import GameDashboardScreen from '../../src/screens/GameDashboardScreen';
-import { getGameBundle } from '../../src/db/repo';
+import { getGameBundle, reopenEndedGame } from '../../src/db/repo';
 import { aggregatePlayerTotalsQByTimeline } from '../../src/models/seatRotation';
 import { computeGameStats } from '../../src/models/gameStats';
 import { computeHkSettlement } from '../../src/domain/hk/settlement';
@@ -12,6 +12,7 @@ import { traditionalRules } from '../../test-support/gameRecord/fixtures';
 
 jest.mock('../../src/db/repo', () => ({
   getGameBundle: jest.fn(),
+  reopenEndedGame: jest.fn(),
 }));
 
 jest.mock('../../src/i18n/useAppLanguage', () => ({
@@ -32,6 +33,7 @@ jest.mock('@react-navigation/native', () => {
 });
 
 const mockedGetGameBundle = getGameBundle as jest.MockedFunction<typeof getGameBundle>;
+const mockedReopenEndedGame = reopenEndedGame as jest.MockedFunction<typeof reopenEndedGame>;
 
 function createEndedBundle() {
   return {
@@ -363,6 +365,7 @@ describe('GameDashboardScreen', () => {
   const navigation = {
     navigate: jest.fn(),
     goBack: jest.fn(),
+    replace: jest.fn(),
   } as any;
 
   beforeEach(() => {
@@ -444,6 +447,47 @@ describe('GameDashboardScreen', () => {
     expect(root.findByProps({ testID: 'hand-row-h1' })).toBeTruthy();
     expect(root.findByProps({ testID: 'hand-row-h2' })).toBeTruthy();
 
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('reopens an authoritative ended local game with stale guards and navigates to a fresh table', async () => {
+    const bundle = createAuthoritativeCanonicalBundle();
+    mockedGetGameBundle.mockResolvedValueOnce(bundle as any);
+    mockedReopenEndedGame.mockResolvedValueOnce({ ok: true, state: 'active', handsCount: 2, recordMutationVersion: 1 } as any);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'reopen', name: 'GameDashboard', params: { gameId: bundle.game.id } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const reopenButton = tree!.root.findByProps({ testID: 'dashboard-reopen' });
+    await act(async () => {
+      reopenButton.props.onPress();
+    });
+    const [, , buttons] = alertSpy.mock.calls[0];
+    const confirm = (buttons as Array<{ text: string; onPress?: () => void | Promise<void> }>).find(
+      (button) => button.text === '確認重新開啟',
+    );
+    expect(confirm).toBeTruthy();
+    await act(async () => {
+      await confirm?.onPress?.();
+    });
+
+    expect(mockedReopenEndedGame).toHaveBeenCalledWith({
+      gameId: bundle.game.id,
+      expectedHandsCount: 2,
+      expectedLastHandId: 'h2',
+      expectedEndedAt: bundle.game.endedAt,
+    });
+    expect(navigation.replace).toHaveBeenCalledWith('GameTable', { gameId: bundle.game.id });
+
+    alertSpy.mockRestore();
     await act(async () => {
       tree!.unmount();
     });

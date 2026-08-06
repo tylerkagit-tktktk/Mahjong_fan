@@ -32,6 +32,29 @@ export type LocalGameReopenPlanResult =
   | { ok: true; plan: LocalGameReopenPlan; issues: readonly [] }
   | { ok: false; plan: null; issues: readonly { code: LocalGameReopenErrorCode }[] };
 
+export type LocalGameReopenAvailabilityCode =
+  | 'AVAILABLE'
+  | 'GAME_NOT_ENDED'
+  | 'ABANDONED_NOT_SUPPORTED'
+  | 'NO_HAND'
+  | 'NOT_AUTHORITATIVE'
+  | 'STALE_SOURCE_DATA';
+
+export function getLocalGameReopenAvailability(input: {
+  bundle: GameBundle;
+  replayResult: LocalGameReplayResult | null;
+}): { code: LocalGameReopenAvailabilityCode; available: boolean } {
+  const { bundle, replayResult } = input;
+  if (bundle.game.gameState === 'abandoned') return { code: 'ABANDONED_NOT_SUPPORTED', available: false };
+  if (bundle.game.gameState !== 'ended') return { code: 'GAME_NOT_ENDED', available: false };
+  if (bundle.hands.length === 0) return { code: 'NO_HAND', available: false };
+  if (bundle.game.handsCount !== bundle.hands.length || bundle.game.endedAt == null) {
+    return { code: 'STALE_SOURCE_DATA', available: false };
+  }
+  if (!replayResult?.authoritative || !replayResult.replay?.summary) return { code: 'NOT_AUTHORITATIVE', available: false };
+  return { code: 'AVAILABLE', available: true };
+}
+
 function reject(code: LocalGameReopenErrorCode): LocalGameReopenPlanResult {
   return { ok: false, plan: null, issues: [{ code }] };
 }

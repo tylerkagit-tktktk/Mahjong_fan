@@ -59,6 +59,29 @@ export type LocalLastHandMutationPlanResult =
   | { ok: true; plan: LocalLastHandMutationPlan; issues: readonly [] }
   | { ok: false; plan: null; issues: readonly LocalLastHandMutationIssue[] };
 
+export type LocalLastHandCorrectionAvailabilityCode =
+  | 'AVAILABLE'
+  | 'GAME_NOT_ACTIVE'
+  | 'NO_HAND'
+  | 'NOT_AUTHORITATIVE'
+  | 'LAST_EFFECTIVE_EVENT_IS_BOUNDARY'
+  | 'STALE_SOURCE_DATA';
+
+export function getLocalLastHandCorrectionAvailability(input: {
+  bundle: GameBundle;
+  authoritative: boolean;
+}): { code: LocalLastHandCorrectionAvailabilityCode; available: boolean } {
+  const { bundle, authoritative } = input;
+  if (bundle.game.gameState !== 'active') return { code: 'GAME_NOT_ACTIVE', available: false };
+  if (bundle.hands.length === 0) return { code: 'NO_HAND', available: false };
+  if (bundle.game.handsCount !== bundle.hands.length) return { code: 'STALE_SOURCE_DATA', available: false };
+  if (!authoritative) return { code: 'NOT_AUTHORITATIVE', available: false };
+  if ((bundle.seatBoundaries ?? []).some((boundary) => boundary.effectiveFromHandIndex === bundle.hands.length)) {
+    return { code: 'LAST_EFFECTIVE_EVENT_IS_BOUNDARY', available: false };
+  }
+  return { code: 'AVAILABLE', available: true };
+}
+
 const WIND_INDEX: Record<string, number> = { 東: 0, 南: 1, 西: 2, 北: 3 };
 
 function reject(code: LocalLastHandMutationErrorCode): LocalLastHandMutationPlanResult {

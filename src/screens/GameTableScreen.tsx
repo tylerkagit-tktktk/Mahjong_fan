@@ -9,10 +9,12 @@ import AppButton from '../components/AppButton';
 import Card from '../components/Card';
 import PillGroup from '../components/PillGroup';
 import ScreenContainer from '../components/ScreenContainer';
-import { endGame, getGameBundle, insertHand, updateGamePlayerSeats } from '../db/repo';
+import { endGame, getGameBundle, insertHand, removeLastHand, replaceLastHand, updateGamePlayerSeats } from '../db/repo';
 import { computeHkSettlement, toAmountFromQ } from '../domain/hk/settlement';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { GameBundle } from '../models/db';
+import { replayLocalGameBundle } from '../services/localGameReplay';
+import { getLocalLastHandCorrectionAvailability } from '../domain/gameRecord/localMutation';
 import {
   getDealerSeatIndexForNextHand,
   getNextDealerSeatIndex,
@@ -26,6 +28,7 @@ import {
   resolveCurrencyCode,
 } from '../models/currency';
 import ReseatFlow from './gameTable/ReseatFlow';
+import LocalLastHandCorrectionModal from './gameTable/LocalLastHandCorrectionModal';
 import { buildPlayersBySeat, formatSeatLabel } from './gameTable/seatMapping';
 import {
   buildWrapToken,
@@ -128,6 +131,12 @@ function GameTableScreen({ route, navigation }: Props) {
   const [paytableMeta, setPaytableMeta] = useState<PaytableMeta | null>(null);
   const [reseatVisible, setReseatVisible] = useState(false);
   const [reseatAllowNameEdit, setReseatAllowNameEdit] = useState(true);
+  const [correctionVisible, setCorrectionVisible] = useState(false);
+  const [correctionPending, setCorrectionPending] = useState(false);
+  const [tableAuthoritative, setTableAuthoritative] = useState(false);
+  const [refreshBlocked, setRefreshBlocked] = useState(false);
+  const mountedRef = useRef(true);
+  const reloadRequestRef = useRef(0);
   const lastPromptedWrapTokenRef = useRef<string | null>(null);
   const wrapTokenLoadedRef = useRef(false);
   const wrapTokenLoadPromiseRef = useRef<Promise<void> | null>(null);
@@ -202,6 +211,11 @@ function GameTableScreen({ route, navigation }: Props) {
     })();
     await wrapTokenLoadPromiseRef.current;
   }, [gameId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     wrapTokenLoadedRef.current = false;
@@ -576,8 +590,14 @@ function GameTableScreen({ route, navigation }: Props) {
     return () => clearInterval(timer);
   }, []);
 
-  const loadTable = useCallback(async () => {
+  const loadTable = useCallback(async (requireAuthoritative = false) => {
+    const request = reloadRequestRef.current + 1;
+    reloadRequestRef.current = request;
     const nextBundle = await getGameBundle(gameId);
+    const replay = replayLocalGameBundle(nextBundle);
+    if (requireAuthoritative && !replay.authoritative) {
+      throw new Error('Local replay is not authoritative after saved mutation');
+    }
     const parsedRules = parseRules(nextBundle.game.rulesJson, normalizeVariant(nextBundle.game.variant));
     const nextTotalsQ: [number, number, number, number] = [0, 0, 0, 0];
 
@@ -591,12 +611,13 @@ function GameTableScreen({ route, navigation }: Props) {
       }
     }
 
+    if (!mountedRef.current || request !== reloadRequestRef.current) return;
     setBundle(nextBundle);
     setRules(parsedRules);
     setTotalsQ(nextTotalsQ);
-    setDealerSeatIndex(
-      getDealerSeatIndexForNextHand(nextBundle.game.startingDealerSeatIndex ?? 0, nextBundle.hands),
-    );
+    setDealerSeatIndex(getDealerSeatIndexForNextHand(nextBundle.game.startingDealerSeatIndex ?? 0, nextBundle.hands));
+    setTableAuthoritative(replay.authoritative);
+    setRefreshBlocked(false);
   }, [gameId]);
 
   useFocusEffect(
@@ -620,7 +641,7 @@ function GameTableScreen({ route, navigation }: Props) {
   );
 
   const openRecordModal = (seatIndex: number) => {
-    if (saving || isEnded) {
+    if (saving || isEnded || refreshBlocked) {
       return;
     }
     setError(null);
@@ -638,8 +659,101 @@ function GameTableScreen({ route, navigation }: Props) {
     setModalVisible(false);
   };
 
+  const correctionAvailability = useMemo(
+    () => bundle ? getLocalLastHandCorrectionAvailability({ bundle, authoritative: tableAuthoritative }) : null,
+    [bundle, tableAuthoritative],
+  );
+
+  const correctionUnavailableReason = correctionAvailability && !correctionAvailability.available
+    ? correctionAvailability.code === 'LAST_EFFECTIVE_EVENT_IS_BOUNDARY'
+      ? t('gameTable.correction.boundaryBlocked')
+      : t('gameTable.correction.unavailable')
+    : null;
+
+  const handleCorrectionReplace = useCallback(async (intent: {
+    outcome: 'discard' | 'zimo' | 'draw'; fan?: number; winnerPlayerId?: string; discarderPlayerId?: string; dealerAction?: 'stick' | 'pass';
+  }) => {
+    if (!bundle || correctionPending || !correctionAvailability?.available) return;
+    const last = bundle.hands.slice().sort((left, right) => left.handIndex - right.handIndex).at(-1);
+    if (!last) return;
+    setCorrectionPending(true);
+    try {
+      const result = await replaceLastHand({
+        action: 'replace', gameId: bundle.game.id, expectedHandId: last.id, expectedHandIndex: last.handIndex,
+        expectedHandsCount: bundle.hands.length, ...intent,
+      });
+      if (!result.ok) {
+        await loadTable();
+        if (!mountedRef.current) return;
+        setCorrectionVisible(false);
+        setError(t('gameTable.correction.stale'));
+        return;
+      }
+      try {
+        await loadTable(true);
+        if (!mountedRef.current) return;
+        setCorrectionVisible(false);
+        Alert.alert(t('gameTable.correction.saved'), t('gameTable.correction.savedMessage'));
+      } catch {
+        if (!mountedRef.current) return;
+        setRefreshBlocked(true);
+        setError(t('gameTable.correction.refreshFailed'));
+      }
+    } catch {
+      if (mountedRef.current) setError(t('gameTable.correction.failed'));
+    } finally {
+      if (mountedRef.current) setCorrectionPending(false);
+    }
+  }, [bundle, correctionAvailability?.available, correctionPending, loadTable, t]);
+
+  const handleCorrectionUndo = useCallback(() => {
+    if (!bundle || correctionPending || !correctionAvailability?.available) return;
+    const last = bundle.hands.slice().sort((left, right) => left.handIndex - right.handIndex).at(-1);
+    if (!last) return;
+    Alert.alert(t('gameTable.correction.undoTitle'), t('gameTable.correction.undoMessage'), [
+      { text: t('gameTable.draw.cancel'), style: 'cancel' },
+      { text: t('gameTable.correction.undo'), style: 'destructive', onPress: async () => {
+        setCorrectionPending(true);
+        try {
+          const result = await removeLastHand({ action: 'remove', gameId: bundle.game.id, expectedHandId: last.id, expectedHandIndex: last.handIndex, expectedHandsCount: bundle.hands.length });
+          if (!result.ok) {
+            await loadTable();
+            if (!mountedRef.current) return;
+            setCorrectionVisible(false);
+            setError(t('gameTable.correction.stale'));
+            return;
+          }
+          try {
+            await loadTable(true);
+            if (!mountedRef.current) return;
+            setCorrectionVisible(false);
+            Alert.alert(t('gameTable.correction.undoDone'), t('gameTable.correction.savedMessage'));
+          } catch {
+            if (!mountedRef.current) return;
+            setRefreshBlocked(true);
+            setError(t('gameTable.correction.refreshFailed'));
+          }
+        } catch {
+          if (mountedRef.current) setError(t('gameTable.correction.failed'));
+        }
+        finally { if (mountedRef.current) setCorrectionPending(false); }
+      } },
+    ]);
+  }, [bundle, correctionAvailability?.available, correctionPending, loadTable, t]);
+
+  const retryAuthoritativeReload = useCallback(async () => {
+    try {
+      await loadTable(true);
+      if (mountedRef.current) setError(null);
+    } catch {
+      if (!mountedRef.current) return;
+      setRefreshBlocked(true);
+      setError(t('gameTable.correction.refreshFailed'));
+    }
+  }, [loadTable, t]);
+
   const saveHand = async () => {
-    if (!bundle || !rules || saving || isEnded) {
+    if (!bundle || !rules || saving || isEnded || refreshBlocked) {
       return;
     }
 
@@ -765,7 +879,7 @@ function GameTableScreen({ route, navigation }: Props) {
   };
 
   const saveDrawHand = async (dealerAction: DrawDealerAction) => {
-    if (!bundle || saving || isEnded) {
+    if (!bundle || saving || isEnded || refreshBlocked) {
       return;
     }
 
@@ -829,7 +943,7 @@ function GameTableScreen({ route, navigation }: Props) {
   };
 
   const handleEndGame = () => {
-    if (!bundle || saving || endingGameRef.current || isEnded) {
+    if (!bundle || saving || endingGameRef.current || isEnded || refreshBlocked) {
       return;
     }
 
@@ -873,7 +987,7 @@ function GameTableScreen({ route, navigation }: Props) {
   };
 
   const handleDrawActionPress = () => {
-    if (!bundle || saving || endingGame || isEnded) {
+    if (!bundle || saving || endingGame || isEnded || refreshBlocked) {
       return;
     }
     Alert.alert(t('gameTable.draw.title'), t('gameTable.draw.message'), [
@@ -985,7 +1099,7 @@ function GameTableScreen({ route, navigation }: Props) {
                         amount={totalsQ[seatIndex] / 4}
                         isDealer={seatIndex === dealerSeatIndex}
                         onPress={() => openRecordModal(seatIndex)}
-                        disabled={saving || isEnded}
+                        disabled={saving || isEnded || refreshBlocked}
                         currencyCode={currencyCode}
                         style={panelStyleBySeat[seatIndex]}
                       />
@@ -1002,20 +1116,41 @@ function GameTableScreen({ route, navigation }: Props) {
           {footerLabel ? <AppText style={styles.elapsedText}>{footerLabel}</AppText> : null}
 
           <View style={styles.footerButtonsRow}>
+            {bundle && bundle.game.gameState === 'active' && bundle.hands.length > 0 ? (
+              <AppButton
+                label={t('gameTable.correction.action')}
+                onPress={() => setCorrectionVisible(true)}
+                disabled={saving || correctionPending || refreshBlocked}
+                variant="secondary"
+                style={styles.footerButton}
+                testID="local-last-hand-correction"
+                accessibilityLabel={t('gameTable.correction.action')}
+              />
+            ) : null}
             <AppButton
               label={t('gameTable.action.draw')}
               onPress={handleDrawActionPress}
-              disabled={saving || !bundle || isEnded}
+              disabled={saving || !bundle || isEnded || refreshBlocked}
               variant="secondary"
               style={styles.footerButton}
             />
             <AppButton
               label={t('gameTable.action.endGame')}
               onPress={handleEndGame}
-              disabled={saving || endingGame || isEnded}
+              disabled={saving || endingGame || isEnded || refreshBlocked}
               style={styles.footerButton}
             />
           </View>
+          {refreshBlocked ? (
+            <AppButton
+              label={t('gameTable.correction.retry')}
+              onPress={retryAuthoritativeReload}
+              disabled={correctionPending}
+              variant="secondary"
+              testID="local-last-hand-retry-reload"
+              accessibilityLabel={t('gameTable.correction.retry')}
+            />
+          ) : null}
         </View>
       </View>
 
@@ -1120,6 +1255,21 @@ function GameTableScreen({ route, navigation }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <LocalLastHandCorrectionModal
+        visible={correctionVisible}
+        hand={bundle?.hands.slice().sort((left, right) => left.handIndex - right.handIndex).at(-1) ?? null}
+        players={bundle?.players ?? []}
+        minFan={minFanInput}
+        maxFan={maxFanInput}
+        pending={correctionPending}
+        unavailableReason={correctionUnavailableReason}
+        onDismiss={() => {
+          if (!correctionPending) setCorrectionVisible(false);
+        }}
+        onReplace={handleCorrectionReplace}
+        onUndo={handleCorrectionUndo}
+      />
 
       <ReseatFlow
         visible={reseatVisible}

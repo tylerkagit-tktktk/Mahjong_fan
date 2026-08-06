@@ -1,9 +1,17 @@
 import { SQLiteDatabase } from 'react-native-sqlite-storage';
 import { INITIAL_ROUND_LABEL_ZH } from '../constants/game';
 
-export const CURRENT_SCHEMA_VERSION = 301;
+const SCHEMA_VERSION_301 = 301;
+export const CURRENT_SCHEMA_VERSION = 302;
 
-const APP_OWNED_TABLES = ['games', 'players', 'hands', 'cloud_archives', 'game_seat_boundaries'] as const;
+const APP_OWNED_TABLES = [
+  'games',
+  'players',
+  'hands',
+  'cloud_archives',
+  'game_seat_boundaries',
+  'game_hand_revisions',
+] as const;
 const APP_OWNED_INDEXES = [
   'idx_hands_game_handIndex',
   'idx_games_createdAt',
@@ -12,6 +20,7 @@ const APP_OWNED_INDEXES = [
   'idx_games_endedAt',
   'idx_games_resultStatus',
   'idx_game_seat_boundaries_game_effective',
+  'idx_game_hand_revisions_game_revision',
 ] as const;
 
 export const APP_OWNED_SCHEMA_OBJECTS = {
@@ -139,6 +148,22 @@ const TABLES = [
     FOREIGN KEY (gameId) REFERENCES games(id) ON DELETE CASCADE,
     UNIQUE (gameId, effectiveFromHandIndex)
   );`,
+  `CREATE TABLE IF NOT EXISTS game_hand_revisions(
+    id TEXT PRIMARY KEY NOT NULL,
+    gameId TEXT NOT NULL,
+    revisionIndex INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    targetHandId TEXT NOT NULL,
+    targetHandIndex INTEGER NOT NULL,
+    beforeHandJson TEXT NOT NULL,
+    afterHandJson TEXT NULL,
+    actorType TEXT NOT NULL,
+    actorId TEXT NULL,
+    reason TEXT NULL,
+    createdAt INTEGER NOT NULL,
+    FOREIGN KEY (gameId) REFERENCES games(id) ON DELETE CASCADE,
+    UNIQUE (gameId, revisionIndex)
+  );`,
 ];
 
 const INDICES = [
@@ -149,6 +174,7 @@ const INDICES = [
   'CREATE INDEX IF NOT EXISTS idx_games_endedAt ON games(endedAt);',
   'CREATE INDEX IF NOT EXISTS idx_games_resultStatus ON games(resultStatus);',
   'CREATE INDEX IF NOT EXISTS idx_game_seat_boundaries_game_effective ON game_seat_boundaries(gameId, effectiveFromHandIndex);',
+  'CREATE INDEX IF NOT EXISTS idx_game_hand_revisions_game_revision ON game_hand_revisions(gameId, revisionIndex);',
 ];
 
 type SchemaObjectRow = { name: string; type: string };
@@ -169,6 +195,10 @@ export async function initializeSchema(db: SQLiteDatabase): Promise<void> {
 
     if (detectedVersion === 300) {
       await migrateSchema300To301(db);
+      detectedVersion = SCHEMA_VERSION_301;
+    }
+    if (detectedVersion === SCHEMA_VERSION_301) {
+      await migrateSchema301To302(db);
       return;
     }
 
@@ -255,12 +285,24 @@ export async function migrateSchema300To301(db: SQLiteDatabase): Promise<void> {
     await ensureColumn(db, 'games', 'seatBoundaryHistoryMode', "TEXT NOT NULL DEFAULT 'explicit'");
     await ensureColumn(db, 'games', 'initialSeatMappingJson', 'TEXT NULL');
     await db.executeSql("UPDATE games SET seatBoundaryHistoryMode = 'legacy_inferred';");
-    await db.executeSql(TABLES[TABLES.length - 1]);
-    await db.executeSql(INDICES[INDICES.length - 1]);
-    await verifyRequiredTables(db);
+    await db.executeSql(TABLES[4]);
+    await db.executeSql(INDICES[6]);
+    await verifyRequiredTables(db, APP_OWNED_TABLES.filter((table) => table !== 'game_hand_revisions'));
     await verifyRequiredColumns(db, 'games', ['seatBoundaryHistoryMode', 'initialSeatMappingJson']);
-    await verifyRequiredIndexes(db);
+    await verifyRequiredIndexes(db, APP_OWNED_INDEXES.filter((index) => index !== 'idx_game_hand_revisions_game_revision'));
     // Stamp only after every migration operation and verification succeeds.
+    await db.executeSql(`PRAGMA user_version = ${SCHEMA_VERSION_301};`);
+  });
+}
+
+/** Version 302 adds immutable audit records without altering existing game timeline data. */
+export async function migrateSchema301To302(db: SQLiteDatabase): Promise<void> {
+  await runSchemaTransaction(db, async () => {
+    await db.executeSql(TABLES[5]);
+    await db.executeSql(INDICES[7]);
+    await verifyRequiredTables(db);
+    await verifyRequiredIndexes(db);
+    // Stamp only after revision storage and its index have both been verified.
     await db.executeSql(`PRAGMA user_version = ${CURRENT_SCHEMA_VERSION};`);
   });
 }
@@ -296,12 +338,15 @@ async function dropAppOwnedSchema(db: SQLiteDatabase): Promise<void> {
   for (const index of APP_OWNED_INDEXES) {
     await db.executeSql(`DROP INDEX IF EXISTS ${index};`);
   }
-  for (const table of ['game_seat_boundaries', 'hands', 'players', 'cloud_archives', 'games'] as const) {
+  for (const table of ['game_hand_revisions', 'game_seat_boundaries', 'hands', 'players', 'cloud_archives', 'games'] as const) {
     await db.executeSql(`DROP TABLE IF EXISTS ${table};`);
   }
 }
 
-async function verifyRequiredTables(db: SQLiteDatabase): Promise<void> {
+async function verifyRequiredTables(
+  db: SQLiteDatabase,
+  requiredTables: readonly string[] = APP_OWNED_TABLES,
+): Promise<void> {
   const [result] = await db.executeSql(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';",
   );
@@ -310,7 +355,7 @@ async function verifyRequiredTables(db: SQLiteDatabase): Promise<void> {
     const row = result.rows.item(index) as { name: string };
     existingTables.add(row.name);
   }
-  const missingTables = APP_OWNED_TABLES.filter((table) => !existingTables.has(table));
+  const missingTables = requiredTables.filter((table) => !existingTables.has(table));
   if (missingTables.length > 0) {
     throw new Error(`Required SQLite tables are missing: ${missingTables.join(', ')}.`);
   }
@@ -332,7 +377,10 @@ async function verifyRequiredColumns(
   }
 }
 
-async function verifyRequiredIndexes(db: SQLiteDatabase): Promise<void> {
+async function verifyRequiredIndexes(
+  db: SQLiteDatabase,
+  requiredIndexes: readonly string[] = APP_OWNED_INDEXES,
+): Promise<void> {
   const [result] = await db.executeSql(
     "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%';",
   );
@@ -340,7 +388,7 @@ async function verifyRequiredIndexes(db: SQLiteDatabase): Promise<void> {
   for (let index = 0; index < result.rows.length; index += 1) {
     existingIndexes.add(String((result.rows.item(index) as { name: string }).name));
   }
-  const missingIndexes = APP_OWNED_INDEXES.filter((index) => !existingIndexes.has(index));
+  const missingIndexes = requiredIndexes.filter((index) => !existingIndexes.has(index));
   if (missingIndexes.length > 0) {
     throw new Error(`Required SQLite indexes are missing: ${missingIndexes.join(', ')}.`);
   }

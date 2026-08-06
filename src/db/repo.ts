@@ -3,12 +3,20 @@ import {
   Game,
   GameBundle,
   Hand,
+  LocalHandRevision,
+  LocalHandRevisionSnapshotV1,
   LocalSeatBoundary,
   NewGameInput,
   NewHandInput,
   NewPlayerInput,
   Player,
 } from '../models/db';
+import {
+  planLocalLastHandMutation,
+  type LocalLastHandMutationErrorCode,
+  type RemoveLastHandInput,
+  type ReplaceLastHandInput,
+} from '../domain/gameRecord/localMutation';
 import { getRoundLabel } from '../models/dealer';
 import {
   aggregatePlayerTotalsQByTimeline,
@@ -62,6 +70,44 @@ function normalizeSeatBoundaries(result: ResultSet): LocalSeatBoundary[] {
     reason: row.reason,
     createdAt: Number(row.createdAt),
   }));
+}
+
+function parseRevisionSnapshot(raw: string, context: string): LocalHandRevisionSnapshotV1 {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('snapshot must be an object');
+    const snapshot = parsed as { version?: unknown; hand?: unknown };
+    if (snapshot.version !== 1 || !snapshot.hand || typeof snapshot.hand !== 'object' || Array.isArray(snapshot.hand)) {
+      throw new Error('unsupported revision snapshot');
+    }
+    const hand = snapshot.hand as Hand;
+    if (
+      typeof hand.id !== 'string' || typeof hand.gameId !== 'string' || !Number.isInteger(hand.handIndex) ||
+      !Number.isInteger(hand.dealerSeatIndex) || typeof hand.computedJson !== 'string' ||
+      typeof hand.createdAt !== 'number' || !Number.isFinite(hand.createdAt)
+    ) throw new Error('snapshot hand is malformed');
+    return { version: 1, hand: { ...hand, isDraw: Boolean(hand.isDraw) } };
+  } catch (error) {
+    throw new Error(`REVISION_SNAPSHOT_INVALID: ${context}: ${error instanceof Error ? error.message : 'JSON parsing failed'}`);
+  }
+}
+
+function normalizeHandRevisions(result: ResultSet): LocalHandRevision[] {
+  return rowsToArray<Omit<LocalHandRevision, 'before' | 'after'> & { beforeHandJson: string; afterHandJson: string | null }>(result)
+    .map((row) => ({
+      id: row.id,
+      gameId: row.gameId,
+      revisionIndex: Number(row.revisionIndex),
+      action: row.action,
+      targetHandId: row.targetHandId,
+      targetHandIndex: Number(row.targetHandIndex),
+      before: parseRevisionSnapshot(row.beforeHandJson, `revision ${row.id} before`),
+      after: row.afterHandJson === null ? null : parseRevisionSnapshot(row.afterHandJson, `revision ${row.id} after`),
+      actorType: row.actorType,
+      actorId: row.actorId ?? null,
+      reason: row.reason ?? null,
+      createdAt: Number(row.createdAt),
+    }));
 }
 
 function buildSeatMapping(players: readonly Pick<Player, 'id' | 'seatIndex'>[]): Record<number, string> {
@@ -607,6 +653,168 @@ export async function getGameBundle(gameId: string): Promise<GameBundle> {
     };
   } catch (error) {
     const wrapped = normalizeError(error, 'getGameBundle failed');
+    console.error('[DB]', wrapped);
+    throw wrapped;
+  }
+}
+
+export async function getGameHandRevisions(gameId: string): Promise<LocalHandRevision[]> {
+  try {
+    if (isDev) setBreadcrumb('Repo: getGameHandRevisions', { gameId });
+    const result = await executeSql(
+      'SELECT * FROM game_hand_revisions WHERE gameId = ? ORDER BY revisionIndex ASC;',
+      [gameId],
+    );
+    return normalizeHandRevisions(result);
+  } catch (error) {
+    const wrapped = normalizeError(error, 'getGameHandRevisions failed');
+    console.error('[DB]', wrapped);
+    throw wrapped;
+  }
+}
+
+async function getGameBundleWithTx(gameId: string, executeTx: TxExecute): Promise<GameBundle | null> {
+  const gameResult = await executeTx('SELECT * FROM games WHERE id = ? LIMIT 1;', [gameId]);
+  const games = rowsToArray<Game>(gameResult);
+  if (games.length === 0) return null;
+  const [playersResult, handsResult, boundariesResult] = await Promise.all([
+    executeTx('SELECT * FROM players WHERE gameId = ? ORDER BY seatIndex ASC;', [gameId]),
+    executeTx('SELECT * FROM hands WHERE gameId = ? ORDER BY handIndex ASC;', [gameId]),
+    executeTx(
+      'SELECT * FROM game_seat_boundaries WHERE gameId = ? ORDER BY effectiveFromHandIndex ASC, id ASC;',
+      [gameId],
+    ),
+  ]);
+  return {
+    game: games[0],
+    players: rowsToArray<Player>(playersResult),
+    hands: normalizeHands(handsResult),
+    seatBoundaries: normalizeSeatBoundaries(boundariesResult),
+  };
+}
+
+function serializeRevisionSnapshot(hand: Hand): string {
+  try {
+    const raw = JSON.stringify({ version: 1, hand });
+    if (!raw) throw new Error('serialization returned empty output');
+    parseRevisionSnapshot(raw, 'new revision');
+    return raw;
+  } catch (error) {
+    throw new Error(`REVISION_SNAPSHOT_INVALID: ${error instanceof Error ? error.message : 'serialization failed'}`);
+  }
+}
+
+export type LocalHandMutationResult =
+  | {
+      ok: true;
+      action: 'replace' | 'remove';
+      hand: Hand | null;
+      revision: LocalHandRevision;
+    }
+  | {
+      ok: false;
+      code: LocalLastHandMutationErrorCode;
+    };
+
+async function mutateLastHandInTransaction(
+  action: ReplaceLastHandInput | RemoveLastHandInput,
+  executeTx: TxExecute,
+  now: () => number,
+): Promise<LocalHandMutationResult> {
+  const bundle = await getGameBundleWithTx(action.gameId, executeTx);
+  if (!bundle) return { ok: false, code: 'GAME_NOT_FOUND' };
+  const planned = planLocalLastHandMutation({ bundle, action });
+  if (!planned.ok) return { ok: false, code: planned.issues[0].code };
+  const plan = planned.plan;
+  const beforeHandJson = serializeRevisionSnapshot(plan.beforeHand);
+  const afterHandJson = plan.afterHand ? serializeRevisionSnapshot(plan.afterHand) : null;
+  const revisionResult = await executeTx(
+    'SELECT COALESCE(MAX(revisionIndex), -1) AS maxRevisionIndex FROM game_hand_revisions WHERE gameId = ?;',
+    [plan.gameId],
+  );
+  const maxRevisionIndex = Number(
+    (revisionResult.rows.item(0) as { maxRevisionIndex?: number | null } | undefined)?.maxRevisionIndex ?? -1,
+  );
+  const revisionIndex = maxRevisionIndex + 1;
+  const revisionCreatedAt = now();
+
+  if (plan.afterHand) {
+    const hand = plan.afterHand;
+    await executeTx(
+      `UPDATE hands
+       SET dealerSeatIndex = ?, windIndex = ?, roundNumber = ?, isDraw = ?, winnerSeatIndex = ?, type = ?,
+           winnerPlayerId = ?, discarderPlayerId = ?, inputValue = ?, deltasJson = ?, nextRoundLabelZh = ?, computedJson = ?
+       WHERE id = ? AND gameId = ? AND handIndex = ?;`,
+      [
+        hand.dealerSeatIndex, hand.windIndex, hand.roundNumber, hand.isDraw ? 1 : 0, hand.winnerSeatIndex ?? null,
+        hand.type, hand.winnerPlayerId ?? null, hand.discarderPlayerId ?? null, hand.inputValue ?? null,
+        hand.deltasJson ?? null, hand.nextRoundLabelZh ?? null, hand.computedJson,
+        hand.id, hand.gameId, hand.handIndex,
+      ],
+    );
+  } else {
+    await executeTx('DELETE FROM hands WHERE id = ? AND gameId = ? AND handIndex = ?;', [
+      plan.beforeHand.id,
+      plan.beforeHand.gameId,
+      plan.beforeHand.handIndex,
+    ]);
+  }
+
+  await executeTx(
+    `UPDATE games
+     SET handsCount = ?, currentRoundLabelZh = ?, gameState = 'active', endedAt = NULL,
+         resultStatus = 'none', resultSummaryJson = NULL, resultUpdatedAt = NULL
+     WHERE id = ?;`,
+    [plan.nextHandsCount, plan.nextRoundLabelZh, plan.gameId],
+  );
+  const revision: LocalHandRevision = {
+    id: `${plan.gameId}:revision:${revisionIndex}`,
+    gameId: plan.gameId,
+    revisionIndex,
+    action: plan.action,
+    targetHandId: plan.beforeHand.id,
+    targetHandIndex: plan.beforeHand.handIndex,
+    before: parseRevisionSnapshot(beforeHandJson, 'new revision before'),
+    after: afterHandJson ? parseRevisionSnapshot(afterHandJson, 'new revision after') : null,
+    actorType: 'local_user',
+    actorId: null,
+    reason: plan.reason,
+    createdAt: revisionCreatedAt,
+  };
+  await executeTx(
+    `INSERT INTO game_hand_revisions
+     (id, gameId, revisionIndex, action, targetHandId, targetHandIndex, beforeHandJson, afterHandJson, actorType, actorId, reason, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+    [
+      revision.id, revision.gameId, revision.revisionIndex, revision.action, revision.targetHandId,
+      revision.targetHandIndex, beforeHandJson, afterHandJson, revision.actorType, revision.actorId,
+      revision.reason, revision.createdAt,
+    ],
+  );
+  return { ok: true, action: plan.action, hand: plan.afterHand, revision };
+}
+
+export async function replaceLastHand(input: ReplaceLastHandInput): Promise<LocalHandMutationResult> {
+  try {
+    if (isDev) setBreadcrumb('Repo: replaceLastHand', { gameId: input.gameId, expectedHandIndex: input.expectedHandIndex });
+    return await runExplicitWriteTransaction('replaceLastHand', (executeTx) =>
+      mutateLastHandInTransaction(input, executeTx, Date.now),
+    );
+  } catch (error) {
+    const wrapped = normalizeError(error, 'replaceLastHand failed');
+    console.error('[DB]', wrapped);
+    throw wrapped;
+  }
+}
+
+export async function removeLastHand(input: RemoveLastHandInput): Promise<LocalHandMutationResult> {
+  try {
+    if (isDev) setBreadcrumb('Repo: removeLastHand', { gameId: input.gameId, expectedHandIndex: input.expectedHandIndex });
+    return await runExplicitWriteTransaction('removeLastHand', (executeTx) =>
+      mutateLastHandInTransaction(input, executeTx, Date.now),
+    );
+  } catch (error) {
+    const wrapped = normalizeError(error, 'removeLastHand failed');
     console.error('[DB]', wrapped);
     throw wrapped;
   }

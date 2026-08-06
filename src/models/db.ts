@@ -46,6 +46,29 @@ export type LocalSeatBoundary = {
   createdAt: number;
 };
 
+export type LocalHandRevisionAction = 'replace' | 'remove';
+
+/** Immutable raw storage snapshot, intentionally independent from UI hand-entry inputs. */
+export type LocalHandRevisionSnapshotV1 = {
+  version: 1;
+  hand: Hand;
+};
+
+export type LocalHandRevision = {
+  id: string;
+  gameId: string;
+  revisionIndex: number;
+  action: LocalHandRevisionAction;
+  targetHandId: string;
+  targetHandIndex: number;
+  before: LocalHandRevisionSnapshotV1;
+  after: LocalHandRevisionSnapshotV1 | null;
+  actorType: 'local_user';
+  actorId: string | null;
+  reason: string | null;
+  createdAt: number;
+};
+
 export type Player = {
   id: string;
   gameId: string;

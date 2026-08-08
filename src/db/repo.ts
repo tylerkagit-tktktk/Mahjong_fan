@@ -19,12 +19,7 @@ import {
   type RemoveLastHandInput,
   type ReplaceLastHandInput,
 } from '../domain/gameRecord/localMutation';
-import {
-  planReopenLocalGame,
-  type LocalGameReopenErrorCode,
-  type ReopenLocalGameInput,
-} from '../domain/gameRecord/localLifecycle';
-import { replayLocalGameBundle } from '../services/localGameReplay';
+import { isLocalGameMutable } from '../domain/gameRecord/localLifecycle';
 import { getRoundLabel } from '../models/dealer';
 import {
   aggregatePlayerTotalsQByTimeline,
@@ -222,7 +217,6 @@ type SqlParam = string | number | null;
 
 type TxExecute = (statement: string, params?: SqlParam[]) => Promise<ResultSet>;
 
-const MUTABLE_GAME_STATES: ReadonlySet<string> = new Set(['draft', 'active']);
 const MUTATION_BLOCKED_ERROR = 'Cannot mutate ended or abandoned game';
 const INTERNAL_BACKUPS_KEY = 'db_internal_backups_v1';
 const INTERNAL_BACKUPS_LIMIT = 5;
@@ -279,7 +273,7 @@ function getKeyValueStorage(): KeyValueStorage {
 }
 
 function assertGameMutable(gameState: string | null | undefined, endedAt: number | null | undefined): void {
-  if (endedAt != null || !MUTABLE_GAME_STATES.has(gameState ?? '')) {
+  if (!isLocalGameMutable({ gameState: gameState as Game['gameState'], endedAt: endedAt ?? null })) {
     throw new Error(MUTATION_BLOCKED_ERROR);
   }
 }
@@ -763,17 +757,6 @@ function serializeRevisionSnapshot(hand: Hand): string {
   }
 }
 
-function serializeLifecycleSnapshot(game: Game): string {
-  try {
-    const raw = JSON.stringify({ version: 1, game });
-    if (!raw) throw new Error('serialization returned empty output');
-    parseLifecycleSnapshot(raw, 'new revision');
-    return raw;
-  } catch (error) {
-    throw new Error(`LIFECYCLE_SNAPSHOT_INVALID: ${error instanceof Error ? error.message : 'serialization failed'}`);
-  }
-}
-
 export type LocalHandMutationResult =
   | {
       ok: true;
@@ -889,99 +872,6 @@ export async function removeLastHand(input: RemoveLastHandInput): Promise<LocalH
     );
   } catch (error) {
     const wrapped = normalizeError(error, 'removeLastHand failed');
-    console.error('[DB]', wrapped);
-    throw wrapped;
-  }
-}
-
-export type LocalGameReopenResult =
-  | {
-      ok: true;
-      gameId: string;
-      state: 'active';
-      handsCount: number;
-      currentRoundLabelZh: string;
-      recordMutationVersion: number;
-      lifecycleRevision: LocalGameLifecycleRevision;
-    }
-  | { ok: false; code: LocalGameReopenErrorCode | 'GAME_NOT_FOUND' };
-
-async function reopenEndedGameInTransaction(
-  input: ReopenLocalGameInput,
-  executeTx: TxExecute,
-  now: () => number,
-): Promise<LocalGameReopenResult> {
-  const bundle = await getGameBundleWithTx(input.gameId, executeTx);
-  if (!bundle) return { ok: false, code: 'GAME_NOT_FOUND' };
-  const planResult = planReopenLocalGame({
-    bundle,
-    replayResult: replayLocalGameBundle(bundle),
-    action: input,
-  });
-  if (!planResult.ok) return { ok: false, code: planResult.issues[0].code };
-  const plan = planResult.plan;
-  const currentMutationVersion = Number(bundle.game.recordMutationVersion ?? 0);
-  const recordMutationVersion = currentMutationVersion + 1;
-  const lifecycleResult = await executeTx(
-    'SELECT COALESCE(MAX(lifecycleRevisionIndex), -1) AS maxLifecycleRevisionIndex FROM game_lifecycle_revisions WHERE gameId = ?;',
-    [plan.gameId],
-  );
-  const lifecycleRevisionIndex = Number(
-    (lifecycleResult.rows.item(0) as { maxLifecycleRevisionIndex?: number | null } | undefined)?.maxLifecycleRevisionIndex ?? -1,
-  ) + 1;
-  const afterGame: Game = { ...plan.afterGame, recordMutationVersion };
-  const beforeGameJson = serializeLifecycleSnapshot(plan.beforeGame);
-  const afterGameJson = serializeLifecycleSnapshot(afterGame);
-  const createdAt = now();
-  await executeTx(
-    `UPDATE games
-     SET gameState = 'active', endedAt = NULL, resultStatus = 'none', resultSummaryJson = NULL,
-         resultUpdatedAt = NULL, handsCount = ?, currentRoundLabelZh = ?, recordMutationVersion = ?
-     WHERE id = ?;`,
-    [plan.handsCount, plan.currentRoundLabelZh, recordMutationVersion, plan.gameId],
-  );
-  const lifecycleRevision: LocalGameLifecycleRevision = {
-    id: `${plan.gameId}:lifecycle-revision:${lifecycleRevisionIndex}`,
-    gameId: plan.gameId,
-    lifecycleRevisionIndex,
-    recordMutationVersion,
-    action: 'reopen',
-    before: parseLifecycleSnapshot(beforeGameJson, 'new lifecycle revision before'),
-    after: parseLifecycleSnapshot(afterGameJson, 'new lifecycle revision after'),
-    actorType: 'local_user',
-    actorId: null,
-    reason: plan.reason,
-    createdAt,
-  };
-  await executeTx(
-    `INSERT INTO game_lifecycle_revisions
-     (id, gameId, lifecycleRevisionIndex, recordMutationVersion, action, beforeGameJson, afterGameJson, actorType, actorId, reason, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-    [
-      lifecycleRevision.id, lifecycleRevision.gameId, lifecycleRevision.lifecycleRevisionIndex,
-      lifecycleRevision.recordMutationVersion, lifecycleRevision.action, beforeGameJson, afterGameJson,
-      lifecycleRevision.actorType, lifecycleRevision.actorId, lifecycleRevision.reason, lifecycleRevision.createdAt,
-    ],
-  );
-  return {
-    ok: true,
-    gameId: plan.gameId,
-    state: 'active',
-    handsCount: plan.handsCount,
-    currentRoundLabelZh: plan.currentRoundLabelZh,
-    recordMutationVersion,
-    lifecycleRevision,
-  };
-}
-
-export async function reopenEndedGame(input: ReopenLocalGameInput): Promise<LocalGameReopenResult> {
-  try {
-    if (isDev) setBreadcrumb('Repo: reopenEndedGame', { gameId: input.gameId, expectedHandsCount: input.expectedHandsCount });
-    return await runExplicitWriteTransaction('reopenEndedGame', (executeTx) =>
-      reopenEndedGameInTransaction(input, executeTx, Date.now),
-    );
-  } catch (error) {
-    const wrapped = normalizeError(error, 'reopenEndedGame failed');
     console.error('[DB]', wrapped);
     throw wrapped;
   }

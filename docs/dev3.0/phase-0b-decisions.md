@@ -2,7 +2,7 @@
 
 ## Product theme
 
-**可信牌局：可修正、可復原、可帶走** — internal theme: **Reliable Game Records**.
+**可信牌局：可修正、可追溯、可分享** — internal theme: **Reliable Game Records**.
 
 Phase 1 begins only after the existing local record behavior is characterized. It must not introduce a second interpretation of settlement, dealer progression, player identity, or result summaries.
 
@@ -86,13 +86,10 @@ Phase 1A implements the replay-core categories through `DEALER_STATE_MISMATCH`. 
 - Arbitrary historical editing, middle insertion and redo are out of scope.
 - Any later implementation must derive all affected values through canonical replay and commit the mutation atomically.
 
-## Local reopen lifecycle
+## Local terminal lifecycle
 
-- `ended` may become `active` only through explicit user action.
-- Reopen invalidates the old `resultSummaryJson`/result snapshot before correction.
-- The user must manually end the game again after correction.
-- `abandoned` cannot reopen in 3.0.
-- A zero-hand end remains `abandoned` under current behavior (`src/db/repo.ts:1423-1456`), so it has no correction/reopen path.
+- This section was superseded by Phase 1I: local `ended` and `abandoned` games are permanently terminal and cannot become `active` again.
+- A zero-hand end remains `abandoned`, and both terminal states have no recording, correction, undo, or reopen path.
 
 ## Multiplayer correction policy
 
@@ -317,22 +314,20 @@ This phase is read-only. It does not change `GameTableScreen`, hand/result write
 - The typed guard results distinguish inactive/no-hand/stale/count-mismatch/later-boundary/non-authoritative/invalid-input/prospective-replay failures. A boundary at the old `handsCount` is a later effective event and blocks correction; one effective at the target hand starts before that hand and is retained. Ended/abandoned reopening, arbitrary history edits, redo, UI wiring, revision UI/export, Cloud/Firestore, multiplayer, and backup changes remain excluded.
 - Real SQLite tests cover schema chain/cascade/rollback and repository replace/remove/revision/rollback behavior; pure tests cover canonical replace/remove, intent validation, stale targets, post-hand boundaries, non-authoritative data, determinism and input immutability. Mutation is now available only as a repository runtime capability; no existing screen calls it.
 
-## Phase 1F Ended Game Reopen Outcome
+## Phase 1F Historical Ended Game Reopen Outcome (superseded by Phase 1I)
 
 - Current schema is `303`: `300` is the replay foundation, `301` explicit seat boundaries, `302` immutable local hand revisions, and `303` lifecycle revisions plus shared mutation order. Migration chains `300 → 301 → 302 → 303`, `301 → 302 → 303`, and `302 → 303` are non-destructive. The 303 migration backfills every hand revision by `revisionIndex + 1` and sets each game `recordMutationVersion` to its last hand-revision version before creating the lifecycle audit objects.
-- `games.recordMutationVersion` is the committed, per-game sequence shared by Phase 1E replace/remove and Phase 1F reopen. Ordinary hand insertion and reseat do not increment it. Hand revisions retain their separate zero-based `revisionIndex`, while `recordMutationVersion` is one-based and unique per game across the hand and lifecycle revision tables.
-- `game_lifecycle_revisions` stores immutable `reopen` audits with `LocalGameLifecycleSnapshotV1` `{ version: 1, game: Game }` before/after snapshots, a lifecycle-only index, shared mutation version, local-user actor/null ID, optional reason and timestamp. `getGameLifecycleRevisions` orders by lifecycle index and rejects malformed snapshots rather than silently omitting audit data.
-- `planReopenLocalGame` is pure and deterministic. It accepts only stale guards (`gameId`, hand count, last hand ID, ended timestamp) and reason, requires an authoritative ended replay with exact required parity/result-summary parity, derives the next round label, and clears terminal cache fields. It neither reads storage nor uses time, randomness, UI or Firebase.
-- `reopenEndedGame` runs under the existing write lock and `BEGIN IMMEDIATE`, reloads the complete local bundle in-transaction, applies the planner, clears `endedAt`, `resultStatus`, `resultSummaryJson` and `resultUpdatedAt`, leaves hands/players/boundaries/hand revisions/rules/dealer untouched, increments the shared mutation version, and inserts its lifecycle revision atomically. A final boundary at `handsCount` remains intact for the next active hand.
-- Only explicit authoritative `ended → active` is available. Active, abandoned, zero-hand, stale, corrupt/non-authoritative and result-summary-mismatched games are rejected with typed codes. No startup/dashboard automatic reopen exists. Real SQLite tests cover cache invalidation, audit snapshots, shared ordering, rollback, second reopen rejection, abandoned rejection, and reopening followed by a hand mutation/new end result. UI, navigation, Cloud/Firestore, multiplayer, redo/restore, backup/export and revision screens remain out of scope.
+- Schema `303` remains unchanged for compatibility. It introduced lifecycle revision storage and the shared mutation-order field; its non-destructive migrations remain part of the supported migration chain.
+- The old `reopen` audit value, snapshot parser, table, and read API remain only so existing schema-303 rows stay readable. Phase 1I removes every production lifecycle writer and does not alter historical rows.
+- The old reopen planner/repository/UI flow and its tests were removed. `recordMutationVersion` remains the per-game sequence for Phase 1E replace/remove revisions; ordinary hand insertion, reseat, and end do not increment it.
 
-## Phase 1G Local Reopen and Last-Hand Correction UI Outcome
+## Phase 1G Historical Reopen and Last-Hand Correction UI Outcome (reopen portion superseded by Phase 1I)
 
-- `GameDashboardScreen` now offers **Reopen game** only for an authoritative ended local bundle with a valid replay/result summary, a persisted non-empty hand timeline, and matching hand count/end timestamp. The confirmation sends only `gameId`, expected hand count, last hand ID, and ended timestamp to `reopenEndedGame`; no result cache, settlement, or UI state is supplied. A stale/terminal rejection reloads the Dashboard once and requires a fresh user action. Other failures stay on the Dashboard and are reported without navigation.
+- Phase 1I removes the Dashboard reopen control and all supporting action state. Ended games now remain read-only on Dashboard.
 - `GameTableScreen` now offers **Correct last hand** only as an active-local-table entry point with at least one hand. The modal reads the final hand summary and emits only an outcome plus winner/discarder identity and fan, or draw dealer action. `replaceLastHand` / `removeLastHand` receive the current last-hand ID/index and hand-count guards; the repository remains the sole planner and settlement authority.
 - Correction is unavailable for non-authoritative/stale timelines and is specifically blocked when a seat boundary begins at `handsCount`, because that boundary is a later effective event. The modal explains that boundary case; it does not attempt to roll identities back automatically. Ended, abandoned, empty, and Cloud/multiplayer games gain no correction path.
 - After a successful replace/remove, the table rereads SQLite and requires an authoritative replay before displaying the new state. There is no optimistic correction, locally calculated settlement, or legacy-state reuse. If the mutation commits but refresh fails, normal table mutations are blocked and an explicit reload action is required. Request ordering and unmount guards prevent late reads from overwriting newer or disposed screen state.
-- The new strings exist in English, Traditional Chinese, and Simplified Chinese, with accessible named buttons for reopening, correcting, saving, undoing, and reload recovery. Tests cover availability gates, guarded Dashboard reopen navigation, and guarded correction intent followed by canonical reload.
+- The correction strings remain in English, Traditional Chinese, and Simplified Chinese. Reopen strings and Dashboard reopen coverage were removed; correction tests continue to cover guarded intent and canonical reload.
 - This UI checkpoint changes no schema, migration, Cloud/Firestore behavior, multiplayer route, scoring engine, ordinary hand-entry workflow, revision browser, redo, or historical/middle-hand editing. Phase 2 may decide broader recovery, audit, Cloud authority, or revision-history UX.
 
 ## Explicitly out of scope
@@ -340,7 +335,7 @@ This phase is read-only. It does not change `GameTableScreen`, hand/result write
 - replay implementation (completed in Phase 1A);
 - arbitrary historical edits, middle insertion, redo;
 - Firestore model/rules/transaction/listener changes;
-- Cloud room reopening;
+- Cloud room correction or reopening;
 - TW/PMA support;
 - tile/fan recognition;
 - backup format and UI;
@@ -349,8 +344,8 @@ This phase is read-only. It does not change `GameTableScreen`, hand/result write
 
 ## Current behavior ambiguities retained for Phase 1
 
-1. New explicit local records persist their initial seat mapping and confirmed seat boundaries. Migrated legacy records can still rely on the North-to-East round-label inference path, so a replay that depends on that inference is intentionally not authoritative for correction/reopen.
-2. The existing `buildGameResultSummarySnapshot` is exact for ended bundles but the repository keeps its result cache separately. Reopen/mutation invalidation is a Phase 1 repository concern.
+1. New explicit local records persist their initial seat mapping and confirmed seat boundaries. Migrated legacy records can still rely on the North-to-East round-label inference path, so a replay that depends on that inference is intentionally not authoritative for correction.
+2. The existing `buildGameResultSummarySnapshot` is exact for ended bundles but the repository keeps its result cache separately. Active correction invalidation is a Phase 1 repository concern; terminal result snapshots remain locked after Phase 1I.
 3. Cloud hand indexes start at 1 while local `hands.handIndex` starts at 0. The canonical adapter must normalize this explicitly; this type contract intentionally does not choose the adapter conversion.
 
 ## Phase 1H Local Correction QA Outcome
@@ -358,6 +353,16 @@ This phase is read-only. It does not change `GameTableScreen`, hand/result write
 - QA ran on the existing **iPhone 17 / iOS 26.5** Simulator. The current Debug app was built with `xcodebuild -quiet -workspace ios/mahjong_be_fd.xcworkspace -configuration Debug -scheme mahjong_be_fd -destination id=C67ED042-1A60-4984-A429-3CF3E519E16A build`, installed with `simctl`, and cold-launched against Metro. Build succeeded with existing third-party `react-native-svg` warnings only; no app crash, unhandled rejection, duplicate SQLite transaction, or sensitive payload logging was observed during launch and local hand entry.
 - QA-A was created as an explicit local game with 東家／南家／西家／北家, then a deterministic draw/stick hand was recorded. Simulator SQLite inspection confirmed `games.handsCount = 1`, a single zero-based `hands.handIndex = 0`, zero-sum `Q` values, matching next-round label (`東風東局` for draw/stick), and no duplicate seat boundary. This validates the normal local persistence and hydration path across a cold launch.
 - A transient QA observation was that the first CLI invocation had booted a previously installed app binary while its Xcode build continued in the background. The table therefore did not expose the new correction entry. Root cause was incomplete build/install orchestration, not game data or replay: installing the completed Debug product resolved it. No product code change was required; direct builds must not run concurrently because Xcode locks its build database.
-- Regression coverage remains focused on the correction contract: availability tests cover active/authoritative/final-boundary gates; the Dashboard test covers guarded reopen and replace navigation; the GameTable test covers guarded replacement intent, one submission, and authoritative reload. Repository schema/revision/lifecycle tests cover mutation order, stale guards, rollback and replay parity.
+- Regression coverage remains focused on the correction contract: availability tests cover active/authoritative/final-boundary gates; the Dashboard test covers terminal read-only behaviour; the GameTable test covers guarded replacement intent, one submission, and authoritative reload. Repository schema/revision/lifecycle tests cover mutation order, stale guards, rollback and replay parity.
 - Device-automation limitation: the Simulator accessibility bridge collapses the pre-existing ordinary hand-entry modal into one accessibility element and History intentionally disables active-game cards. This prevented completing every permutation of the manual matrix by automation alone without adding a debug route or modifying user data. The Phase 1G correction modal itself carries explicit named action controls/test IDs and is covered by the focused UI regression suite. Manual device verification remains recommended for keyboard, large Dynamic Type, English/Simplified Chinese wrapping, and all outcome permutations before release.
 - Phase 1H introduces no schema, Cloud/Firestore, multiplayer, scoring, redo, revision-restore, arbitrary historical edit, dependency, commit, or push change.
+
+## Phase 1I Permanent Ended Lifecycle Outcome
+
+- **Superseded internal framing:** 「可信牌局：可修正、可復原、可帶走」. The 3.0 focus is now correction, auditability, and result sharing.
+- Local lifecycle is now one-way: a `draft` game is writable only while setting up its first hand, an `active` game supports ordinary recording plus last-hand correction/undo, and `ended` or `abandoned` games are permanently read-only. `isLocalGameMutable` centralizes the repository-level terminal guard.
+- `localLifecycle` now contains only that pure mutability predicate. The reopen planner, availability selector, repository transaction/writer, Dashboard state/action, dedicated reopen tests, and three-locale reopen strings were removed.
+- Schema remains at `303`. `game_lifecycle_revisions`, `LocalGameLifecycleRevisionAction`, snapshots, and `getGameLifecycleRevisions` are retained solely for read compatibility with pre-existing audit rows; no new lifecycle revision is written and no historical data is migrated or changed.
+- End Game confirmation now states that the result becomes locked and that editing, undoing, and reopening are unavailable. After confirmation the Dashboard stays read-only, with sharing preserved and no reopen action. History continues to keep active cards non-resumable; no route, Cloud, Firestore, multiplayer, scoring, settlement, or schema behavior changed.
+- Focused tests cover the pure guard, terminal repository mutations, terminal Dashboard rendering, terminal correction absence, strong end-copy semantics, and the retained schema-303 migration path. Phase 2A may add richer read-only history/audit presentation, but never a local reopen path unless product policy is explicitly revisited.
+- Future roadmap: **Phase 2A — Shareable Result Experience** (result cards, image sharing, and Share Sheet improvements). Multiplayer correction, a revision viewer, redo, historical editing, and raw backup/export remain optional future work; local reopen is not on the roadmap.

@@ -1,5 +1,6 @@
 import {
   createGameWithPlayers,
+  endGame,
   getGameBundle,
   getGameHandRevisions,
   insertHand,
@@ -137,5 +138,47 @@ describe('local last-hand mutation repository transactions', () => {
     expect(after.hands[0].type).toBe('discard');
     expect(await getGameHandRevisions(gameId)).toEqual([]);
     expect(await rows(database, 'SELECT handsCount FROM games WHERE id = ?;', [gameId])).toEqual([{ handsCount: 1 }]);
+  });
+
+  it('keeps ended and abandoned games terminal without advancing the mutation version', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const endedId = 'terminal-ended';
+    try {
+      await createActiveGame(endedId);
+      await endGame(endedId, 1_700_000_010_000);
+      const ended = await getGameBundle(endedId);
+      expect(ended.game).toMatchObject({ gameState: 'ended', recordMutationVersion: 0 });
+      expect(ended.game.resultSummaryJson).not.toBeNull();
+
+      await expect(insertHand({
+        id: `${endedId}:h1`, gameId: endedId, dealerSeatIndex: 1, isDraw: true, winnerSeatIndex: null,
+        discarderSeatIndex: null, type: 'draw', winnerPlayerId: null, discarderPlayerId: null, inputValue: 0,
+        deltasJson: JSON.stringify({ unit: 'Q', values: [0, 0, 0, 0] }),
+        computedJson: JSON.stringify({ settlementType: 'draw', dealerAction: 'stick' }), createdAt: 1_700_000_010_001,
+      })).rejects.toThrow('Cannot mutate ended or abandoned game');
+      expect(await replaceLastHand({
+        action: 'replace', gameId: endedId, expectedHandId: `${endedId}:h0`, expectedHandIndex: 0, expectedHandsCount: 1,
+        outcome: 'draw', dealerAction: 'stick',
+      })).toEqual({ ok: false, code: 'GAME_NOT_ACTIVE' });
+      expect(await removeLastHand({
+        action: 'remove', gameId: endedId, expectedHandId: `${endedId}:h0`, expectedHandIndex: 0, expectedHandsCount: 1,
+      })).toEqual({ ok: false, code: 'GAME_NOT_ACTIVE' });
+
+      const abandonedId = 'terminal-abandoned';
+      await createGameWithPlayers({
+        id: abandonedId, title: abandonedId, currencySymbol: 'HK$', variant: 'HK', rulesJson: JSON.stringify(traditionalRules()),
+        startingDealerSeatIndex: 0, createdAt: 1_700_000_020_000,
+      }, players(abandonedId));
+      await endGame(abandonedId, 1_700_000_020_001);
+      expect((await getGameBundle(abandonedId)).game.gameState).toBe('abandoned');
+      await expect(insertHand({
+        id: `${abandonedId}:h0`, gameId: abandonedId, dealerSeatIndex: 0, isDraw: true, winnerSeatIndex: null,
+        discarderSeatIndex: null, type: 'draw', winnerPlayerId: null, discarderPlayerId: null, inputValue: 0,
+        deltasJson: JSON.stringify({ unit: 'Q', values: [0, 0, 0, 0] }),
+        computedJson: JSON.stringify({ settlementType: 'draw', dealerAction: 'stick' }), createdAt: 1_700_000_020_002,
+      })).rejects.toThrow('Cannot mutate ended or abandoned game');
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

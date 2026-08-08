@@ -18,7 +18,9 @@ jest.mock('../../src/db/repo', () => ({
 
 jest.mock('../../src/i18n/useAppLanguage', () => ({
   useAppLanguage: () => ({
-    t: (key: string) => key,
+    t: (key: string) => key === 'gameTable.endGame.message'
+      ? "Once ended, this game's result will be locked. You won't be able to edit or undo hands or reopen the game."
+      : key,
     language: 'zh-Hant',
     setLanguage: jest.fn(),
   }),
@@ -159,6 +161,7 @@ describe('GameTableScreen end game flow', () => {
     });
 
     const [, , buttons] = alertSpy.mock.calls[0];
+    expect(alertSpy.mock.calls[0][1]).toContain("won't be able to edit or undo hands or reopen the game");
     const confirmButton = (buttons as Array<{ text: string; onPress?: () => void | Promise<void> }>).find(
       (button) => button.text === 'gameTable.endGame.confirm',
     );
@@ -207,6 +210,28 @@ describe('GameTableScreen end game flow', () => {
     });
     expect(mockedGetGameBundle).toHaveBeenCalledTimes(2);
     alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('does not expose last-hand correction for a terminal game', async () => {
+    const bundle = createBundleWithHand();
+    mockedGetGameBundle.mockResolvedValue({
+      ...bundle,
+      game: { ...bundle.game, gameState: 'ended', endedAt: 1735689700000, resultStatus: 'result' },
+    } as any);
+    const navigation = { setOptions: jest.fn(), replace: jest.fn(), navigate: jest.fn(), goBack: jest.fn() } as any;
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameTableScreen navigation={navigation} route={{ key: 'ended', name: 'GameTable', params: { gameId: 'game-1' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-correction' })).toThrow();
     await act(async () => {
       tree!.unmount();
     });

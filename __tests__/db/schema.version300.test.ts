@@ -165,7 +165,7 @@ describe('SQLite schema version 303 bootstrap', () => {
     ]);
   });
 
-  it('migrates a version-301 database through revision and lifecycle storage without changing game rows', async () => {
+  it('migrates a version-301 database through hand revisions and historical lifecycle compatibility without changing game rows', async () => {
     const db = await createDatabase();
     await initializeSchema(db as unknown as SQLiteDatabase);
     await db.executeSql("INSERT INTO games(id, title) VALUES ('g301', 'Version 301');");
@@ -180,6 +180,28 @@ describe('SQLite schema version 303 bootstrap', () => {
     expect(await queryRows(db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_hand_revisions';")).toEqual([
       { name: 'game_hand_revisions' },
     ]);
+    expect(await queryRows(db, "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'game_lifecycle_revisions';")).toEqual([
+      { name: 'game_lifecycle_revisions' },
+    ]);
+  });
+
+  it('preserves existing schema-303 historical lifecycle revisions without creating a new migration', async () => {
+    const db = await createDatabase();
+    await initializeSchema(db as unknown as SQLiteDatabase);
+    await db.executeSql("INSERT INTO games(id, title) VALUES ('historical-lifecycle', 'Historical lifecycle');");
+    await db.executeSql(
+      `INSERT INTO game_lifecycle_revisions
+       (id, gameId, lifecycleRevisionIndex, recordMutationVersion, action, beforeGameJson, afterGameJson, actorType, actorId, reason, createdAt)
+       VALUES ('historical-lifecycle:0', 'historical-lifecycle', 0, 2, 'reopen', '{"version":1}', '{"version":1}', 'local_user', NULL, NULL, 1);`,
+    );
+
+    await initializeSchema(db as unknown as SQLiteDatabase);
+
+    expect(await userVersion(db)).toBe(303);
+    expect(await queryRows(
+      db,
+      "SELECT id, recordMutationVersion, action FROM game_lifecycle_revisions WHERE gameId = 'historical-lifecycle';",
+    )).toEqual([{ id: 'historical-lifecycle:0', recordMutationVersion: 2, action: 'reopen' }]);
   });
 
   it('rolls back a failed 300 to 301 migration and can retry through 303 without data loss', async () => {

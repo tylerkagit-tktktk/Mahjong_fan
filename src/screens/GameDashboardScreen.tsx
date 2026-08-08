@@ -6,7 +6,7 @@ import { Alert, Pressable, SectionList, Share, StyleSheet, View } from 'react-na
 import AppButton from '../components/AppButton';
 import Card from '../components/Card';
 import ScreenContainer from '../components/ScreenContainer';
-import { getGameBundle, reopenEndedGame } from '../db/repo';
+import { getGameBundle } from '../db/repo';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { translateWithFallback } from '../i18n/translateWithFallback';
@@ -17,7 +17,6 @@ import {
   type DashboardSettlementDirection,
 } from '../domain/gameRecord/localDashboardProjection';
 import { replayLocalGameBundle } from '../services/localGameReplay';
-import { getLocalGameReopenAvailability } from '../domain/gameRecord/localLifecycle';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
 import { typography } from '../styles/typography';
@@ -211,11 +210,9 @@ function GameDashboardScreen({ navigation, route }: Props) {
   const [expandedHands, setExpandedHands] = useState<Record<string, boolean>>({});
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [handFilter, setHandFilter] = useState<HandFilter>('all');
-  const [reopening, setReopening] = useState(false);
 
   const sectionListRef = useRef<SectionList<HandDisplay, HandSection>>(null);
   const nonEndedAlertShownRef = useRef(false);
-  const reopeningRef = useRef(false);
 
   const loadBundle = useCallback(async () => {
     setError(null);
@@ -277,11 +274,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
     }
     return buildLocalDashboardProjection({ bundle, localReplayResult });
   }, [bundle, localReplayResult]);
-
-  const reopenAvailability = useMemo(
-    () => bundle ? getLocalGameReopenAvailability({ bundle, replayResult: localReplayResult }) : null,
-    [bundle, localReplayResult],
-  );
 
   const gameStats = dashboardProjection?.projection.statistics ?? null;
   const ruleSummary = dashboardProjection?.projection.ruleSummary ?? null;
@@ -489,56 +481,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
     ].join('\n');
     await Share.share({ title: bundle.game.title, message: summaryText });
   }, [bundle, dashboardProjection, gameStats, handsCount, isEnded, rankedPlayers, t]);
-
-  const handleReopen = useCallback(() => {
-    if (!bundle || !reopenAvailability?.available || reopeningRef.current) return;
-    const lastHand = bundle.hands.slice().sort((left, right) => left.handIndex - right.handIndex).at(-1);
-    if (!lastHand || bundle.game.endedAt == null) return;
-    Alert.alert(
-      translateWithFallback(t, 'game.detail.reopen.title', '重新開啟牌局'),
-      translateWithFallback(t, 'game.detail.reopen.message', '牌局會變回進行中，現有完場結果會失效；所有已記錄手牌會保留，修改後要重新按完場。'),
-      [
-        { text: translateWithFallback(t, 'game.detail.action.cancel', '取消'), style: 'cancel' },
-        {
-          text: translateWithFallback(t, 'game.detail.reopen.confirm', '確認重新開啟'),
-          onPress: async () => {
-            if (reopeningRef.current) return;
-            reopeningRef.current = true;
-            setReopening(true);
-            try {
-              const result = await reopenEndedGame({
-                gameId: bundle.game.id,
-                expectedHandsCount: bundle.hands.length,
-                expectedLastHandId: lastHand.id,
-                expectedEndedAt: bundle.game.endedAt as number,
-              });
-              if (!result.ok) {
-                if (result.code === 'STALE_REOPEN_TARGET' || result.code === 'GAME_NOT_ENDED') {
-                  await loadBundle();
-                  const staleMessage = translateWithFallback(t, 'game.detail.reopen.stale', '牌局已更新，請重新檢查。');
-                  setError(staleMessage);
-                  Alert.alert(translateWithFallback(t, 'game.detail.reopen.title', '重新開啟牌局'), staleMessage);
-                  return;
-                }
-                const failedMessage = translateWithFallback(t, 'game.detail.reopen.failed', '重新開啟牌局失敗。');
-                setError(failedMessage);
-                Alert.alert(translateWithFallback(t, 'game.detail.reopen.title', '重新開啟牌局'), failedMessage);
-                return;
-              }
-              navigation.replace('GameTable', { gameId: bundle.game.id });
-            } catch {
-              const failedMessage = translateWithFallback(t, 'game.detail.reopen.failed', '重新開啟牌局失敗。');
-              setError(failedMessage);
-              Alert.alert(translateWithFallback(t, 'game.detail.reopen.title', '重新開啟牌局'), failedMessage);
-            } finally {
-              reopeningRef.current = false;
-              setReopening(false);
-            }
-          },
-        },
-      ],
-    );
-  }, [bundle, loadBundle, navigation, reopenAvailability?.available, t]);
 
   const toggleExpand = useCallback((handId: string) => {
     setExpandedHands((prev) => ({ ...prev, [handId]: !prev[handId] }));
@@ -906,16 +848,6 @@ function GameDashboardScreen({ navigation, route }: Props) {
         ListFooterComponent={
           <>
             <View style={styles.actionsWrap}>
-              {reopenAvailability?.available ? (
-                <AppButton
-                  label={translateWithFallback(t, 'game.detail.reopen.action', '重新開啟牌局')}
-                  onPress={handleReopen}
-                  disabled={reopening}
-                  variant="secondary"
-                  testID="dashboard-reopen"
-                  accessibilityLabel={translateWithFallback(t, 'game.detail.reopen.action', '重新開啟牌局')}
-                />
-              ) : null}
               <AppButton
                 label={translateWithFallback(t, 'game.detail.action.share', '分享')}
                 onPress={() => {

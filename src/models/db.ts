@@ -72,6 +72,7 @@ export type LocalHandRevision = {
   recordMutationVersion: number;
 };
 
+/** Historical schema-303 value retained only to read existing lifecycle audit rows. */
 export type LocalGameLifecycleRevisionAction = 'reopen';
 
 export type LocalGameLifecycleSnapshotV1 = {

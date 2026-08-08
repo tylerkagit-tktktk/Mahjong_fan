@@ -338,7 +338,6 @@ This phase is read-only. It does not change `GameTableScreen`, hand/result write
 ## Explicitly out of scope
 
 - replay implementation (completed in Phase 1A);
-- undo/replace/remove repository functions or UI;
 - arbitrary historical edits, middle insertion, redo;
 - Firestore model/rules/transaction/listener changes;
 - Cloud room reopening;
@@ -350,6 +349,15 @@ This phase is read-only. It does not change `GameTableScreen`, hand/result write
 
 ## Current behavior ambiguities retained for Phase 1
 
-1. Current local seat rotation aggregation infers a rotation after a North-to-East round-label wrap; it does not persist a first-class local seat-boundary event. Phase 1 must preserve parity before deciding whether to persist boundaries.
+1. New explicit local records persist their initial seat mapping and confirmed seat boundaries. Migrated legacy records can still rely on the North-to-East round-label inference path, so a replay that depends on that inference is intentionally not authoritative for correction/reopen.
 2. The existing `buildGameResultSummarySnapshot` is exact for ended bundles but the repository keeps its result cache separately. Reopen/mutation invalidation is a Phase 1 repository concern.
 3. Cloud hand indexes start at 1 while local `hands.handIndex` starts at 0. The canonical adapter must normalize this explicitly; this type contract intentionally does not choose the adapter conversion.
+
+## Phase 1H Local Correction QA Outcome
+
+- QA ran on the existing **iPhone 17 / iOS 26.5** Simulator. The current Debug app was built with `xcodebuild -quiet -workspace ios/mahjong_be_fd.xcworkspace -configuration Debug -scheme mahjong_be_fd -destination id=C67ED042-1A60-4984-A429-3CF3E519E16A build`, installed with `simctl`, and cold-launched against Metro. Build succeeded with existing third-party `react-native-svg` warnings only; no app crash, unhandled rejection, duplicate SQLite transaction, or sensitive payload logging was observed during launch and local hand entry.
+- QA-A was created as an explicit local game with 東家／南家／西家／北家, then a deterministic draw/stick hand was recorded. Simulator SQLite inspection confirmed `games.handsCount = 1`, a single zero-based `hands.handIndex = 0`, zero-sum `Q` values, matching next-round label (`東風東局` for draw/stick), and no duplicate seat boundary. This validates the normal local persistence and hydration path across a cold launch.
+- A transient QA observation was that the first CLI invocation had booted a previously installed app binary while its Xcode build continued in the background. The table therefore did not expose the new correction entry. Root cause was incomplete build/install orchestration, not game data or replay: installing the completed Debug product resolved it. No product code change was required; direct builds must not run concurrently because Xcode locks its build database.
+- Regression coverage remains focused on the correction contract: availability tests cover active/authoritative/final-boundary gates; the Dashboard test covers guarded reopen and replace navigation; the GameTable test covers guarded replacement intent, one submission, and authoritative reload. Repository schema/revision/lifecycle tests cover mutation order, stale guards, rollback and replay parity.
+- Device-automation limitation: the Simulator accessibility bridge collapses the pre-existing ordinary hand-entry modal into one accessibility element and History intentionally disables active-game cards. This prevented completing every permutation of the manual matrix by automation alone without adding a debug route or modifying user data. The Phase 1G correction modal itself carries explicit named action controls/test IDs and is covered by the focused UI regression suite. Manual device verification remains recommended for keyboard, large Dynamic Type, English/Simplified Chinese wrapping, and all outcome permutations before release.
+- Phase 1H introduces no schema, Cloud/Firestore, multiplayer, scoring, redo, revision-restore, arbitrary historical edit, dependency, commit, or push change.

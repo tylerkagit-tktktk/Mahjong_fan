@@ -76,6 +76,7 @@
   "game.detail.stats.wins": "食糊",
   "game.detail.timeline.dealerAction.pass": "過莊",
   "game.detail.timeline.dealerAction.stick": "留莊",
+  "game.detail.timeline.handNumber": "第 {{count}} 鋪",
   "game.detail.timeline.summary.discard": "{{winner}} 食糊 · {{loser}} 出銃 · {{fan}} 番",
   "game.detail.timeline.summary.draw": "流局 · {{dealerAction}}",
   "game.detail.timeline.summary.zimo": "{{name}} 自摸 · {{fan}} 番",

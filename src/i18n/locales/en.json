@@ -76,6 +76,7 @@
   "game.detail.stats.wins": "Wins",
   "game.detail.timeline.dealerAction.pass": "dealer passes",
   "game.detail.timeline.dealerAction.stick": "dealer stays",
+  "game.detail.timeline.handNumber": "Hand {{count}}",
   "game.detail.timeline.summary.discard": "{{winner}} wins · {{loser}} discards · {{fan}} fan(s)",
   "game.detail.timeline.summary.draw": "Draw · {{dealerAction}}",
   "game.detail.timeline.summary.zimo": "{{name}} self-draws · {{fan}} fan(s)",

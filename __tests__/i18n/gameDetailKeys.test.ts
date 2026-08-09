@@ -18,6 +18,7 @@ const touchedKeys = [
   'game.detail.accessibility.timeline',
   'game.detail.highlights.title',
   'game.detail.hands.title',
+  'game.detail.timeline.handNumber',
   'game.detail.timeline.summary.zimo',
   'game.detail.timeline.summary.discard',
   'game.detail.timeline.summary.draw',

@@ -1,6 +1,6 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Alert, Share, Text } from 'react-native';
+import { Alert, Share, StyleSheet, Text } from 'react-native';
 import AppButton from '../../src/components/AppButton';
 import GameDashboardScreen from '../../src/screens/GameDashboardScreen';
 import { getGameBundle } from '../../src/db/repo';
@@ -470,6 +470,9 @@ describe('GameDashboardScreen', () => {
       accessibilityLabel: '分享戰果',
       disabled: false,
       icon: { type: 'sfSymbol', name: 'square.and.arrow.up' },
+      variant: 'plain',
+      hidesSharedBackground: true,
+      sharesBackground: false,
     });
     expect((tree! as renderer.ReactTestRenderer).root.findAllByType(AppButton).map((button) => button.props.label)).not.toContain('分享');
 
@@ -609,11 +612,21 @@ describe('GameDashboardScreen', () => {
     expect(allText.indexOf('Bob 食糊 · Alice 出銃 · 4 番')).toBeLessThan(allText.indexOf('流局 · 留莊'));
 
     const firstHandText = firstHand.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
-    expect(firstHandText).toContain('Bob +HK$20');
+    expect(firstHandText).toContain('第 1 鋪');
+    expect(firstHandText).toContain('+HK$20');
+    expect(firstHandText).not.toContain('Bob +HK$20');
     expect(firstHandText).not.toContain('\n東\n');
     expect(firstHandText).not.toContain('\n南\n');
     expect(firstHandText).not.toContain('\n西\n');
     expect(firstHandText).not.toContain('\n北\n');
+
+    const historyTitleStyle = StyleSheet.flatten(root.findByProps({ testID: 'dashboard-history-title' }).props.style);
+    const eventRowStyle = StyleSheet.flatten(root.findByProps({ testID: 'hand-event-row-h1' }).props.style);
+    const gainStyle = StyleSheet.flatten(root.findByProps({ testID: 'hand-gain-h1' }).props.style);
+    expect(historyTitleStyle.backgroundColor).toBeUndefined();
+    expect(eventRowStyle).toMatchObject({ flexDirection: 'row', alignItems: 'flex-start' });
+    expect(gainStyle).toMatchObject({ flexShrink: 0, textAlign: 'right', fontVariant: ['tabular-nums'] });
+    expect(() => root.findByProps({ testID: 'hand-gain-h2' })).toThrow();
 
     const windSection = root.findByProps({ testID: 'wind-section-東風' });
     expect(windSection.props.onPress).toBeUndefined();
@@ -640,6 +653,50 @@ describe('GameDashboardScreen', () => {
     expect(rowText).toContain('流局 · 過莊');
     expect(rowText).not.toContain('HK$0');
     expect(row.props.accessibilityLabel).toBe('東風東局，流局 · 過莊');
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('keeps long timeline identities and a large winner gain in the flex-safe event row', async () => {
+    const bundle = createEndedBundle();
+    bundle.players = bundle.players.map((player) => ({
+      ...player,
+      name: player.id === 'p1'
+        ? 'VeryLongWinnerNameThatNeedsToWrap'
+        : player.id === 'p0'
+          ? 'VeryLongDiscarderNameThatNeedsToWrap'
+          : player.name,
+    }));
+    bundle.hands = bundle.hands.map((hand, index) => (
+      index === 0
+        ? { ...hand, deltasJson: JSON.stringify([-5120, 5120, 0, 0]) }
+        : hand
+    )) as typeof bundle.hands;
+    bundle.game.resultSummaryJson = JSON.stringify({
+      seatTotalsQ: [-5120, 5120, 0, 0],
+      playersCount: 4,
+    });
+    mockedGetGameBundle.mockResolvedValueOnce(bundle as any);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'long-timeline', name: 'GameDashboard', params: { gameId: bundle.game.id } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const row = tree!.root.findByProps({ testID: 'hand-row-h1' });
+    const rowText = row.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(rowText).toContain('VeryLongWinnerNameThatNeedsToWrap 食糊 · VeryLongDiscarderNameThatNeedsToWrap 出銃 · 4 番');
+    expect(rowText).toContain('+HK$1280');
+    expect(rowText).not.toContain('VeryLongWinnerNameThatNeedsToWrap +HK$1280');
+    expect(StyleSheet.flatten(tree!.root.findByProps({ testID: 'hand-event-row-h1' }).props.style)).toMatchObject({
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    });
 
     await act(async () => {
       tree!.unmount();

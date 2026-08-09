@@ -38,6 +38,7 @@ type HandDisplay = {
 type HandSection = {
   title: string;
   data: HandDisplay[];
+  isFirst: boolean;
 };
 
 function formatDate(timestamp: number): string {
@@ -119,7 +120,6 @@ function getHandSummary(
 
 function getWinnerGain(
   hand: DashboardHandRow,
-  winnerName: string,
   currencySymbol: string,
 ): string | null {
   if (hand.outcome === 'draw' || !hand.winnerPlayerId || !hand.deltasQ) {
@@ -129,7 +129,7 @@ function getWinnerGain(
   if (winnerSeatIndex === undefined) {
     return null;
   }
-  return `${winnerName} ${formatSignedMoney((hand.deltasQ[winnerSeatIndex] ?? 0) / 4, currencySymbol)}`;
+  return formatSignedMoney((hand.deltasQ[winnerSeatIndex] ?? 0) / 4, currencySymbol);
 }
 
 function GameDashboardScreen({ navigation, route }: Props) {
@@ -254,9 +254,10 @@ function GameDashboardScreen({ navigation, route }: Props) {
       list.push(entry);
       sections.set(entry.windLabel, list);
     });
-    return Array.from(sections.entries()).map(([title, data]) => ({
+    return Array.from(sections.entries()).map(([title, data], sectionIndex) => ({
       title,
       data,
+      isFirst: sectionIndex === 0,
     }));
   }, [handDisplayList]);
 
@@ -406,6 +407,9 @@ function GameDashboardScreen({ navigation, route }: Props) {
         label: shareAccessibilityLabel,
         accessibilityLabel: shareAccessibilityLabel,
         icon: { type: 'sfSymbol', name: 'square.and.arrow.up' },
+        variant: 'plain',
+        hidesSharedBackground: true,
+        sharesBackground: false,
         disabled: !isEnded || sharing,
         onPress: () => { handleShare().catch(() => {}); },
       }],
@@ -413,7 +417,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
   }, [handleShare, isEnded, navigation, renderHeaderShare, shareAccessibilityLabel, sharing]);
 
   const renderHandItem = useCallback(
-    ({ item }: { item: HandDisplay }) => {
+    ({ item, index, section }: { item: HandDisplay; index: number; section: HandSection }) => {
       if (!bundle) {
         return null;
       }
@@ -426,7 +430,13 @@ function GameDashboardScreen({ navigation, route }: Props) {
         ? rankedPlayers.find((player) => player.playerId === hand.discarderPlayerId)?.displayName ?? '—'
         : null;
       const summary = getHandSummary(hand, winnerName, discarderName, t);
-      const winnerGain = getWinnerGain(hand, winnerName, bundle.game.currencySymbol ?? '');
+      const winnerGain = getWinnerGain(hand, bundle.game.currencySymbol ?? '');
+      const handNumber = translateWithFallback(
+        t,
+        'game.detail.timeline.handNumber',
+        '第 {count} 鋪',
+        { count: hand.handIndex + 1 },
+      );
       const accessibilityLabel = translateWithFallback(
         t,
         'game.detail.accessibility.timeline',
@@ -440,14 +450,18 @@ function GameDashboardScreen({ navigation, route }: Props) {
           testID={`hand-row-${hand.id}`}
           accessible
           accessibilityLabel={accessibilityLabel}
-          style={styles.handRow}
+          style={[styles.handRow, index === section.data.length - 1 && styles.handRowLast]}
         >
           <View style={styles.handTopRow}>
             <AppText style={styles.handRound}>{handRoundLabel}</AppText>
-            <AppText style={styles.handIndex}>#{hand.handIndex + 1}</AppText>
+            <AppText testID={`hand-number-${hand.id}`} style={styles.handIndex}>{handNumber}</AppText>
           </View>
-          <AppText style={styles.handSummary}>{summary}</AppText>
-          {winnerGain ? <AppText style={styles.handGain}>{winnerGain}</AppText> : null}
+          <View testID={`hand-event-row-${hand.id}`} style={styles.handEventRow}>
+            <AppText style={styles.handSummary}>{summary}</AppText>
+            {winnerGain ? (
+              <AppText testID={`hand-gain-${hand.id}`} style={styles.handGain}>{winnerGain}</AppText>
+            ) : null}
+          </View>
         </View>
       );
     },
@@ -456,7 +470,10 @@ function GameDashboardScreen({ navigation, route }: Props) {
 
   const renderSectionHeader = useCallback(
     ({ section }: { section: HandSection }) => (
-      <View testID={`wind-section-${section.title}`} style={styles.windSectionHeader}>
+      <View
+        testID={`wind-section-${section.title}`}
+        style={[styles.windSectionHeader, !section.isFirst && styles.windSectionHeaderSpaced]}
+      >
         <AppText style={styles.windSectionTitle}>{section.title}</AppText>
       </View>
     ),
@@ -582,13 +599,13 @@ function GameDashboardScreen({ navigation, route }: Props) {
               </View>
             </Card>
 
-            <View style={styles.historyTitleWrap}>
+            <View testID="dashboard-history-title" style={styles.historyTitleWrap}>
               <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.hands.title', '牌局紀錄')}</AppText>
             </View>
           </>
         )}
         ListFooterComponent={
-          <Card style={styles.card}>
+          <Card style={styles.rulesCard}>
             <Pressable
               testID="dashboard-rules-toggle"
               accessibilityRole="button"
@@ -754,25 +771,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   historyTitleWrap: {
-    backgroundColor: theme.colors.surface,
-    borderTopLeftRadius: theme.radius.md,
-    borderTopRightRadius: theme.radius.md,
-    paddingHorizontal: theme.spacing.md,
-    paddingTop: theme.spacing.md,
-    paddingBottom: theme.spacing.xs,
+    paddingTop: theme.spacing.xs,
   },
   handRow: {
-    backgroundColor: theme.colors.surface,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
+    paddingTop: theme.spacing.sm,
+    paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border,
   },
+  handRowLast: {
+    borderBottomWidth: 0,
+  },
   windSectionHeader: {
-    backgroundColor: theme.colors.surface,
-    paddingHorizontal: theme.spacing.md,
-    paddingTop: theme.spacing.md,
-    paddingBottom: theme.spacing.xs,
+    paddingTop: theme.spacing.xs,
+    paddingBottom: 2,
+  },
+  windSectionHeaderSpaced: {
+    paddingTop: theme.spacing.lg,
+  },
+  rulesCard: {
+    marginTop: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
   },
   rulesHeader: {
     flexDirection: 'row',
@@ -798,22 +817,37 @@ const styles = StyleSheet.create({
   handIndex: {
     ...typography.caption,
     color: theme.colors.textSecondary,
+    fontWeight: '400',
+    flexShrink: 0,
+    marginLeft: theme.spacing.sm,
   },
   handRound: {
     ...typography.body,
     color: theme.colors.textPrimary,
     fontWeight: '600',
+    flex: 1,
+    minWidth: 0,
+  },
+  handEventRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
   },
   handSummary: {
-    marginTop: 4,
     ...typography.body,
     color: theme.colors.textPrimary,
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   handGain: {
-    marginTop: 4,
-    ...typography.caption,
-    color: theme.colors.textSecondary,
+    ...typography.body,
+    color: theme.colors.textPrimary,
     fontWeight: '700',
+    flexShrink: 0,
+    marginLeft: theme.spacing.sm,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
   },
   errorText: {
     color: theme.colors.danger,

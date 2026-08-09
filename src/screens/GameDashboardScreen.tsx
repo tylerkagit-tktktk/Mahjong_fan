@@ -14,26 +14,19 @@ import { GameBundle } from '../models/db';
 import {
   buildLocalDashboardProjection,
   type DashboardHandRow,
-  type DashboardSettlementDirection,
 } from '../domain/gameRecord/localDashboardProjection';
+import {
+  getTopDashboardPlayers,
+  rankDashboardPlayers,
+  type DashboardRankedPlayer,
+  type DashboardTopPlayers,
+} from '../domain/gameRecord/dashboardResultPresentation';
 import { replayLocalGameBundle } from '../services/localGameReplay';
 import { RootStackParamList } from '../navigation/types';
 import theme from '../theme/theme';
 import { typography } from '../styles/typography';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'GameDashboard'>;
-
-type SeatSummary = {
-  playerId: string;
-  name: string;
-  total: number;
-};
-
-type SettlementTransfer = {
-  fromPlayerId: string;
-  toPlayerId: string;
-  amount: number;
-};
 
 type HandDisplay = {
   hand: DashboardHandRow;
@@ -75,101 +68,52 @@ function formatSignedMoney(value: number, symbol: string): string {
   return `${sign}${symbol ?? ''}${abs}`;
 }
 
-function getRankPrefix(index: number): string {
-  if (index === 0) {
-    return '🥇';
-  }
-  if (index === 1) {
-    return '🥈';
-  }
-  if (index === 2) {
-    return '🥉';
-  }
-  return `${index + 1}.`;
+function formatMoney(value: number, symbol: string): string {
+  return `${symbol ?? ''}${Math.abs(Math.round(value))}`;
 }
 
-function formatHighlight(value: { displayName: string; count: number } | null): string {
-  if (!value) {
+function getRankPrefix(rank: number): string {
+  if (rank === 1) {
+    return '🥇';
+  }
+  if (rank === 2) {
+    return '🥈';
+  }
+  if (rank === 3) {
+    return '🥉';
+  }
+  return `${rank}.`;
+}
+
+function formatHighlight(value: DashboardTopPlayers | null): string {
+  if (!value || value.players.length === 0) {
     return '—';
   }
-  return `${value.displayName} (${value.count})`;
+  return `${value.players.map((player) => player.displayName).join(', ')} ×${value.count}`;
 }
 
 function buildShareRankingLines(
-  rankedPlayers: SeatSummary[],
+  rankedPlayers: DashboardRankedPlayer[],
   symbol: string,
 ): string[] {
-  return rankedPlayers.map((player, index) => {
-    return `${index + 1}. ${player.name} ${formatSignedMoney(player.total, symbol)}`;
+  return rankedPlayers.map((player) => {
+    return `${player.rank}. ${player.displayName} ${formatSignedMoney(player.totalQ / 4, symbol)}`;
   });
-}
-
-function buildSettlementTransfers(rankedPlayers: SeatSummary[]): SettlementTransfer[] {
-  const winners = rankedPlayers
-    .filter((player) => player.total > 0)
-    .map((player) => ({ ...player, remaining: Math.round(player.total) }))
-    .sort((a, b) => b.remaining - a.remaining);
-  const losers = rankedPlayers
-    .filter((player) => player.total < 0)
-    .map((player) => ({ ...player, remaining: Math.abs(Math.round(player.total)) }))
-    .sort((a, b) => b.remaining - a.remaining);
-
-  const transfers: SettlementTransfer[] = [];
-  losers.forEach((loser) => {
-    for (const winner of winners) {
-      if (loser.remaining <= 0) {
-        break;
-      }
-      if (winner.remaining <= 0) {
-        continue;
-      }
-      const amount = Math.min(loser.remaining, winner.remaining);
-      if (amount <= 0) {
-        continue;
-      }
-      transfers.push({ fromPlayerId: loser.playerId, toPlayerId: winner.playerId, amount });
-      loser.remaining -= amount;
-      winner.remaining -= amount;
-    }
-  });
-
-  return transfers.filter((transfer) => transfer.amount > 0);
 }
 
 function buildSettlementDirectionLines(
-  rankedPlayers: SeatSummary[],
+  rankedPlayers: DashboardRankedPlayer[],
   symbol: string,
   t: (key: TranslationKey) => string,
-  canonicalDirections?: readonly DashboardSettlementDirection[],
+  directions: ReadonlyArray<{ fromPlayerId: string; toPlayerId: string; amountQ: number }>,
 ): string[] {
-  const transfers = canonicalDirections
-    ? canonicalDirections.map((direction) => ({
-        fromPlayerId: direction.fromPlayerId,
-        toPlayerId: direction.toPlayerId,
-        amount: direction.amountQ / 4,
-      }))
-    : buildSettlementTransfers(rankedPlayers);
-  if (transfers.length === 0) {
-    return ['—'];
+  if (directions.length === 0) {
+    return [translateWithFallback(t, 'game.detail.settlement.none', '無需找數')];
   }
-  const byFromPlayer = new Map<string, SettlementTransfer[]>();
-  transfers.forEach((transfer) => {
-    const list = byFromPlayer.get(transfer.fromPlayerId) ?? [];
-    list.push(transfer);
-    byFromPlayer.set(transfer.fromPlayerId, list);
-  });
-  const nameById = new Map(rankedPlayers.map((player) => [player.playerId, player.name]));
-  const loserOrder = rankedPlayers.filter((player) => player.total < 0).map((player) => player.playerId);
-
-  return loserOrder
-    .filter((loserId) => byFromPlayer.has(loserId))
-    .map((loserId) => {
-      const transfersByLoser = byFromPlayer.get(loserId) ?? [];
-      const details = transfersByLoser
-        .map((transfer) => `${nameById.get(transfer.toPlayerId) ?? transfer.toPlayerId} ${symbol}${Math.round(transfer.amount)}`)
-        .join(' / ');
-      return `${nameById.get(loserId) ?? loserId} ${translateWithFallback(t, 'game.detail.share.settlementArrow', '→')} ${details}`;
-    });
+  const nameById = new Map(rankedPlayers.map((player) => [player.playerId, player.displayName]));
+  return directions.map((direction) => (
+    `${nameById.get(direction.fromPlayerId) ?? direction.fromPlayerId} ${translateWithFallback(t, 'game.detail.share.settlementArrow', '→')} ${nameById.get(direction.toPlayerId) ?? direction.toPlayerId} ${formatMoney(direction.amountQ / 4, symbol)}`
+  ));
 }
 
 function getHandSummary(
@@ -210,9 +154,17 @@ function GameDashboardScreen({ navigation, route }: Props) {
   const [expandedHands, setExpandedHands] = useState<Record<string, boolean>>({});
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [handFilter, setHandFilter] = useState<HandFilter>('all');
+  const [rulesExpanded, setRulesExpanded] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   const sectionListRef = useRef<SectionList<HandDisplay, HandSection>>(null);
   const nonEndedAlertShownRef = useRef(false);
+  const mountedRef = useRef(true);
+  const sharingRef = useRef(false);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   const loadBundle = useCallback(async () => {
     setError(null);
@@ -220,6 +172,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
     setBundle(data);
     setCollapsedSections({});
     setHandFilter('all');
+    setRulesExpanded(false);
     setLoading(false);
   }, [gameId]);
 
@@ -280,14 +233,27 @@ function GameDashboardScreen({ navigation, route }: Props) {
 
   const rankedPlayers = useMemo(() => {
     if (!dashboardProjection) {
-      return [] as SeatSummary[];
+      return [] as DashboardRankedPlayer[];
     }
-    return dashboardProjection.projection.players.map((entry) => ({
+    return rankDashboardPlayers(dashboardProjection.projection.players.map((entry) => ({
       playerId: entry.playerId,
-      name: entry.displayName,
-      total: entry.totalQ / 4,
-    }));
+      displayName: entry.displayName,
+      totalQ: entry.totalQ,
+    })));
   }, [dashboardProjection]);
+
+  const zimoHighlight = useMemo(
+    () => getTopDashboardPlayers(rankedPlayers, gameStats?.zimoByPlayerId ?? {}),
+    [gameStats?.zimoByPlayerId, rankedPlayers],
+  );
+  const discardHighlight = useMemo(
+    () => getTopDashboardPlayers(rankedPlayers, gameStats?.discardByPlayerId ?? {}),
+    [gameStats?.discardByPlayerId, rankedPlayers],
+  );
+  const settlementDirections = useMemo(
+    () => dashboardProjection?.projection.settlementDirections ?? [],
+    [dashboardProjection],
+  );
 
   const handDisplayList = useMemo(() => {
     if (!dashboardProjection) {
@@ -432,7 +398,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
   );
 
   const handleShare = useCallback(async () => {
-    if (!bundle) {
+    if (!bundle || sharingRef.current) {
       return;
     }
     if (!isEnded) {
@@ -443,44 +409,36 @@ function GameDashboardScreen({ navigation, route }: Props) {
       return;
     }
     const rankingLines = buildShareRankingLines(rankedPlayers, bundle.game.currencySymbol ?? '');
-    const settlementLines = buildSettlementDirectionLines(
-      rankedPlayers,
-      bundle.game.currencySymbol ?? '',
-      t,
-      dashboardProjection?.source === 'canonical'
-        ? dashboardProjection.projection.settlementDirections
-        : undefined,
-    );
-    const playerStatsLines = rankedPlayers.map(
-      (player) =>
-        `${player.name}：${translateWithFallback(t, 'game.detail.stats.wins', '食糊')} ${
-          gameStats?.winsByPlayerId[player.playerId] ?? 0
-        }｜${translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} ${
-          gameStats?.zimoByPlayerId[player.playerId] ?? 0
-        }｜${translateWithFallback(t, 'game.detail.stats.discards', '出銃')} ${
-          gameStats?.discardByPlayerId[player.playerId] ?? 0
-        }`,
-    );
+    const settlementLines = buildSettlementDirectionLines(rankedPlayers, bundle.game.currencySymbol ?? '', t, settlementDirections);
     const titleText = bundle.game.title || translateWithFallback(t, 'game.detail.header.title', '對局總結');
     const dateText = formatDate(bundle.game.createdAt);
     const summaryText = [
       `${titleText} — ${dateText}`,
       '',
-      `${translateWithFallback(t, 'game.detail.players.title', '玩家排名')}:`,
+      translateWithFallback(t, 'game.detail.share.resultTitle', '牌局戰果'),
       ...rankingLines,
       '',
-      `${translateWithFallback(t, 'game.detail.share.settlementTitle', '結算方向')}:`,
+      translateWithFallback(t, 'game.detail.settlement.title', '找數'),
       ...settlementLines,
       '',
-      `${translateWithFallback(t, 'game.detail.stats.title', '統計')}:`,
-      `${translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', { count: handsCount })}`,
-      `${translateWithFallback(t, 'game.detail.stats.draws', '流局')}: ${gameStats?.draws ?? 0}`,
-      ...playerStatsLines,
-      `${translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}: ${formatHighlight(gameStats?.mostDiscarder ?? null)}`,
-      `${translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}: ${formatHighlight(gameStats?.mostZimo ?? null)}`,
+      `${translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', { count: handsCount })} · ${translateWithFallback(t, 'game.detail.stats.draws', '流局')} ${gameStats?.draws ?? 0}`,
+      `${translateWithFallback(t, 'game.detail.highlights.topZimo', '最多自摸')}：${formatHighlight(zimoHighlight)}`,
+      `${translateWithFallback(t, 'game.detail.highlights.topDiscard', '最多出銃')}：${formatHighlight(discardHighlight)}`,
     ].join('\n');
-    await Share.share({ title: bundle.game.title, message: summaryText });
-  }, [bundle, dashboardProjection, gameStats, handsCount, isEnded, rankedPlayers, t]);
+    sharingRef.current = true;
+    setSharing(true);
+    try {
+      await Share.share({ title: bundle.game.title, message: summaryText });
+    } catch {
+      Alert.alert(
+        translateWithFallback(t, 'game.detail.share.failedTitle', '未能分享結果'),
+        translateWithFallback(t, 'game.detail.share.failedMessage', '請稍後再試。'),
+      );
+    } finally {
+      sharingRef.current = false;
+      if (mountedRef.current) setSharing(false);
+    }
+  }, [bundle, discardHighlight, gameStats?.draws, handsCount, isEnded, rankedPlayers, settlementDirections, t, zimoHighlight]);
 
   const toggleExpand = useCallback((handId: string) => {
     setExpandedHands((prev) => ({ ...prev, [handId]: !prev[handId] }));
@@ -599,34 +557,31 @@ function GameDashboardScreen({ navigation, route }: Props) {
   );
 
   const renderSectionHeader = useCallback(
-    ({ section }: { section: HandSection }) => (
-      <Pressable
-        testID={`wind-section-${section.title}`}
-        onPress={() => {
-          setCollapsedSections((prev) => {
-            const isCollapsed = prev[section.title] !== false;
-            return { ...prev, [section.title]: isCollapsed ? false : true };
-          });
-        }}
-        style={styles.windSectionHeader}
-      >
-        <AppText style={styles.windSectionTitle}>
-          {section.totalCount > section.data.length
-            ? translateWithFallback(
-                t,
-                'game.detail.hands.sectionPartial',
-                '{wind}（顯示 {visible}/{total}）',
-                {
-                  wind: section.title,
-                  visible: section.data.length,
-                  total: section.totalCount,
-                },
-              )
-            : section.title}
-        </AppText>
-        <AppText style={styles.windSectionToggle}>{collapsedSections[section.title] !== false ? '＋' : '－'}</AppText>
-      </Pressable>
-    ),
+    ({ section }: { section: HandSection }) => {
+      const collapsed = collapsedSections[section.title] !== false;
+      return (
+        <Pressable
+          testID={`wind-section-${section.title}`}
+          accessibilityRole="button"
+          accessibilityLabel={section.title}
+          accessibilityState={{ expanded: !collapsed }}
+          onPress={() => setCollapsedSections((prev) => ({ ...prev, [section.title]: collapsed ? false : true }))}
+          style={styles.windSectionHeader}
+        >
+          <AppText style={styles.windSectionTitle}>
+            {section.totalCount > section.data.length
+              ? translateWithFallback(
+                  t,
+                  'game.detail.hands.sectionPartial',
+                  '{wind}（顯示 {visible}/{total}）',
+                  { wind: section.title, visible: section.data.length, total: section.totalCount },
+                )
+              : section.title}
+          </AppText>
+          <AppText style={styles.windSectionToggle}>{collapsed ? '＋' : '－'}</AppText>
+        </Pressable>
+      );
+    },
     [collapsedSections, t],
   );
 
@@ -682,14 +637,25 @@ function GameDashboardScreen({ navigation, route }: Props) {
           <>
             <Card style={styles.card}>
               <View style={styles.heroTopRow}>
-                <AppText style={styles.heroLabel}>
-                  {translateWithFallback(t, 'game.detail.header.title', '對局總結')}
-                </AppText>
-                <View style={styles.statusBadge}>
-                  <AppText style={styles.statusBadgeText}>
-                    {translateWithFallback(t, 'game.detail.header.statusEnded', '已結束')}
+                <View style={styles.heroStatusWrap}>
+                  <AppText style={styles.heroLabel}>
+                    {translateWithFallback(t, 'game.detail.header.title', '對局總結')}
                   </AppText>
+                  <View style={styles.statusBadge}>
+                    <AppText style={styles.statusBadgeText}>
+                      {translateWithFallback(t, 'game.detail.header.statusEnded', '已結束')}
+                    </AppText>
+                  </View>
                 </View>
+                <AppButton
+                  testID="dashboard-share"
+                  label={translateWithFallback(t, 'game.detail.action.share', '分享')}
+                  accessibilityLabel={translateWithFallback(t, 'game.detail.action.share', '分享')}
+                  onPress={() => { handleShare().catch(() => {}); }}
+                  disabled={!isEnded || sharing}
+                  variant="secondary"
+                  style={styles.headerShareButton}
+                />
               </View>
               <AppText style={styles.headerTitle}>{bundle.game.title}</AppText>
               <AppText style={styles.heroSubTitle}>
@@ -717,14 +683,24 @@ function GameDashboardScreen({ navigation, route }: Props) {
               <AppText style={styles.sectionTitle}>
                 {translateWithFallback(t, 'game.detail.players.title', '玩家排名')}
               </AppText>
-              {rankedPlayers.map((player, index) => (
-                <View key={`rank-${player.playerId}`} style={styles.playerRow}>
-                  <AppText style={styles.playerRank}>{getRankPrefix(index)}</AppText>
+              {rankedPlayers.map((player) => (
+                <View
+                  key={`rank-${player.playerId}`}
+                  accessible
+                  accessibilityLabel={translateWithFallback(
+                    t,
+                    'game.detail.accessibility.rank',
+                    '第 {rank} 名，{name}，最終 {amount}',
+                    { rank: player.rank, name: player.displayName, amount: formatSignedMoney(player.totalQ / 4, bundle.game.currencySymbol ?? '') },
+                  )}
+                  style={styles.playerRow}
+                >
+                  <AppText style={styles.playerRank}>{getRankPrefix(player.rank)}</AppText>
                   <View style={styles.playerMetaWrap}>
-                    <AppText style={styles.playerName}>{player.name}</AppText>
+                    <AppText numberOfLines={1} ellipsizeMode="tail" style={styles.playerName}>{player.displayName}</AppText>
                   </View>
                   <AppText style={styles.playerTotal}>
-                    {formatSignedMoney(player.total, bundle.game.currencySymbol ?? '')}
+                    {formatSignedMoney(player.totalQ / 4, bundle.game.currencySymbol ?? '')}
                   </AppText>
                 </View>
               ))}
@@ -732,74 +708,52 @@ function GameDashboardScreen({ navigation, route }: Props) {
 
             <Card style={styles.card}>
               <AppText style={styles.sectionTitle}>
-                {translateWithFallback(t, 'game.detail.rules.title', '規則摘要')}
+                {translateWithFallback(t, 'game.detail.settlement.title', '找數')}
               </AppText>
-              <AppText style={styles.metaText}>
-                {translateWithFallback(t, 'game.detail.rules.variant', '牌型')}：{localizedVariant}
-              </AppText>
-              <AppText style={styles.metaText}>
-                {translateWithFallback(t, 'game.detail.rules.currency', '幣別')}：
-                {ruleSummary?.currencySymbol || '—'}
-              </AppText>
-              {typeof ruleSummary?.minFanToWin === 'number' ? (
+              {settlementDirections.length === 0 ? (
                 <AppText style={styles.metaText}>
-                  {translateWithFallback(t, 'game.detail.rules.minFan', '最低番數')}：{ruleSummary.minFanToWin}
+                  {translateWithFallback(t, 'game.detail.settlement.none', '無需找數')}
                 </AppText>
-              ) : null}
-              {ruleSummary?.variant === 'HK' ? (
-                <>
-                  <AppText style={styles.metaText}>
-                    {translateWithFallback(t, 'game.detail.rules.hkPreset', '計分模式')}：{localizedScoringPreset}
-                  </AppText>
-                  {ruleSummary.scoringPreset === 'traditionalFan' ? (
-                    <>
-                      <AppText style={styles.metaText}>
-                        {translateWithFallback(t, 'game.detail.rules.hkGunMode', '銃制')}：{localizedGunMode}
-                      </AppText>
-                      <AppText style={styles.metaText}>
-                        {translateWithFallback(t, 'game.detail.rules.hkStake', '注碼')}：{localizedStakePreset}
-                      </AppText>
-                    </>
-                  ) : null}
-                  {customUnitPerFanLine ? (
-                    <AppText style={styles.metaText}>{customUnitPerFanLine}</AppText>
-                  ) : null}
-                  {customMultiplierSummary ? (
-                    <AppText style={styles.metaText}>{customMultiplierSummary}</AppText>
-                  ) : null}
-                  <AppText style={styles.metaText}>
-                    {translateWithFallback(t, 'game.detail.rules.hkCapFan', '爆棚')}：
-                    {ruleSummary.capFan == null ? '∞' : ruleSummary.capFan}
-                  </AppText>
-                </>
-              ) : null}
+              ) : settlementDirections.map((direction) => {
+                const fromName = rankedPlayers.find((player) => player.playerId === direction.fromPlayerId)?.displayName ?? direction.fromPlayerId;
+                const toName = rankedPlayers.find((player) => player.playerId === direction.toPlayerId)?.displayName ?? direction.toPlayerId;
+                const amount = formatMoney(direction.amountQ / 4, bundle.game.currencySymbol ?? '');
+                return (
+                  <View
+                    key={`${direction.fromPlayerId}-${direction.toPlayerId}-${direction.amountQ}`}
+                    accessible
+                    accessibilityLabel={translateWithFallback(t, 'game.detail.accessibility.settlement', '{from} 付款給 {to} {amount}', { from: fromName, to: toName, amount })}
+                    style={styles.settlementRow}
+                  >
+                    <AppText numberOfLines={1} ellipsizeMode="tail" style={styles.settlementNames}>
+                      {`${fromName} ${translateWithFallback(t, 'game.detail.share.settlementArrow', '→')} ${toName}`}
+                    </AppText>
+                    <AppText style={styles.settlementAmount}>{amount}</AppText>
+                  </View>
+                );
+              })}
             </Card>
 
             <Card style={styles.card}>
-              <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.stats.title', '統計')}</AppText>
-              <AppText style={styles.statsHeadline}>
-                {translateWithFallback(t, 'game.detail.stats.hands', '手數')}：{handsCount}
-                {'  ·  '}
-                {translateWithFallback(t, 'game.detail.stats.draws', '流局')}：{gameStats?.draws ?? 0}
-              </AppText>
-              {rankedPlayers.map((player) => (
-                <AppText key={`wins-${player.playerId}`} style={styles.statsPlayerLine}>
-                  {player.name}：
-                  {translateWithFallback(t, 'game.detail.stats.wins', '食糊')} {gameStats?.winsByPlayerId[player.playerId] ?? 0}
-                  {' ｜ '}
-                  {translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} {gameStats?.zimoByPlayerId[player.playerId] ?? 0}
-                  {' ｜ '}
-                  {translateWithFallback(t, 'game.detail.stats.discards', '出銃')} {gameStats?.discardByPlayerId[player.playerId] ?? 0}
-                </AppText>
-              ))}
-              <AppText style={styles.statsHighlightLine}>
-                {translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}：
-                {gameStats?.mostDiscarder ? `${gameStats.mostDiscarder.displayName} (${gameStats.mostDiscarder.count})` : '—'}
-              </AppText>
-              <AppText style={styles.statsHighlightLine}>
-                {translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}：
-                {gameStats?.mostZimo ? `${gameStats.mostZimo.displayName} (${gameStats.mostZimo.count})` : '—'}
-              </AppText>
+              <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.highlights.title', '戰果重點')}</AppText>
+              <View style={styles.highlightsGrid}>
+                <View style={styles.highlightCell}>
+                  <AppText style={styles.highlightLabel}>{translateWithFallback(t, 'game.detail.stats.hands', '手數')}</AppText>
+                  <AppText style={styles.highlightValue}>{handsCount}</AppText>
+                </View>
+                <View style={styles.highlightCell}>
+                  <AppText style={styles.highlightLabel}>{translateWithFallback(t, 'game.detail.stats.draws', '流局')}</AppText>
+                  <AppText style={styles.highlightValue}>{gameStats?.draws ?? 0}</AppText>
+                </View>
+                <View style={styles.highlightCell}>
+                  <AppText style={styles.highlightLabel}>{translateWithFallback(t, 'game.detail.highlights.topZimo', '最多自摸')}</AppText>
+                  <AppText style={styles.highlightName}>{formatHighlight(zimoHighlight)}</AppText>
+                </View>
+                <View style={styles.highlightCell}>
+                  <AppText style={styles.highlightLabel}>{translateWithFallback(t, 'game.detail.highlights.topDiscard', '最多出銃')}</AppText>
+                  <AppText style={styles.highlightName}>{formatHighlight(discardHighlight)}</AppText>
+                </View>
+              </View>
             </Card>
 
             <Card style={styles.card}>
@@ -811,6 +765,8 @@ function GameDashboardScreen({ navigation, route }: Props) {
                     <Pressable
                       key={option.key}
                       testID={`hands-filter-${option.key}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
                       onPress={() => {
                         setHandFilter(option.key);
                         setCollapsedSections({});
@@ -833,6 +789,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
                   <Pressable
                     key={jump.wind}
                     testID={`jump-${jump.wind}`}
+                    accessibilityRole="button"
                     onPress={() => jumpToWind(jump.wind)}
                     style={styles.jumpButton}
                   >
@@ -846,17 +803,35 @@ function GameDashboardScreen({ navigation, route }: Props) {
           </>
         )}
         ListFooterComponent={
-          <>
-            <View style={styles.actionsWrap}>
-              <AppButton
-                label={translateWithFallback(t, 'game.detail.action.share', '分享')}
-                onPress={() => {
-                  handleShare().catch((shareError) => console.error('[GameDashboard] share failed', shareError));
-                }}
-                disabled={!isEnded}
-              />
-            </View>
-          </>
+          <Card style={styles.card}>
+            <Pressable
+              testID="dashboard-rules-toggle"
+              accessibilityRole="button"
+              accessibilityLabel={translateWithFallback(t, 'game.detail.rules.title', '規則摘要')}
+              accessibilityState={{ expanded: rulesExpanded }}
+              onPress={() => setRulesExpanded((expanded) => !expanded)}
+              style={styles.rulesHeader}
+            >
+              <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.rules.title', '規則摘要')}</AppText>
+              <AppText style={styles.rulesToggle}>{rulesExpanded ? '－' : '＋'}</AppText>
+            </Pressable>
+            {rulesExpanded ? (
+              <View>
+                <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.variant', '牌型')}：{localizedVariant}</AppText>
+                <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.currency', '幣別')}：{ruleSummary?.currencySymbol || '—'}</AppText>
+                {typeof ruleSummary?.minFanToWin === 'number' ? <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.minFan', '最低番數')}：{ruleSummary.minFanToWin}</AppText> : null}
+                {ruleSummary?.variant === 'HK' ? (
+                  <>
+                    <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.hkPreset', '計分模式')}：{localizedScoringPreset}</AppText>
+                    {ruleSummary.scoringPreset === 'traditionalFan' ? <><AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.hkGunMode', '銃制')}：{localizedGunMode}</AppText><AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.hkStake', '注碼')}：{localizedStakePreset}</AppText></> : null}
+                    {customUnitPerFanLine ? <AppText style={styles.metaText}>{customUnitPerFanLine}</AppText> : null}
+                    {customMultiplierSummary ? <AppText style={styles.metaText}>{customMultiplierSummary}</AppText> : null}
+                    <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.hkCapFan', '爆棚')}：{ruleSummary.capFan == null ? '∞' : ruleSummary.capFan}</AppText>
+                  </>
+                ) : null}
+              </View>
+            ) : null}
+          </Card>
         }
       />
     </ScreenContainer>
@@ -886,6 +861,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: theme.spacing.sm,
+  },
+  heroStatusWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    flexShrink: 1,
+  },
+  headerShareButton: {
+    minHeight: 40,
+    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.sm,
   },
   heroLabel: {
     ...typography.caption,
@@ -957,6 +943,7 @@ const styles = StyleSheet.create({
   },
   playerMetaWrap: {
     flex: 1,
+    minWidth: 0,
   },
   playerName: {
     ...typography.subtitle,
@@ -967,22 +954,54 @@ const styles = StyleSheet.create({
     ...typography.subtitle,
     color: theme.colors.textPrimary,
     fontWeight: '700',
+    flexShrink: 0,
+    marginLeft: theme.spacing.sm,
+    fontVariant: ['tabular-nums'],
   },
-  statsHeadline: {
+  settlementRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xs,
+  },
+  settlementNames: {
     ...typography.body,
     color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.sm,
-    fontWeight: '600',
+    flex: 1,
+    minWidth: 0,
   },
-  statsPlayerLine: {
+  settlementAmount: {
     ...typography.body,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+    flexShrink: 0,
+    marginLeft: theme.spacing.sm,
+    fontVariant: ['tabular-nums'],
+  },
+  highlightsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -theme.spacing.xs,
+  },
+  highlightCell: {
+    width: '50%',
+    paddingHorizontal: theme.spacing.xs,
+    paddingVertical: theme.spacing.sm,
+  },
+  highlightLabel: {
+    ...typography.caption,
     color: theme.colors.textSecondary,
-    marginBottom: 6,
+    marginBottom: 2,
   },
-  statsHighlightLine: {
+  highlightValue: {
+    ...typography.subtitle,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  highlightName: {
     ...typography.body,
     color: theme.colors.textPrimary,
-    marginTop: 4,
+    fontWeight: '600',
   },
   filterWrap: {
     flexDirection: 'row',
@@ -1051,6 +1070,17 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.xs,
     marginTop: theme.spacing.sm,
     paddingHorizontal: theme.spacing.xs,
+  },
+  rulesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  rulesToggle: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+    marginBottom: theme.spacing.sm,
   },
   windSectionTitle: {
     ...typography.body,
@@ -1142,9 +1172,6 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: theme.colors.textSecondary,
     marginBottom: 4,
-  },
-  actionsWrap: {
-    marginTop: theme.spacing.sm,
   },
   errorText: {
     color: theme.colors.danger,

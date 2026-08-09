@@ -387,23 +387,31 @@ describe('GameDashboardScreen', () => {
     expect(textContent).toContain('🥇');
     expect(textContent).toContain('Bob');
     expect(textContent).toContain('+HK$20');
-    expect(textContent).toContain('傳統番數');
-    expect(textContent).toContain('半銃');
-    expect(textContent).toContain('最多出銃');
-    expect(textContent).toContain('Alice (1)');
-    expect(textContent).toContain('最多自摸');
+    expect(textContent).toContain('找數');
+    expect(textContent).toContain('Alice → Bob');
+    expect(textContent).toContain('戰果重點');
+    expect(textContent).toContain('Alice ×1');
+    expect(textContent).toContain('規則摘要');
+    expect(textContent).not.toContain('傳統番數');
     expect(textContent).toContain('—');
     expect(textContent).toContain('出銃');
     expect(textContent).not.toContain('traditionalFan');
     expect(textContent).not.toContain('halfGun');
 
     const rankingStart = textContent.indexOf('玩家排名');
-    const rankingEnd = textContent.indexOf('規則摘要');
+    const rankingEnd = textContent.indexOf('找數');
     const rankingSlice = textContent.slice(rankingStart, rankingEnd);
     expect(rankingSlice).not.toContain('\n東\n');
     expect(rankingSlice).not.toContain('\n南\n');
     expect(rankingSlice).not.toContain('\n西\n');
     expect(rankingSlice).not.toContain('\n北\n');
+
+    await act(async () => {
+      (tree! as renderer.ReactTestRenderer).root.findByProps({ testID: 'dashboard-rules-toggle' }).props.onPress();
+    });
+    const expandedText = (tree! as renderer.ReactTestRenderer).root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(expandedText).toContain('傳統番數');
+    expect(expandedText).toContain('半銃');
 
     await act(async () => {
       (tree! as renderer.ReactTestRenderer).unmount();
@@ -640,6 +648,9 @@ describe('GameDashboardScreen', () => {
       await Promise.resolve();
     });
 
+    await act(async () => {
+      (tree! as renderer.ReactTestRenderer).root.findByProps({ testID: 'dashboard-rules-toggle' }).props.onPress();
+    });
     const textContent = (tree! as renderer.ReactTestRenderer).root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
     expect(textContent).toContain('自訂番數（價錢表）');
     expect(textContent).toContain('每番金額：HK$0.5');
@@ -712,10 +723,11 @@ describe('GameDashboardScreen', () => {
     const payload = shareSpy.mock.calls[0][0] as { message: string };
     expect(payload.message).toContain('Ended Match');
     expect(payload.message).toContain('Ended Match — 01/01/2025');
-    expect(payload.message).toContain('玩家排名');
-    expect(payload.message).toContain('結算方向');
+    expect(payload.message).toContain('牌局戰果');
+    expect(payload.message).toContain('找數');
     expect(payload.message).toContain('Alice → Bob HK$20');
     expect(payload.message).toContain('最多出銃');
+    expect(payload.message).not.toContain('食糊 1 ｜');
     expect(payload.message).not.toMatch(/game\.detail\./);
     expect(payload.message).not.toMatch(/share\./);
     expect(payload.message).not.toContain('undefined');
@@ -746,6 +758,10 @@ describe('GameDashboardScreen', () => {
     });
 
     const payload = shareSpy.mock.calls[0][0] as { message: string };
+    expect(payload.message).toContain('1. Alice +HK$20');
+    expect(payload.message).toContain('1. Bob +HK$20');
+    expect(payload.message).toContain('3. Carol -HK$20');
+    expect(payload.message).toContain('3. David -HK$20');
     expect(payload.message).not.toContain('(+1 more)');
     expect(payload.message).not.toContain('（另 +');
 
@@ -813,6 +829,82 @@ describe('GameDashboardScreen', () => {
     shareSpy.mockRestore();
     await act(async () => {
       (tree! as renderer.ReactTestRenderer).unmount();
+    });
+  });
+
+  it('keeps zero-balance results readable with no settlement and accessible collapsed sections', async () => {
+    const bundle = createEndedBundle();
+    bundle.hands = bundle.hands.map((hand) => ({
+      ...hand,
+      deltasJson: JSON.stringify([0, 0, 0, 0]),
+    })) as typeof bundle.hands;
+    bundle.game.resultSummaryJson = JSON.stringify({ seatTotalsQ: [0, 0, 0, 0], playersCount: 4 });
+    bundle.players = bundle.players.map((player, index) => ({
+      ...player,
+      name: index === 0 ? 'A very long English player name that should not hide the balance' : player.name,
+    }));
+    mockedGetGameBundle.mockResolvedValueOnce(bundle as any);
+    let resolveShare: ((value: { action: never }) => void) | null = null;
+    const shareSpy = jest.spyOn(Share, 'share').mockImplementation(
+      () => new Promise((resolve) => { resolveShare = resolve as (value: { action: never }) => void; }),
+    );
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'zero', name: 'GameDashboard', params: { gameId: bundle.game.id } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const root = tree!.root;
+    const text = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(text).toContain('無需找數');
+    expect((text.match(/🥇/g) ?? [])).toHaveLength(4);
+    expect(text).toContain('A very long English player name that should not hide the balance');
+    expect(text).toContain('0');
+    expect(root.findByProps({ testID: 'wind-section-東風' }).props.accessibilityState).toEqual({ expanded: false });
+    expect(root.findByProps({ testID: 'dashboard-rules-toggle' }).props.accessibilityState).toEqual({ expanded: false });
+
+    const shareButton = root.findByProps({ testID: 'dashboard-share' });
+    await act(async () => {
+      shareButton.props.onPress();
+      shareButton.props.onPress();
+    });
+    expect(shareSpy).toHaveBeenCalledTimes(1);
+    expect((shareSpy.mock.calls[0][0] as { message: string }).message).toContain('無需找數');
+    await act(async () => {
+      resolveShare?.({ action: 'dismissedAction' as never });
+      await Promise.resolve();
+    });
+
+    shareSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('shows a user-facing message when native sharing rejects', async () => {
+    mockedGetGameBundle.mockResolvedValueOnce(createEndedBundle() as any);
+    const shareSpy = jest.spyOn(Share, 'share').mockRejectedValue(new Error('share unavailable'));
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'share-error', name: 'GameDashboard', params: { gameId: 'g-ended' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await tree!.root.findByProps({ testID: 'dashboard-share' }).props.onPress();
+    });
+    expect(alertSpy).toHaveBeenCalledWith('未能分享結果', '請稍後再試。');
+
+    alertSpy.mockRestore();
+    shareSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
     });
   });
 });

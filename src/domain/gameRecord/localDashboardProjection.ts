@@ -183,6 +183,34 @@ function seatAssignmentsFromPlayers(bundle: GameBundle): CanonicalSeatAssignment
     .sort((left, right) => left.seatIndex - right.seatIndex) as CanonicalSeatAssignment[];
 }
 
+/**
+ * Legacy records do not store settlement directions. This is the same final-balance
+ * transfer allocation formerly used only by Dashboard sharing, now owned by the selected
+ * projection so every local result surface reads one presentation source.
+ */
+function buildLegacySettlementDirections(players: readonly DashboardPlayerRow[]): DashboardSettlementDirection[] {
+  const winners = players
+    .filter((player) => player.totalQ > 0)
+    .map((player) => ({ ...player, remainingQ: player.totalQ }))
+    .sort((left, right) => right.remainingQ - left.remainingQ);
+  const losers = players
+    .filter((player) => player.totalQ < 0)
+    .map((player) => ({ ...player, remainingQ: Math.abs(player.totalQ) }))
+    .sort((left, right) => right.remainingQ - left.remainingQ);
+  const directions: DashboardSettlementDirection[] = [];
+
+  losers.forEach((loser) => {
+    winners.forEach((winner) => {
+      if (loser.remainingQ <= 0 || winner.remainingQ <= 0) return;
+      const amountQ = Math.min(loser.remainingQ, winner.remainingQ);
+      directions.push({ fromPlayerId: loser.playerId, toPlayerId: winner.playerId, amountQ });
+      loser.remainingQ -= amountQ;
+      winner.remainingQ -= amountQ;
+    });
+  });
+  return directions.filter((direction) => direction.amountQ > 0);
+}
+
 function buildLegacyLocalDashboardProjection(bundle: GameBundle): LocalDashboardProjection {
   const stats = computeGameStats(bundle);
   const orderedHands = bundle.hands.slice().sort((left, right) => left.handIndex - right.handIndex);
@@ -232,7 +260,7 @@ function buildLegacyLocalDashboardProjection(bundle: GameBundle): LocalDashboard
         : null,
       zeroSum: stats.zeroSumOk,
     },
-    settlementDirections: [],
+    settlementDirections: buildLegacySettlementDirections(players),
     hands,
     ruleSummary: ruleSummaryFromBundle(bundle),
   };

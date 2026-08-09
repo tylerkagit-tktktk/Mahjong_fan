@@ -111,6 +111,19 @@ describe('local dashboard projection', () => {
     expect(result.projection.players).toHaveLength(4);
   });
 
+  it('provides legacy settlement directions from the selected projection', () => {
+    const bundle = explicitEndedBundle();
+
+    const result = buildLocalDashboardProjection({ bundle, localReplayResult: null });
+
+    expect(result).toMatchObject({ source: 'legacy', fallbackReason: 'ADAPTER_NOT_OK' });
+    expect(result.projection.settlementDirections).toEqual([
+      { fromPlayerId: 'p0', toPlayerId: 'p1', amountQ: 16 },
+      { fromPlayerId: 'p2', toPlayerId: 'p1', amountQ: 8 },
+      { fromPlayerId: 'p3', toPlayerId: 'p1', amountQ: 8 },
+    ]);
+  });
+
   it('uses a stable legacy fallback for an active game without attempting canonical projection', () => {
     const bundle = explicitEndedBundle();
     bundle.game.gameState = 'active';

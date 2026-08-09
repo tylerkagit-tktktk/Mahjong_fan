@@ -18,6 +18,8 @@ const touchedKeys = [
   'game.detail.accessibility.timeline',
   'game.detail.highlights.title',
   'game.detail.hands.title',
+  'game.detail.hands.count',
+  'game.detail.hands.countOne',
   'game.detail.timeline.handNumber',
   'game.detail.timeline.summary.zimo',
   'game.detail.timeline.summary.discard',
@@ -48,5 +50,14 @@ describe('game detail i18n keys', () => {
 
   it('contains touched keys for zh-Hans', () => {
     assertKeys(zhHans as Dict);
+  });
+
+  it('uses the established hand terminology for history counts', () => {
+    expect(en['game.detail.hands.count']).toBe('{{count}} hands');
+    expect(en['game.detail.hands.countOne']).toBe('{{count}} hand');
+    expect(zhHant['game.detail.hands.count']).toBe('{{count}} 鋪');
+    expect(zhHant['game.detail.hands.countOne']).toBe('{{count}} 鋪');
+    expect(zhHans['game.detail.hands.count']).toBe('{{count}} 铺');
+    expect(zhHans['game.detail.hands.countOne']).toBe('{{count}} 铺');
   });
 });

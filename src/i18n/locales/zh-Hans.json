@@ -30,6 +30,8 @@
   "game.detail.hand.win": "食糊",
   "game.detail.hand.zimo": "自摸",
   "game.detail.hands.title": "牌局记录",
+  "game.detail.hands.count": "{{count}} 铺",
+  "game.detail.hands.countOne": "{{count}} 铺",
   "game.detail.header.date": "日期",
   "game.detail.header.handsPlayed": "已打 {count} 铺",
   "game.detail.header.statusEnded": "已结束",

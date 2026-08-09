@@ -134,11 +134,12 @@ function getWinnerGain(
 
 function GameDashboardScreen({ navigation, route }: Props) {
   const { gameId } = route.params;
-  const { t } = useAppLanguage();
+  const { t, language } = useAppLanguage();
 
   const [bundle, setBundle] = useState<GameBundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [rulesExpanded, setRulesExpanded] = useState(false);
   const [sharing, setSharing] = useState(false);
 
@@ -154,6 +155,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
     setError(null);
     const data = await getGameBundle(gameId);
     setBundle(data);
+    setHistoryExpanded(false);
     setRulesExpanded(false);
     setLoading(false);
   }, [gameId]);
@@ -260,6 +262,16 @@ function GameDashboardScreen({ navigation, route }: Props) {
       isFirst: sectionIndex === 0,
     }));
   }, [handDisplayList]);
+
+  const effectiveHandCount = handDisplayList.length;
+  const historyCountLabel = translateWithFallback(
+    t,
+    effectiveHandCount === 1 ? 'game.detail.hands.countOne' : 'game.detail.hands.count',
+    '{count} 鋪',
+    { count: effectiveHandCount },
+  );
+  const historyTitle = translateWithFallback(t, 'game.detail.hands.title', '牌局紀錄');
+  const historyAccessibilityLabel = `${historyTitle}${language === 'en' ? ', ' : '，'}${historyCountLabel}`;
 
   const handsCount = gameStats?.handsCount ?? bundle?.game.handsCount ?? 0;
 
@@ -508,7 +520,7 @@ function GameDashboardScreen({ navigation, route }: Props) {
   return (
     <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
       <SectionList
-        sections={handSections}
+        sections={historyExpanded ? handSections : []}
         keyExtractor={(item) => item.hand.id}
         renderItem={renderHandItem}
         renderSectionHeader={renderSectionHeader}
@@ -599,9 +611,23 @@ function GameDashboardScreen({ navigation, route }: Props) {
               </View>
             </Card>
 
-            <View testID="dashboard-history-title" style={styles.historyTitleWrap}>
-              <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.hands.title', '牌局紀錄')}</AppText>
-            </View>
+            <Pressable
+              testID="dashboard-history-toggle"
+              accessibilityRole="button"
+              accessibilityLabel={historyAccessibilityLabel}
+              accessibilityState={{
+                expanded: historyExpanded,
+                disabled: effectiveHandCount === 0,
+              }}
+              disabled={effectiveHandCount === 0}
+              onPress={() => setHistoryExpanded((expanded) => !expanded)}
+              style={styles.historyDisclosure}
+            >
+              <AppText style={styles.historyTitle}>{`${historyTitle} · ${historyCountLabel}`}</AppText>
+              {effectiveHandCount > 0 ? (
+                <AppText style={styles.historyToggle}>{historyExpanded ? '－' : '＋'}</AppText>
+              ) : null}
+            </Pressable>
           </>
         )}
         ListFooterComponent={
@@ -770,8 +796,26 @@ const styles = StyleSheet.create({
     color: theme.colors.textPrimary,
     fontWeight: '600',
   },
-  historyTitleWrap: {
+  historyDisclosure: {
     paddingTop: theme.spacing.xs,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  historyTitle: {
+    ...typography.subtitle,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+    flex: 1,
+    minWidth: 0,
+    marginRight: theme.spacing.sm,
+  },
+  historyToggle: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+    flexShrink: 0,
   },
   handRow: {
     paddingTop: theme.spacing.sm,

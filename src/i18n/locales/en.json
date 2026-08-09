@@ -30,6 +30,8 @@
   "game.detail.hand.win": "Win",
   "game.detail.hand.zimo": "Self Draw",
   "game.detail.hands.title": "Hand history",
+  "game.detail.hands.count": "{{count}} hands",
+  "game.detail.hands.countOne": "{{count}} hand",
   "game.detail.header.date": "Date",
   "game.detail.header.handsPlayed": "{count} hands played",
   "game.detail.header.statusEnded": "Ended",

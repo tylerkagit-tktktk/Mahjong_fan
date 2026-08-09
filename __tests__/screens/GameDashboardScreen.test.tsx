@@ -1,6 +1,6 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Alert, Share, StyleSheet, Text } from 'react-native';
+import { Alert, SectionList, Share, StyleSheet, Text } from 'react-native';
 import AppButton from '../../src/components/AppButton';
 import GameDashboardScreen from '../../src/screens/GameDashboardScreen';
 import { getGameBundle } from '../../src/db/repo';
@@ -388,6 +388,50 @@ function createMultiWindBundle() {
   };
 }
 
+function createLongHistoryBundle() {
+  const ended = createEndedBundle();
+  const draw = ended.hands[1];
+  return {
+    ...ended,
+    game: {
+      ...ended.game,
+      id: 'g-long-history',
+      title: 'Long History Match',
+      handsCount: 30,
+      currentRoundLabelZh: '東風東局',
+      resultSummaryJson: JSON.stringify({ seatTotalsQ: [0, 0, 0, 0], playersCount: 4 }),
+    },
+    players: ended.players.map((player) => ({ ...player, gameId: 'g-long-history' })),
+    hands: Array.from({ length: 30 }, (_, handIndex) => ({
+      ...draw,
+      id: `long-${handIndex}`,
+      gameId: 'g-long-history',
+      handIndex,
+      dealerSeatIndex: 0,
+      nextRoundLabelZh: '東風東局',
+      computedJson: JSON.stringify({ settlementType: 'draw', dealerAction: 'stick' }),
+      deltasJson: JSON.stringify([0, 0, 0, 0]),
+    })),
+  };
+}
+
+function createEmptyHistoryBundle() {
+  const ended = createEndedBundle();
+  return {
+    ...ended,
+    game: {
+      ...ended.game,
+      id: 'g-empty-history',
+      title: 'Empty History Match',
+      handsCount: 0,
+      currentRoundLabelZh: '東風東局',
+      resultSummaryJson: JSON.stringify({ seatTotalsQ: [0, 0, 0, 0], playersCount: 4 }),
+    },
+    players: ended.players.map((player) => ({ ...player, gameId: 'g-empty-history' })),
+    hands: [],
+  };
+}
+
 function createCustomTableBundle() {
   const ended = createEndedBundle();
   return {
@@ -430,6 +474,12 @@ describe('GameDashboardScreen', () => {
   function getHeaderShareItem() {
     const options = navigation.setOptions.mock.calls.at(-1)?.[0];
     return options?.unstable_headerRightItems?.()[0];
+  }
+
+  async function toggleHistory(tree: renderer.ReactTestRenderer) {
+    await act(async () => {
+      tree.root.findByProps({ testID: 'dashboard-history-toggle' }).props.onPress();
+    });
   }
 
   beforeEach(() => {
@@ -485,6 +535,14 @@ describe('GameDashboardScreen', () => {
     expect(rankingSlice).not.toContain('\n北\n');
     expect(textContent.indexOf('牌局統計')).toBeLessThan(textContent.indexOf('牌局紀錄'));
     expect(textContent.indexOf('牌局紀錄')).toBeLessThan(textContent.indexOf('規則摘要'));
+    const historyToggle = (tree! as renderer.ReactTestRenderer).root.findByProps({ testID: 'dashboard-history-toggle' });
+    expect(historyToggle.props.accessibilityRole).toBe('button');
+    expect(historyToggle.props.accessibilityLabel).toBe('牌局紀錄，2 鋪');
+    expect(historyToggle.props.accessibilityState).toEqual({ expanded: false, disabled: false });
+    expect(textContent).toContain('牌局紀錄 · 2 鋪');
+    expect(() => (tree! as renderer.ReactTestRenderer).root.findByProps({ testID: 'wind-section-東風' })).toThrow();
+    expect(() => (tree! as renderer.ReactTestRenderer).root.findByProps({ testID: 'hand-row-h1' })).toThrow();
+    expect((tree! as renderer.ReactTestRenderer).root.findByProps({ testID: 'dashboard-rules-toggle' }).props.accessibilityState).toEqual({ expanded: false });
 
     await act(async () => {
       (tree! as renderer.ReactTestRenderer).root.findByProps({ testID: 'dashboard-rules-toggle' }).props.onPress();
@@ -527,6 +585,7 @@ describe('GameDashboardScreen', () => {
     expect(payload.message).not.toContain('找數');
     shareSpy.mockRestore();
 
+    await toggleHistory(tree!);
     expect(root.findByProps({ testID: 'hand-row-h1' })).toBeTruthy();
     expect(root.findByProps({ testID: 'hand-row-h2' })).toBeTruthy();
     const timelineText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
@@ -579,7 +638,7 @@ describe('GameDashboardScreen', () => {
     });
   });
 
-  it('shows every hand as a chronological, non-interactive event timeline', async () => {
+  it('expands and collapses every hand as one chronological, non-interactive event timeline', async () => {
     mockedGetGameBundle.mockResolvedValueOnce(createEndedBundle() as any);
 
     let tree: renderer.ReactTestRenderer;
@@ -591,8 +650,18 @@ describe('GameDashboardScreen', () => {
     });
 
     const root = (tree! as renderer.ReactTestRenderer).root;
+    const collapsedText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    const historyToggle = root.findByProps({ testID: 'dashboard-history-toggle' });
+    expect(collapsedText).toContain('牌局紀錄 · 2 鋪');
+    expect(collapsedText).not.toContain('Bob 食糊 · Alice 出銃 · 4 番');
+    expect(historyToggle.props.accessibilityState).toEqual({ expanded: false, disabled: false });
+    expect(() => root.findByProps({ testID: 'hand-row-h1' })).toThrow();
+    expect(root.findByType(SectionList).props.sections).toEqual([]);
+
+    await toggleHistory(tree!);
     const allText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
-    expect(allText).toContain('牌局紀錄');
+    expect(root.findByProps({ testID: 'dashboard-history-toggle' }).props.accessibilityState).toEqual({ expanded: true, disabled: false });
+    expect(root.findByType(SectionList).props.sections).toHaveLength(1);
     expect(allText).toContain('Bob 食糊 · Alice 出銃 · 4 番');
     expect(allText).toContain('流局 · 留莊');
     expect(allText).not.toContain('載入更多');
@@ -620,7 +689,7 @@ describe('GameDashboardScreen', () => {
     expect(firstHandText).not.toContain('\n西\n');
     expect(firstHandText).not.toContain('\n北\n');
 
-    const historyTitleStyle = StyleSheet.flatten(root.findByProps({ testID: 'dashboard-history-title' }).props.style);
+    const historyTitleStyle = StyleSheet.flatten(root.findByProps({ testID: 'dashboard-history-toggle' }).props.style);
     const eventRowStyle = StyleSheet.flatten(root.findByProps({ testID: 'hand-event-row-h1' }).props.style);
     const gainStyle = StyleSheet.flatten(root.findByProps({ testID: 'hand-gain-h1' }).props.style);
     expect(historyTitleStyle.backgroundColor).toBeUndefined();
@@ -631,6 +700,11 @@ describe('GameDashboardScreen', () => {
     const windSection = root.findByProps({ testID: 'wind-section-東風' });
     expect(windSection.props.onPress).toBeUndefined();
     expect(windSection.props.accessibilityState).toBeUndefined();
+
+    await toggleHistory(tree!);
+    expect(root.findByProps({ testID: 'dashboard-history-toggle' }).props.accessibilityState).toEqual({ expanded: false, disabled: false });
+    expect(() => root.findByProps({ testID: 'hand-row-h1' })).toThrow();
+    expect(root.findByProps({ testID: 'dashboard-history-toggle' })).toBeTruthy();
 
     await act(async () => {
       (tree! as renderer.ReactTestRenderer).unmount();
@@ -648,11 +722,68 @@ describe('GameDashboardScreen', () => {
       await Promise.resolve();
     });
 
+    await toggleHistory(tree!);
     const row = tree!.root.findByProps({ testID: 'hand-row-draw-pass' });
     const rowText = row.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
     expect(rowText).toContain('流局 · 過莊');
     expect(rowText).not.toContain('HK$0');
     expect(row.props.accessibilityLabel).toBe('東風東局，流局 · 過莊');
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('keeps a 30-hand history compact until the global disclosure is opened', async () => {
+    mockedGetGameBundle.mockResolvedValueOnce(createLongHistoryBundle() as any);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'long-history', name: 'GameDashboard', params: { gameId: 'g-long-history' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const root = tree!.root;
+    const toggle = root.findByProps({ testID: 'dashboard-history-toggle' });
+    expect(toggle.props.accessibilityLabel).toBe('牌局紀錄，30 鋪');
+    expect(root.findByType(SectionList).props.sections).toEqual([]);
+    expect(() => root.findByProps({ testID: 'hand-row-long-0' })).toThrow();
+    expect(() => root.findByProps({ testID: 'hand-row-long-29' })).toThrow();
+
+    await toggleHistory(tree!);
+    expect(root.findByProps({ testID: 'hand-row-long-0' })).toBeTruthy();
+    const expandedSections = root.findByType(SectionList).props.sections;
+    expect(expandedSections).toHaveLength(1);
+    expect(expandedSections[0].data).toHaveLength(30);
+    expect(expandedSections[0].data[29].hand.id).toBe('long-29');
+    expect(root.findAllByType(Text).map((node) => String(node.props.children)).join('\n')).not.toContain('載入更多');
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('shows a disabled zero-hand disclosure instead of an expandable blank timeline', async () => {
+    mockedGetGameBundle.mockResolvedValueOnce(createEmptyHistoryBundle() as any);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'empty-history', name: 'GameDashboard', params: { gameId: 'g-empty-history' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const root = tree!.root;
+    const toggle = root.findByProps({ testID: 'dashboard-history-toggle' });
+    expect(toggle.props.accessibilityLabel).toBe('牌局紀錄，0 鋪');
+    expect(toggle.props.disabled).toBe(true);
+    expect(toggle.props.accessibilityState).toEqual({ expanded: false, disabled: true });
+    expect(toggle.findAllByType(Text).map((node) => String(node.props.children)).join('\n')).toBe('牌局紀錄 · 0 鋪');
+    expect(root.findByType(SectionList).props.sections).toEqual([]);
+    expect(root.findAll((node) => typeof node.props.testID === 'string' && node.props.testID.startsWith('hand-row-'))).toHaveLength(0);
 
     await act(async () => {
       tree!.unmount();
@@ -688,6 +819,7 @@ describe('GameDashboardScreen', () => {
       await Promise.resolve();
     });
 
+    await toggleHistory(tree!);
     const row = tree!.root.findByProps({ testID: 'hand-row-h1' });
     const rowText = row.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
     expect(rowText).toContain('VeryLongWinnerNameThatNeedsToWrap 食糊 · VeryLongDiscarderNameThatNeedsToWrap 出銃 · 4 番');
@@ -715,6 +847,9 @@ describe('GameDashboardScreen', () => {
     });
 
     const root = tree!.root;
+    expect(root.findByProps({ testID: 'dashboard-history-toggle' }).props.accessibilityLabel).toBe('牌局紀錄，5 鋪');
+    expect(() => root.findByProps({ testID: 'wind-section-東風' })).toThrow();
+    await toggleHistory(tree!);
     expect(root.findByProps({ testID: 'wind-section-東風' })).toBeTruthy();
     expect(root.findByProps({ testID: 'wind-section-南風' })).toBeTruthy();
     expect(root.findByProps({ testID: 'hand-row-multi-0' })).toBeTruthy();
@@ -739,6 +874,8 @@ describe('GameDashboardScreen', () => {
     });
 
     const root = tree!.root;
+    expect(root.findByProps({ testID: 'dashboard-history-toggle' }).props.accessibilityLabel).toBe('牌局紀錄，1 鋪');
+    await toggleHistory(tree!);
     const allText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
     expect(allText).toContain('Bob 自摸 · 10 番');
     expect(allText).not.toContain('Bob 自摸 · 36 番');
@@ -760,6 +897,7 @@ describe('GameDashboardScreen', () => {
     });
 
     const root = tree!.root;
+    await toggleHistory(tree!);
     const allText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
     expect(allText).toContain('Bob 食糊 · Alice 出銃 · 10 番');
     expect(allText).not.toContain('Bob 食糊 · Alice 出銃 · 32 番');
@@ -960,6 +1098,7 @@ describe('GameDashboardScreen', () => {
       await Promise.resolve();
     });
 
+    await toggleHistory(tree!);
     const timelineText = tree!.root.findByProps({ testID: 'hand-row-rt-h4' })
       .findAllByType(Text)
       .map((node) => String(node.props.children))
@@ -1017,7 +1156,8 @@ describe('GameDashboardScreen', () => {
     expect((text.match(/🥇/g) ?? [])).toHaveLength(4);
     expect(text).toContain('A very long English player name that should not hide the balance');
     expect(text).toContain('0');
-    expect(root.findByProps({ testID: 'wind-section-東風' }).props.accessibilityState).toBeUndefined();
+    expect(() => root.findByProps({ testID: 'wind-section-東風' })).toThrow();
+    expect(root.findByProps({ testID: 'dashboard-history-toggle' }).props.accessibilityState).toEqual({ expanded: false, disabled: false });
     expect(root.findByProps({ testID: 'dashboard-rules-toggle' }).props.accessibilityState).toEqual({ expanded: false });
 
     const shareButton = getHeaderShareItem();

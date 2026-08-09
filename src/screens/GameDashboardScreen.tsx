@@ -797,7 +797,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   historyDisclosure: {
-    paddingTop: theme.spacing.xs,
+    paddingVertical: theme.spacing.sm,
+    paddingRight: theme.spacing.sm,
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
@@ -816,6 +817,8 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontWeight: '600',
     flexShrink: 0,
+    minWidth: 24,
+    textAlign: 'center',
   },
   handRow: {
     paddingTop: theme.spacing.sm,
@@ -834,7 +837,7 @@ const styles = StyleSheet.create({
     paddingTop: theme.spacing.lg,
   },
   rulesCard: {
-    marginTop: theme.spacing.lg,
+    marginTop: theme.spacing.md,
     marginBottom: theme.spacing.md,
   },
   rulesHeader: {
@@ -847,6 +850,8 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     fontWeight: '600',
     marginBottom: theme.spacing.sm,
+    minWidth: 24,
+    textAlign: 'center',
   },
   windSectionTitle: {
     ...typography.subtitle,

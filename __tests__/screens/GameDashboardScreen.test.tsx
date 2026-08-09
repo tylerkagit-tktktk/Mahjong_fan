@@ -2,6 +2,7 @@ import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 import { Alert, SectionList, Share, StyleSheet, Text } from 'react-native';
 import AppButton from '../../src/components/AppButton';
+import Card from '../../src/components/Card';
 import GameDashboardScreen from '../../src/screens/GameDashboardScreen';
 import { getGameBundle } from '../../src/db/repo';
 import { aggregatePlayerTotalsQByTimeline } from '../../src/models/seatRotation';
@@ -690,6 +691,9 @@ describe('GameDashboardScreen', () => {
     expect(firstHandText).not.toContain('\n北\n');
 
     const historyTitleStyle = StyleSheet.flatten(root.findByProps({ testID: 'dashboard-history-toggle' }).props.style);
+    expect(historyTitleStyle.minHeight).toBeGreaterThanOrEqual(44);
+    expect(historyTitleStyle.paddingVertical).toBeGreaterThanOrEqual(10);
+    expect(historyTitleStyle.paddingRight).toBeGreaterThanOrEqual(10);
     const eventRowStyle = StyleSheet.flatten(root.findByProps({ testID: 'hand-event-row-h1' }).props.style);
     const gainStyle = StyleSheet.flatten(root.findByProps({ testID: 'hand-gain-h1' }).props.style);
     expect(historyTitleStyle.backgroundColor).toBeUndefined();
@@ -700,6 +704,9 @@ describe('GameDashboardScreen', () => {
     const windSection = root.findByProps({ testID: 'wind-section-東風' });
     expect(windSection.props.onPress).toBeUndefined();
     expect(windSection.props.accessibilityState).toBeUndefined();
+    const rulesCardStyle = StyleSheet.flatten(root.findAllByType(Card).at(-1)?.props.style);
+    expect(rulesCardStyle.marginTop).toBe(16);
+    expect(rulesCardStyle.marginBottom).toBe(16);
 
     await toggleHistory(tree!);
     expect(root.findByProps({ testID: 'dashboard-history-toggle' }).props.accessibilityState).toEqual({ expanded: false, disabled: false });

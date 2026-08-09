@@ -1,4 +1,4 @@
-import { getRoundLabel } from '../../models/dealer';
+import { getRoundLabel, getRoundLabelFromDealerState } from '../../models/dealer';
 import { computeGameStats } from '../../models/gameStats';
 import type { GameBundle, Hand } from '../../models/db';
 import type { LocalGameReplayResult } from '../../services/localGameReplay';
@@ -217,9 +217,10 @@ function buildLegacyLocalDashboardProjection(bundle: GameBundle): LocalDashboard
   const progressive: Hand[] = [];
   const effectiveSeats = seatAssignmentsFromPlayers(bundle);
   const hands = orderedHands.map((hand) => {
-    progressive.push(hand);
     const parsed = parseComputed(hand);
     const roundLabelZh = getRoundLabel(bundle.game.startingDealerSeatIndex, progressive).labelZh;
+    progressive.push(hand);
+    const derivedNextRoundLabelZh = getRoundLabel(bundle.game.startingDealerSeatIndex, progressive).labelZh;
     return {
       id: hand.id,
       handIndex: hand.handIndex,
@@ -233,7 +234,7 @@ function buildLegacyLocalDashboardProjection(bundle: GameBundle): LocalDashboard
       deltasQ: resolveDeltasQ(hand.deltasJson),
       effectiveSeats,
       roundLabelZh,
-      nextRoundLabelZh: hand.nextRoundLabelZh ?? roundLabelZh,
+      nextRoundLabelZh: hand.nextRoundLabelZh ?? derivedNextRoundLabelZh,
       windLabelZh: roundLabelZh.slice(0, 2),
     } satisfies DashboardHandRow;
   });
@@ -276,24 +277,30 @@ function buildCanonicalLocalDashboardProjection(bundle: GameBundle, replay: Repl
     finalSeatIndex: finalSeats.find((seat) => seat.playerId === entry.playerId)?.seatIndex ?? null,
   }));
   const statistics = replay.statistics!;
-  const hands = replay.handProjections.map((projection) => ({
-    id: projection.source.id,
-    handIndex: projection.source.handIndex,
-    occurredAt: projection.source.occurredAt,
-    outcome: projection.source.outcome,
-    winnerPlayerId: projection.source.winnerPlayerId,
-    winnerSeatIndex: projection.source.winnerPlayerId
-      ? projection.effectiveSeats.find((seat) => seat.playerId === projection.source.winnerPlayerId)?.seatIndex ?? null
-      : null,
-    discarderPlayerId: projection.source.discarderPlayerId,
-    fan: projection.source.fan,
-    drawDealerAction: projection.source.drawDealerAction,
-    deltasQ: projection.deltasQ,
-    effectiveSeats: projection.effectiveSeats,
-    roundLabelZh: projection.roundAfterHand?.nextRoundLabelZh ?? '',
-    nextRoundLabelZh: projection.roundAfterHand?.nextRoundLabelZh ?? '',
-    windLabelZh: (projection.roundAfterHand?.nextRoundLabelZh ?? '').slice(0, 2),
-  } satisfies DashboardHandRow));
+  const initialRoundLabelZh = getRoundLabelFromDealerState(bundle.game.startingDealerSeatIndex, 0).labelZh;
+  const hands = replay.handProjections.map((projection, index) => {
+    const roundLabelZh = index === 0
+      ? initialRoundLabelZh
+      : replay.handProjections[index - 1].roundAfterHand?.nextRoundLabelZh ?? initialRoundLabelZh;
+    return {
+      id: projection.source.id,
+      handIndex: projection.source.handIndex,
+      occurredAt: projection.source.occurredAt,
+      outcome: projection.source.outcome,
+      winnerPlayerId: projection.source.winnerPlayerId,
+      winnerSeatIndex: projection.source.winnerPlayerId
+        ? projection.effectiveSeats.find((seat) => seat.playerId === projection.source.winnerPlayerId)?.seatIndex ?? null
+        : null,
+      discarderPlayerId: projection.source.discarderPlayerId,
+      fan: projection.source.fan,
+      drawDealerAction: projection.source.drawDealerAction,
+      deltasQ: projection.deltasQ,
+      effectiveSeats: projection.effectiveSeats,
+      roundLabelZh,
+      nextRoundLabelZh: projection.roundAfterHand?.nextRoundLabelZh ?? roundLabelZh,
+      windLabelZh: roundLabelZh.slice(0, 2),
+    } satisfies DashboardHandRow;
+  });
   const rules = replay.source.rules;
   const canonicalRules: CanonicalHkRules | null = rules.variant === 'HK' && 'currencySymbol' in rules
     ? rules as CanonicalHkRules

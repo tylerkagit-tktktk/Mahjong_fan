@@ -74,7 +74,7 @@ describe('local dashboard projection', () => {
     expect(result.projection.statistics).toMatchObject({ handsCount: 1, draws: 0, zeroSum: true });
     expect(result.projection.hands[0]).toMatchObject({
       id: 'h0', outcome: 'discard', winnerPlayerId: 'p1', discarderPlayerId: 'p0', fan: 3,
-      roundLabelZh: '東風南局', nextRoundLabelZh: '東風南局',
+      roundLabelZh: '東風東局', nextRoundLabelZh: '東風南局', windLabelZh: '東風',
     });
     expect(result.projection.settlementDirections).toEqual(replay.replay?.settlementDirections);
     expect(result.projection.ruleSummary).toMatchObject({ variant: 'HK', minFanToWin: 3, gunMode: 'halfGun' });
@@ -98,6 +98,46 @@ describe('local dashboard projection', () => {
     expect(projection.players.find((player) => player.playerId === 'p3')?.finalSeatIndex).toBe(0);
   });
 
+  it('uses the explicit effective seat boundary for hand identities without changing chronology', () => {
+    const bundle = explicitEndedBundle();
+    const deltasQ = JSON.parse(bundle.hands[0].deltasJson ?? '{}').values as number[];
+    bundle.players = players(bundle.game.id, ['p2', 'p3', 'p0', 'p1']);
+    bundle.hands[0] = {
+      ...bundle.hands[0],
+      winnerPlayerId: 'p3',
+      discarderPlayerId: 'p2',
+    };
+    bundle.seatBoundaries = [{
+      id: 'opening-boundary',
+      gameId: bundle.game.id,
+      effectiveFromHandIndex: 0,
+      seatMapping: { 0: 'p2', 1: 'p3', 2: 'p0', 3: 'p1' },
+      reason: 'confirmed_reseat',
+      createdAt: 1_699_999_999_999,
+    }];
+    bundle.game.resultSummaryJson = JSON.stringify({
+      seatTotalsQ: deltasQ,
+      playerTotalsQ: { p2: deltasQ[0], p3: deltasQ[1], p0: deltasQ[2], p1: deltasQ[3] },
+      playersCount: 4,
+    });
+
+    const replay = replayLocalGameBundle(bundle);
+    expect(replay.authoritative).toBe(true);
+    const projection = buildLocalDashboardProjection({ bundle, localReplayResult: replay }).projection;
+
+    expect(projection.hands[0]).toMatchObject({
+      winnerPlayerId: 'p3',
+      discarderPlayerId: 'p2',
+      roundLabelZh: '東風東局',
+    });
+    expect(projection.hands[0].effectiveSeats).toEqual([
+      { seatIndex: 0, playerId: 'p2' },
+      { seatIndex: 1, playerId: 'p3' },
+      { seatIndex: 2, playerId: 'p0' },
+      { seatIndex: 3, playerId: 'p1' },
+    ]);
+  });
+
   it('falls back without losing legacy presentation data when replay is not authoritative', () => {
     const bundle = explicitEndedBundle();
     bundle.hands[0].deltasJson = JSON.stringify([0, 0, 0, 0]);
@@ -109,6 +149,11 @@ describe('local dashboard projection', () => {
     expect(result.fallbackReason).toBe('REPLAY_INVALID');
     expect(result.projection.hands).toHaveLength(1);
     expect(result.projection.players).toHaveLength(4);
+    expect(result.projection.hands[0]).toMatchObject({
+      roundLabelZh: '東風東局',
+      nextRoundLabelZh: '東風南局',
+      windLabelZh: '東風',
+    });
   });
 
   it('provides legacy settlement directions from the selected projection', () => {

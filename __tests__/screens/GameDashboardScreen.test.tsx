@@ -328,6 +328,66 @@ function createFanSummaryFromComputedBundle() {
   };
 }
 
+function createDrawPassBundle() {
+  const ended = createEndedBundle();
+  return {
+    ...ended,
+    game: {
+      ...ended.game,
+      id: 'g-draw-pass',
+      title: 'Draw Pass Match',
+      handsCount: 1,
+      resultSummaryJson: JSON.stringify({ seatTotalsQ: [0, 0, 0, 0], playersCount: 4 }),
+    },
+    players: ended.players.map((player) => ({ ...player, gameId: 'g-draw-pass' })),
+    hands: [{
+      ...ended.hands[1],
+      id: 'draw-pass',
+      gameId: 'g-draw-pass',
+      handIndex: 0,
+      dealerSeatIndex: 0,
+      computedJson: JSON.stringify({ settlementType: 'draw', dealerAction: 'pass' }),
+      deltasJson: JSON.stringify([0, 0, 0, 0]),
+      nextRoundLabelZh: '東風南局',
+    }],
+  };
+}
+
+function createMultiWindBundle() {
+  const ended = createEndedBundle();
+  const wins = [
+    { winnerSeatIndex: 1, winnerPlayerId: 'p1', discarderPlayerId: 'p0', deltas: [-40, 40, 0, 0], next: '東風南局' },
+    { winnerSeatIndex: 2, winnerPlayerId: 'p2', discarderPlayerId: 'p1', deltas: [0, -40, 40, 0], next: '東風西局' },
+    { winnerSeatIndex: 3, winnerPlayerId: 'p3', discarderPlayerId: 'p2', deltas: [0, 0, -40, 40], next: '東風北局' },
+    { winnerSeatIndex: 0, winnerPlayerId: 'p0', discarderPlayerId: 'p3', deltas: [40, 0, 0, -40], next: '南風東局' },
+    { winnerSeatIndex: 1, winnerPlayerId: 'p1', discarderPlayerId: 'p0', deltas: [-40, 40, 0, 0], next: '南風南局' },
+  ];
+  return {
+    ...ended,
+    game: {
+      ...ended.game,
+      id: 'g-multi-wind',
+      title: 'Multi Wind Match',
+      handsCount: wins.length,
+      currentRoundLabelZh: '南風南局',
+      resultSummaryJson: JSON.stringify({ seatTotalsQ: [-40, 40, 0, 0], playersCount: 4 }),
+    },
+    players: ended.players.map((player) => ({ ...player, gameId: 'g-multi-wind' })),
+    hands: wins.map((win, handIndex) => ({
+      ...ended.hands[0],
+      id: `multi-${handIndex}`,
+      gameId: 'g-multi-wind',
+      handIndex,
+      dealerSeatIndex: handIndex % 4,
+      winnerSeatIndex: win.winnerSeatIndex,
+      winnerPlayerId: win.winnerPlayerId,
+      discarderPlayerId: win.discarderPlayerId,
+      deltasJson: JSON.stringify(win.deltas),
+      nextRoundLabelZh: win.next,
+    })),
+  };
+}
+
 function createCustomTableBundle() {
   const ended = createEndedBundle();
   return {
@@ -364,7 +424,13 @@ describe('GameDashboardScreen', () => {
     navigate: jest.fn(),
     goBack: jest.fn(),
     replace: jest.fn(),
+    setOptions: jest.fn(),
   } as any;
+
+  function getHeaderShareItem() {
+    const options = navigation.setOptions.mock.calls.at(-1)?.[0];
+    return options?.unstable_headerRightItems?.()[0];
+  }
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -387,9 +453,10 @@ describe('GameDashboardScreen', () => {
     expect(textContent).toContain('🥇');
     expect(textContent).toContain('Bob');
     expect(textContent).toContain('+HK$20');
-    expect(textContent).toContain('找數');
-    expect(textContent).toContain('Alice → Bob');
-    expect(textContent).toContain('戰果重點');
+    expect(textContent).not.toContain('找數');
+    expect(textContent).not.toContain('Alice → Bob');
+    expect(textContent).toContain('牌局統計');
+    expect(textContent).toContain('牌局紀錄');
     expect(textContent).toContain('Alice ×1');
     expect(textContent).toContain('規則摘要');
     expect(textContent).not.toContain('傳統番數');
@@ -397,14 +464,24 @@ describe('GameDashboardScreen', () => {
     expect(textContent).toContain('出銃');
     expect(textContent).not.toContain('traditionalFan');
     expect(textContent).not.toContain('halfGun');
+    expect(getHeaderShareItem()).toMatchObject({
+      type: 'button',
+      label: '分享戰果',
+      accessibilityLabel: '分享戰果',
+      disabled: false,
+      icon: { type: 'sfSymbol', name: 'square.and.arrow.up' },
+    });
+    expect((tree! as renderer.ReactTestRenderer).root.findAllByType(AppButton).map((button) => button.props.label)).not.toContain('分享');
 
     const rankingStart = textContent.indexOf('玩家排名');
-    const rankingEnd = textContent.indexOf('找數');
+    const rankingEnd = textContent.indexOf('牌局統計');
     const rankingSlice = textContent.slice(rankingStart, rankingEnd);
     expect(rankingSlice).not.toContain('\n東\n');
     expect(rankingSlice).not.toContain('\n南\n');
     expect(rankingSlice).not.toContain('\n西\n');
     expect(rankingSlice).not.toContain('\n北\n');
+    expect(textContent.indexOf('牌局統計')).toBeLessThan(textContent.indexOf('牌局紀錄'));
+    expect(textContent.indexOf('牌局紀錄')).toBeLessThan(textContent.indexOf('規則摘要'));
 
     await act(async () => {
       (tree! as renderer.ReactTestRenderer).root.findByProps({ testID: 'dashboard-rules-toggle' }).props.onPress();
@@ -439,19 +516,19 @@ describe('GameDashboardScreen', () => {
     expect(mockedGetGameBundle).toHaveBeenCalledTimes(1);
 
     const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' as never });
-    const shareButton = root.findAllByType(AppButton).find((button) => button.props.label === '分享');
     await act(async () => {
-      await shareButton?.props.onPress();
+      await getHeaderShareItem().onPress();
     });
     const payload = shareSpy.mock.calls[0][0] as { message: string };
-    expect(payload.message).toContain('Alice → Bob HK$8');
+    expect(payload.message).not.toContain('Alice → Bob HK$8');
+    expect(payload.message).not.toContain('找數');
     shareSpy.mockRestore();
 
-    await act(async () => {
-      root.findByProps({ testID: 'wind-section-東風' }).props.onPress();
-    });
     expect(root.findByProps({ testID: 'hand-row-h1' })).toBeTruthy();
     expect(root.findByProps({ testID: 'hand-row-h2' })).toBeTruthy();
+    const timelineText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(timelineText).toContain('東風東局');
+    expect(timelineText).toContain('東風南局');
 
     await act(async () => {
       tree!.unmount();
@@ -499,7 +576,7 @@ describe('GameDashboardScreen', () => {
     });
   });
 
-  it('shows win/draw rows and expands hand details', async () => {
+  it('shows every hand as a chronological, non-interactive event timeline', async () => {
     mockedGetGameBundle.mockResolvedValueOnce(createEndedBundle() as any);
 
     let tree: renderer.ReactTestRenderer;
@@ -512,55 +589,84 @@ describe('GameDashboardScreen', () => {
 
     const root = (tree! as renderer.ReactTestRenderer).root;
     const allText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
-    expect(allText).toContain('流局');
+    expect(allText).toContain('牌局紀錄');
+    expect(allText).toContain('Bob 食糊 · Alice 出銃 · 4 番');
+    expect(allText).toContain('流局 · 留莊');
     expect(allText).not.toContain('載入更多');
-    expect(root.findByProps({ testID: 'hands-filter-all' })).toBeTruthy();
-    expect(root.findByProps({ testID: 'hands-filter-wins' })).toBeTruthy();
-    expect(root.findByProps({ testID: 'hands-filter-draws' })).toBeTruthy();
-    expect(root.findByProps({ testID: 'jump-東風' })).toBeTruthy();
-    expect(root.findByProps({ testID: 'jump-南風' })).toBeTruthy();
-    expect(allText).toContain('＋');
+    expect(() => root.findByProps({ testID: 'hands-filter-all' })).toThrow();
+    expect(() => root.findByProps({ testID: 'hands-filter-wins' })).toThrow();
+    expect(() => root.findByProps({ testID: 'hands-filter-draws' })).toThrow();
+    expect(() => root.findByProps({ testID: 'jump-東風' })).toThrow();
+    expect(() => root.findByProps({ testID: 'jump-南風' })).toThrow();
 
-    expect(() => root.findByProps({ testID: 'hand-row-h1' })).toThrow();
+    const firstHand = root.findByProps({ testID: 'hand-row-h1' });
+    const secondHand = root.findByProps({ testID: 'hand-row-h2' });
+    expect(firstHand).toBeTruthy();
+    expect(secondHand).toBeTruthy();
+    expect(firstHand.props.onPress).toBeUndefined();
+    expect(firstHand.props.accessibilityLabel).toBe('東風東局，Bob 食糊 · Alice 出銃 · 4 番');
+    expect(secondHand.props.accessibilityLabel).toBe('東風南局，流局 · 留莊');
+    expect(allText.indexOf('Bob 食糊 · Alice 出銃 · 4 番')).toBeLessThan(allText.indexOf('流局 · 留莊'));
+
+    const firstHandText = firstHand.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(firstHandText).toContain('Bob +HK$20');
+    expect(firstHandText).not.toContain('\n東\n');
+    expect(firstHandText).not.toContain('\n南\n');
+    expect(firstHandText).not.toContain('\n西\n');
+    expect(firstHandText).not.toContain('\n北\n');
 
     const windSection = root.findByProps({ testID: 'wind-section-東風' });
-    await act(async () => {
-      windSection.props.onPress();
-    });
-    expect(root.findAllByType(Text).map((node) => String(node.props.children)).join('\n')).toContain('Alice 出銃比 Bob 4 番');
-
-    const firstHandPressable = root.findByProps({ testID: 'hand-row-h1' });
-    await act(async () => {
-      firstHandPressable.props.onPress();
-    });
-    expect(root.findByProps({ testID: 'hand-row-h2' })).toBeTruthy();
-
-    const expandedText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
-    expect(expandedText).toContain('贏家');
-    expect(expandedText).toContain('點炮者');
-    expect(expandedText).not.toContain('計算資料');
-    expect(expandedText).not.toContain('{"dealerAction":"stick"}');
-    expect(expandedText).not.toContain('[-80,80,0,0]');
-
-    await act(async () => {
-      windSection.props.onPress();
-    });
-    expect(() => root.findByProps({ testID: 'hand-row-h1' })).toThrow();
-
-    const winsFilter = root.findByProps({ testID: 'hands-filter-wins' });
-    await act(async () => {
-      winsFilter.props.onPress();
-    });
-    expect(() => root.findByProps({ testID: 'hand-row-h1' })).toThrow();
-    await act(async () => {
-      windSection.props.onPress();
-    });
-    expect(root.findByProps({ testID: 'hand-row-h1' })).toBeTruthy();
-    expect(() => root.findByProps({ testID: 'hand-row-h2' })).toThrow();
-    expect(root.findAllByType(Text).map((node) => String(node.props.children)).join('\n')).toContain('流局');
+    expect(windSection.props.onPress).toBeUndefined();
+    expect(windSection.props.accessibilityState).toBeUndefined();
 
     await act(async () => {
       (tree! as renderer.ReactTestRenderer).unmount();
+    });
+  });
+
+  it('shows a draw-pass event without zero-value delta chips', async () => {
+    mockedGetGameBundle.mockResolvedValueOnce(createDrawPassBundle() as any);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'draw-pass', name: 'GameDashboard', params: { gameId: 'g-draw-pass' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const row = tree!.root.findByProps({ testID: 'hand-row-draw-pass' });
+    const rowText = row.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(rowText).toContain('流局 · 過莊');
+    expect(rowText).not.toContain('HK$0');
+    expect(row.props.accessibilityLabel).toBe('東風東局，流局 · 過莊');
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('keeps wind grouping visual while rendering a multi-wind history in full', async () => {
+    mockedGetGameBundle.mockResolvedValueOnce(createMultiWindBundle() as any);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'multi-wind', name: 'GameDashboard', params: { gameId: 'g-multi-wind' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const root = tree!.root;
+    expect(root.findByProps({ testID: 'wind-section-東風' })).toBeTruthy();
+    expect(root.findByProps({ testID: 'wind-section-南風' })).toBeTruthy();
+    expect(root.findByProps({ testID: 'hand-row-multi-0' })).toBeTruthy();
+    expect(root.findByProps({ testID: 'hand-row-multi-4' })).toBeTruthy();
+    const text = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(text.indexOf('東風北局')).toBeLessThan(text.indexOf('南風東局'));
+
+    await act(async () => {
+      tree!.unmount();
     });
   });
 
@@ -576,14 +682,9 @@ describe('GameDashboardScreen', () => {
     });
 
     const root = tree!.root;
-    const windSection = root.findByProps({ testID: 'wind-section-東風' });
-    await act(async () => {
-      windSection.props.onPress();
-    });
-
     const allText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
-    expect(allText).toContain('Bob 自摸 10 番');
-    expect(allText).not.toContain('Bob 自摸 36 番');
+    expect(allText).toContain('Bob 自摸 · 10 番');
+    expect(allText).not.toContain('Bob 自摸 · 36 番');
 
     await act(async () => {
       tree!.unmount();
@@ -602,14 +703,9 @@ describe('GameDashboardScreen', () => {
     });
 
     const root = tree!.root;
-    const windSection = root.findByProps({ testID: 'wind-section-東風' });
-    await act(async () => {
-      windSection.props.onPress();
-    });
-
     const allText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
-    expect(allText).toContain('Alice 出銃比 Bob 10 番');
-    expect(allText).not.toContain('Alice 出銃比 Bob 32 番');
+    expect(allText).toContain('Bob 食糊 · Alice 出銃 · 10 番');
+    expect(allText).not.toContain('Bob 食糊 · Alice 出銃 · 32 番');
 
     await act(async () => {
       tree!.unmount();
@@ -676,17 +772,16 @@ describe('GameDashboardScreen', () => {
       await Promise.resolve();
     });
 
-    const buttons = (tree! as renderer.ReactTestRenderer).root.findAllByType(AppButton);
-    const shareButton = buttons.find((button) => button.props.label === '分享');
+    const shareButton = getHeaderShareItem();
     const allText = (tree! as renderer.ReactTestRenderer).root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
 
-    expect(shareButton?.props.disabled).toBe(true);
+    expect(shareButton.disabled).toBe(true);
     expect(allText).toContain('此頁僅供已結束對局查看。');
     expect(alertSpy).toHaveBeenCalled();
     alertSpy.mockClear();
 
     await act(async () => {
-      await shareButton?.props.onPress();
+      await shareButton.onPress();
     });
     expect(shareSpy).not.toHaveBeenCalled();
     expect(alertSpy).toHaveBeenCalled();
@@ -711,12 +806,11 @@ describe('GameDashboardScreen', () => {
       await Promise.resolve();
     });
 
-    const root = (tree! as renderer.ReactTestRenderer).root;
-    const shareButton = root.findAllByType(AppButton).find((btn) => btn.props.label === '分享');
+    const shareButton = getHeaderShareItem();
     expect(shareButton).toBeTruthy();
 
     await act(async () => {
-      await shareButton!.props.onPress();
+      await shareButton.onPress();
     });
 
     expect(shareSpy).toHaveBeenCalledTimes(1);
@@ -724,8 +818,8 @@ describe('GameDashboardScreen', () => {
     expect(payload.message).toContain('Ended Match');
     expect(payload.message).toContain('Ended Match — 01/01/2025');
     expect(payload.message).toContain('牌局戰果');
-    expect(payload.message).toContain('找數');
-    expect(payload.message).toContain('Alice → Bob HK$20');
+    expect(payload.message).not.toContain('找數');
+    expect(payload.message).not.toContain('Alice → Bob HK$20');
     expect(payload.message).toContain('最多出銃');
     expect(payload.message).not.toContain('食糊 1 ｜');
     expect(payload.message).not.toMatch(/game\.detail\./);
@@ -750,11 +844,9 @@ describe('GameDashboardScreen', () => {
       await Promise.resolve();
     });
 
-    const shareButton = (tree! as renderer.ReactTestRenderer).root
-      .findAllByType(AppButton)
-      .find((btn) => btn.props.label === '分享');
+    const shareButton = getHeaderShareItem();
     await act(async () => {
-      await shareButton?.props.onPress();
+      await shareButton.onPress();
     });
 
     const payload = shareSpy.mock.calls[0][0] as { message: string };
@@ -811,11 +903,15 @@ describe('GameDashboardScreen', () => {
       await Promise.resolve();
     });
 
-    const shareButton = (tree! as renderer.ReactTestRenderer).root
-      .findAllByType(AppButton)
-      .find((btn) => btn.props.label === '分享');
+    const timelineText = tree!.root.findByProps({ testID: 'hand-row-rt-h4' })
+      .findAllByType(Text)
+      .map((node) => String(node.props.children))
+      .join('\n');
+    expect(timelineText).toContain('Bob 食糊 · Carol 出銃 · 4 番');
+
+    const shareButton = getHeaderShareItem();
     await act(async () => {
-      await shareButton?.props.onPress();
+      await shareButton.onPress();
     });
 
     const payload = shareSpy.mock.calls[0][0] as { message: string };
@@ -832,7 +928,7 @@ describe('GameDashboardScreen', () => {
     });
   });
 
-  it('keeps zero-balance results readable with no settlement and accessible collapsed sections', async () => {
+  it('keeps zero-balance results readable and treats native share cancellation as normal', async () => {
     const bundle = createEndedBundle();
     bundle.hands = bundle.hands.map((hand) => ({
       ...hand,
@@ -848,6 +944,7 @@ describe('GameDashboardScreen', () => {
     const shareSpy = jest.spyOn(Share, 'share').mockImplementation(
       () => new Promise((resolve) => { resolveShare = resolve as (value: { action: never }) => void; }),
     );
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
     let tree: renderer.ReactTestRenderer;
     await act(async () => {
@@ -859,25 +956,27 @@ describe('GameDashboardScreen', () => {
 
     const root = tree!.root;
     const text = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
-    expect(text).toContain('無需找數');
+    expect(text).not.toContain('無需找數');
     expect((text.match(/🥇/g) ?? [])).toHaveLength(4);
     expect(text).toContain('A very long English player name that should not hide the balance');
     expect(text).toContain('0');
-    expect(root.findByProps({ testID: 'wind-section-東風' }).props.accessibilityState).toEqual({ expanded: false });
+    expect(root.findByProps({ testID: 'wind-section-東風' }).props.accessibilityState).toBeUndefined();
     expect(root.findByProps({ testID: 'dashboard-rules-toggle' }).props.accessibilityState).toEqual({ expanded: false });
 
-    const shareButton = root.findByProps({ testID: 'dashboard-share' });
+    const shareButton = getHeaderShareItem();
     await act(async () => {
-      shareButton.props.onPress();
-      shareButton.props.onPress();
+      shareButton.onPress();
+      shareButton.onPress();
     });
     expect(shareSpy).toHaveBeenCalledTimes(1);
-    expect((shareSpy.mock.calls[0][0] as { message: string }).message).toContain('無需找數');
+    expect((shareSpy.mock.calls[0][0] as { message: string }).message).not.toContain('找數');
     await act(async () => {
       resolveShare?.({ action: 'dismissedAction' as never });
       await Promise.resolve();
     });
+    expect(alertSpy).not.toHaveBeenCalledWith('未能分享結果', '請稍後再試。');
 
+    alertSpy.mockRestore();
     shareSpy.mockRestore();
     await act(async () => {
       tree!.unmount();
@@ -897,7 +996,7 @@ describe('GameDashboardScreen', () => {
       await Promise.resolve();
     });
     await act(async () => {
-      await tree!.root.findByProps({ testID: 'dashboard-share' }).props.onPress();
+      await getHeaderShareItem().onPress();
     });
     expect(alertSpy).toHaveBeenCalledWith('未能分享結果', '請稍後再試。');
 

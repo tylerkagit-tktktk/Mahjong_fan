@@ -423,6 +423,8 @@
   "newGame.sync.pendingCleanup.blocked": "請先清理之前放棄的同步房，之後先可以建立新的同步房。",
   "multiplayer.mode.sync": "多人同步",
   "cloudArchive.notFound": "本機未找到此封存牌局。",
+  "cloudArchive.resultUnavailable.title": "暫時無法確認牌局結果",
+  "cloudArchive.resultUnavailable.body": "部分牌局資料不完整，為避免顯示錯誤分數，暫時未能產生可靠結果。",
   "cloudArchive.cleanup.title": "雲端清理",
   "cloudArchive.cleanup.syncProgress": "本機封存：{synced}/{total} 位成員已完成",
   "cloudArchive.cleanup.waiting": "等待：{players}",

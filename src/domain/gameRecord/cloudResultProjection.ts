@@ -38,8 +38,14 @@ export type CloudCurrentHandRound = {
 export type CloudResultHandProjection = {
   trace: CloudHandTrace;
   currentRound: CloudCurrentHandRound;
+  outcome: 'zimo' | 'discard' | 'draw';
+  fan: number | null;
+  winnerPlayerId: string | null;
+  discarderPlayerId: string | null;
+  drawDealerAction: 'stick' | 'pass' | null;
   effectiveSeats: readonly CanonicalSeatAssignment[];
   deltasQ: readonly [number, number, number, number] | null;
+  winnerGainQ: number | null;
   roundAfterHand: ReplayRoundProjection | null;
 };
 
@@ -133,11 +139,22 @@ function projectValidReplay(
     if (!trace) {
       throw new Error(`Missing Cloud hand trace for canonical hand ${hand.source.handIndex}`);
     }
+    const winnerSeatIndex = hand.source.winnerPlayerId
+      ? hand.effectiveSeats.find((seat) => seat.playerId === hand.source.winnerPlayerId)?.seatIndex
+      : undefined;
     const projected = {
       trace,
       currentRound,
+      outcome: hand.source.outcome,
+      fan: hand.source.fan,
+      winnerPlayerId: hand.source.winnerPlayerId,
+      discarderPlayerId: hand.source.discarderPlayerId,
+      drawDealerAction: hand.source.drawDealerAction,
       effectiveSeats: hand.effectiveSeats,
       deltasQ: hand.deltasQ,
+      winnerGainQ: winnerSeatIndex !== undefined && hand.deltasQ
+        ? hand.deltasQ[winnerSeatIndex]
+        : null,
       roundAfterHand: hand.roundAfterHand,
     };
     if (hand.roundAfterHand) {

@@ -423,6 +423,8 @@
   "newGame.sync.pendingCleanup.blocked": "Clean up the previously abandoned sync room before creating another synced room.",
   "multiplayer.mode.sync": "Synced multiplayer",
   "cloudArchive.notFound": "This archived room could not be found locally.",
+  "cloudArchive.resultUnavailable.title": "Unable to confirm this result",
+  "cloudArchive.resultUnavailable.body": "Some game data is incomplete. To avoid showing incorrect scores, a reliable result cannot be produced right now.",
   "cloudArchive.cleanup.title": "Cloud cleanup",
   "cloudArchive.cleanup.syncProgress": "Local archive: {synced}/{total} members complete",
   "cloudArchive.cleanup.waiting": "Waiting for: {players}",

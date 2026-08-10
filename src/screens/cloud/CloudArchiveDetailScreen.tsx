@@ -1,313 +1,146 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import AppText from '../../components/AppText';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, SectionList, Share, StyleSheet, View } from 'react-native';
 import AppButton from '../../components/AppButton';
+import AppText from '../../components/AppText';
 import Card from '../../components/Card';
+import HeaderIconButton from '../../components/HeaderIconButton';
 import ScreenContainer from '../../components/ScreenContainer';
-import { computeHkSettlement, toAmountFromQ } from '../../domain/hk/settlement';
+import {
+  buildCloudCanonicalResult,
+  type CloudCanonicalProjection,
+  type CloudResultHandProjection,
+} from '../../domain/gameRecord/cloudResultProjection';
 import { useAppLanguage } from '../../i18n/useAppLanguage';
 import { TranslationKey } from '../../i18n/types';
 import { translateWithFallback } from '../../i18n/translateWithFallback';
-import { ArchiveSyncStatus, CloudArchivePayload, HandLog, RoomMember } from '../../models/cloud';
-import { parseRules, RulesV1 } from '../../models/rules';
+import { ArchiveSyncStatus, CloudArchivePayload, RoomMember } from '../../models/cloud';
 import { RootStackParamList } from '../../navigation/types';
 import { loadArchivedGame } from '../../services/cloud/archiveRepo';
 import { ensureSession } from '../../services/cloud/authRepo';
-import { deleteArchivedRoomAfterSync, getArchiveSyncStatus, subscribeMembers } from '../../services/cloud/roomRepo';
+import {
+  deleteArchivedRoomAfterSync,
+  getArchiveSyncStatus,
+  subscribeMembers,
+} from '../../services/cloud/roomRepo';
 import { typography } from '../../styles/typography';
 import theme from '../../theme/theme';
-import {
-  SEAT_GLYPHS,
-  SEAT_KEYS,
-  getCloudRoundLabel,
-  getDealerSeatIndexAfterHand,
-  getLineupForHand,
-  getSeatPlayerIds,
-} from './helpers';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CloudArchiveDetail'>;
 
-type PlayerTotal = {
-  playerId: string;
-  name: string;
-  total: number;
-};
-
-type ArchiveSummary = {
-  roundLabel: string;
-  roundIndex: number;
-  handCount: number;
-  rankedPlayers: PlayerTotal[];
-};
-
-type ArchiveStats = {
-  draws: number;
-  winsByPlayerId: Record<string, number>;
-  zimoByPlayerId: Record<string, number>;
-  discardByPlayerId: Record<string, number>;
-  mostDiscarder: { name: string; count: number } | null;
-  mostZimo: { name: string; count: number } | null;
-};
-
-type ArchiveHandDisplay = {
-  hand: HandLog;
-  roundLabel: string;
+type HandDisplay = {
+  hand: CloudResultHandProjection;
   windLabel: string;
-  winnerName: string;
-  discarderName: string | null;
-  deltasQ: number[] | null;
 };
 
-type ArchiveDetails = {
-  summary: ArchiveSummary;
-  stats: ArchiveStats;
-  handDisplays: ArchiveHandDisplay[];
+type HandSection = {
+  title: string;
+  data: HandDisplay[];
+  isFirst: boolean;
 };
-
-type HandFilter = 'all' | 'wins' | 'draws';
 
 function formatDate(timestamp: number | null | undefined): string {
-  if (!timestamp) {
-    return '-';
-  }
+  if (!timestamp) return '—';
   const date = new Date(timestamp);
   const dd = `${date.getDate()}`.padStart(2, '0');
   const mm = `${date.getMonth() + 1}`.padStart(2, '0');
-  const yyyy = date.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  return `${dd}/${mm}/${date.getFullYear()}`;
 }
 
-function formatSignedMoney(value: number, symbol: string): string {
-  const rounded = Math.round(value);
-  if (rounded === 0) {
-    return '0';
-  }
-  const sign = rounded > 0 ? '+' : '-';
-  return `${sign}${symbol}${Math.abs(rounded)}`;
+function formatSignedMoneyQ(valueQ: number, symbol: string): string {
+  const rounded = Math.round(valueQ / 4);
+  if (rounded === 0) return '0';
+  return `${rounded > 0 ? '+' : '-'}${symbol}${Math.abs(rounded)}`;
 }
 
-function getRankPrefix(index: number): string {
-  if (index === 0) {
-    return '🥇';
-  }
-  if (index === 1) {
-    return '🥈';
-  }
-  if (index === 2) {
-    return '🥉';
-  }
-  return `${index + 1}.`;
+function getRankPrefix(rank: number): string {
+  if (rank === 1) return '🥇';
+  if (rank === 2) return '🥈';
+  if (rank === 3) return '🥉';
+  return `${rank}.`;
 }
 
-function formatHighlight(value: { name: string; count: number } | null): string {
-  if (!value) {
-    return '—';
-  }
-  return `${value.name} (${value.count})`;
+function formatLeader(
+  projection: CloudCanonicalProjection,
+  leader: { count: number; playerIds: readonly string[] } | null,
+): string {
+  if (!leader || leader.playerIds.length === 0) return '—';
+  const nameById = new Map(projection.players.map((player) => [player.playerId, player.displayName]));
+  return `${leader.playerIds.map((playerId) => nameById.get(playerId) ?? playerId).join(', ')} ×${leader.count}`;
 }
 
-function buildNameMap(payload: CloudArchivePayload): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const member of payload.members) {
-    map.set(member.uid, member.displayName);
-  }
-  for (const player of payload.tempPlayers) {
-    map.set(player.tempPlayerId, player.displayName);
-  }
-  return map;
-}
-
-function getMostCount(
-  counts: Record<string, number>,
-  nameById: Map<string, string>,
-  sortLocale: string,
-): { name: string; count: number } | null {
-  const best = Object.entries(counts)
-    .filter(([, count]) => count > 0)
-    .sort(
-      ([aId, aCount], [bId, bCount]) =>
-        bCount - aCount || (nameById.get(aId) ?? aId).localeCompare(nameById.get(bId) ?? bId, sortLocale),
-    )[0];
-  if (!best) {
-    return null;
-  }
-  const [playerId, count] = best;
-  return { name: nameById.get(playerId) ?? playerId, count };
-}
-
-function buildArchiveDetails(payload: CloudArchivePayload, rules: RulesV1, sortLocale: string): ArchiveDetails {
-  const sortedHands = [...payload.hands].sort((a, b) => a.handIndex - b.handIndex);
-  const sortedLineups = [...payload.lineups].sort(
-    (a, b) => a.effectiveFromHandIndex - b.effectiveFromHandIndex || a.lineupVersion - b.lineupVersion,
-  );
-  const nameById = buildNameMap(payload);
-  const totalsQByPlayerId: Record<string, number> = {};
-  const winsByPlayerId: Record<string, number> = {};
-  const zimoByPlayerId: Record<string, number> = {};
-  const discardByPlayerId: Record<string, number> = {};
-  const handDisplays: ArchiveHandDisplay[] = [];
-  let draws = 0;
-  let dealerSeatIndex = 0;
-  let dealerAdvanceCount = 0;
-
-  for (const lineup of sortedLineups) {
-    SEAT_KEYS.forEach((seatKey) => {
-      const playerId = lineup.seats[seatKey];
-      if (playerId) {
-        totalsQByPlayerId[playerId] = totalsQByPlayerId[playerId] ?? 0;
-      }
-    });
-  }
-
-  for (const hand of sortedHands) {
-    const lineup = getLineupForHand(sortedLineups, hand);
-    const roundIndex = Math.floor(dealerAdvanceCount / 4) + 1;
-    let deltasQ: number[] | null = null;
-    let winnerName = hand.winnerPlayerId ? nameById.get(hand.winnerPlayerId) ?? hand.winnerPlayerId : '—';
-    let discarderName = hand.discarderPlayerId ? nameById.get(hand.discarderPlayerId) ?? hand.discarderPlayerId : null;
-
-    if (hand.type !== 'draw' && lineup && hand.winnerPlayerId) {
-      const seatPlayerIds = getSeatPlayerIds(lineup);
-      const winnerSeatIndex = seatPlayerIds.findIndex((playerId) => playerId === hand.winnerPlayerId);
-      const discarderSeatIndex =
-        hand.type === 'discard'
-          ? seatPlayerIds.findIndex((playerId) => playerId === (hand.discarderPlayerId ?? null))
-          : -1;
-
-      if (winnerSeatIndex >= 0 && (hand.type !== 'discard' || discarderSeatIndex >= 0)) {
-        const settlement = computeHkSettlement({
-          rules,
-          fan: hand.fan ?? rules.minFanToWin ?? 1,
-          settlementType: hand.type === 'zimo' ? 'zimo' : 'discard',
-          winnerSeatIndex,
-          discarderSeatIndex: hand.type === 'discard' ? discarderSeatIndex : null,
-        });
-        deltasQ = settlement.deltasQ;
-        winsByPlayerId[hand.winnerPlayerId] = (winsByPlayerId[hand.winnerPlayerId] ?? 0) + 1;
-        if (hand.type === 'zimo') {
-          zimoByPlayerId[hand.winnerPlayerId] = (zimoByPlayerId[hand.winnerPlayerId] ?? 0) + 1;
-        }
-        if (hand.type === 'discard' && hand.discarderPlayerId) {
-          discardByPlayerId[hand.discarderPlayerId] = (discardByPlayerId[hand.discarderPlayerId] ?? 0) + 1;
-        }
-
-        SEAT_KEYS.forEach((seatKey, seatIndex) => {
-          const playerId = lineup.seats[seatKey];
-          if (!playerId) {
-            return;
-          }
-          totalsQByPlayerId[playerId] = (totalsQByPlayerId[playerId] ?? 0) + settlement.deltasQ[seatIndex];
-        });
-      }
-    } else if (hand.type === 'draw') {
-      draws += 1;
-    }
-
-    handDisplays.push({
-      hand,
-      roundLabel: getCloudRoundLabel(roundIndex, dealerSeatIndex),
-      windLabel: getCloudRoundLabel(roundIndex, dealerSeatIndex).slice(0, 2),
-      winnerName,
-      discarderName,
-      deltasQ,
-    });
-
-    const nextDealerSeatIndex = getDealerSeatIndexAfterHand(dealerSeatIndex, hand, lineup);
-    if (nextDealerSeatIndex !== dealerSeatIndex) {
-      dealerAdvanceCount += 1;
-    }
-    dealerSeatIndex = nextDealerSeatIndex;
-  }
-
-  const rankedPlayers = Object.entries(totalsQByPlayerId)
-    .map(([playerId, totalQ]) => ({
-      playerId,
-      name: nameById.get(playerId) ?? playerId,
-      total: toAmountFromQ(totalQ),
-    }))
-    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, sortLocale));
-
-  const roundIndex = Math.floor(dealerAdvanceCount / 4) + 1;
-  return {
-    summary: {
-      roundLabel: getCloudRoundLabel(roundIndex, dealerSeatIndex),
-      roundIndex,
-      handCount: sortedHands.length,
-      rankedPlayers,
-    },
-    stats: {
-      draws,
-      winsByPlayerId,
-      zimoByPlayerId,
-      discardByPlayerId,
-      mostDiscarder: getMostCount(discardByPlayerId, nameById, sortLocale),
-      mostZimo: getMostCount(zimoByPlayerId, nameById, sortLocale),
-    },
-    handDisplays,
-  };
-}
-
-function getArchiveHandSummary(
-  hand: HandLog,
+function getHandSummary(
+  hand: CloudResultHandProjection,
   winnerName: string,
   discarderName: string | null,
-  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+  t: (key: TranslationKey) => string,
 ): string {
-  if (hand.type === 'draw') {
-    return translateWithFallback(t, 'game.detail.hand.summary.draw', '流局');
+  if (hand.outcome === 'draw') {
+    const dealerAction = hand.drawDealerAction === 'pass'
+      ? translateWithFallback(t, 'game.detail.timeline.dealerAction.pass', '過莊')
+      : translateWithFallback(t, 'game.detail.timeline.dealerAction.stick', '留莊');
+    return translateWithFallback(t, 'game.detail.timeline.summary.draw', '流局 · {dealerAction}', { dealerAction });
   }
-  const fanValue = hand.fan === null || hand.fan === undefined ? '—' : String(hand.fan);
-  if (hand.type === 'zimo') {
-    return translateWithFallback(t, 'game.detail.hand.summary.zimo', '{name} 自摸 {fan} 番', {
-      name: winnerName || '—',
-      fan: fanValue,
+  const fan = hand.fan === null ? '—' : String(hand.fan);
+  if (hand.outcome === 'zimo') {
+    return translateWithFallback(t, 'game.detail.timeline.summary.zimo', '{name} 自摸 · {fan} 番', {
+      name: winnerName,
+      fan,
     });
   }
-  return translateWithFallback(t, 'game.detail.hand.summary.discard', '{loser} 出銃比 {winner} {fan} 番', {
-    loser: discarderName || '—',
-    winner: winnerName || '—',
-    fan: fanValue,
+  return translateWithFallback(t, 'game.detail.timeline.summary.discard', '{winner} 食糊 · {loser} 出銃 · {fan} 番', {
+    winner: winnerName,
+    loser: discarderName ?? '—',
+    fan,
   });
 }
 
-function getVariantLabel(rules: RulesV1, t: (key: TranslationKey) => string): string {
-  if (rules.mode === 'HK') {
-    return `${translateWithFallback(t, 'newGame.mode.hk', '香港')} (HK)`;
-  }
-  if (rules.mode === 'TW') {
-    return `${translateWithFallback(t, 'newGame.variant.twSimple', '台牌')} (TW)`;
-  }
-  return `${translateWithFallback(t, 'newGame.variant.pma', '跑馬仔')} (PMA)`;
+function buildShareRankingLines(projection: CloudCanonicalProjection): string[] {
+  return projection.ranking.map(
+    (player) => `${player.rank}. ${player.displayName} ${formatSignedMoneyQ(player.totalQ, projection.rules.currencySymbol)}`,
+  );
 }
 
 function CloudArchiveDetailScreen({ route, navigation }: Props) {
   const { language, t } = useAppLanguage();
   const { roomId } = route.params;
   const [payload, setPayload] = useState<CloudArchivePayload | null>(null);
-  const [error, setError] = useState('');
-  const [handFilter, setHandFilter] = useState<HandFilter>('all');
-  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [rulesExpanded, setRulesExpanded] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [sessionUid, setSessionUid] = useState('');
   const [syncedMembers, setSyncedMembers] = useState<RoomMember[]>([]);
   const [receivedMemberSnapshot, setReceivedMemberSnapshot] = useState(false);
   const [deletingCloudRoom, setDeletingCloudRoom] = useState(false);
   const [cloudRoomDeleted, setCloudRoomDeleted] = useState(false);
   const [cloudCleanupError, setCloudCleanupError] = useState('');
+  const mountedRef = useRef(true);
+  const sharingRef = useRef(false);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+  }, []);
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
     try {
       const archive = await loadArchivedGame(roomId);
       if (!archive) {
-        setError(translateWithFallback(t, 'cloudArchive.notFound', '找不到封存牌局。'));
         setPayload(null);
+        setLoadError(translateWithFallback(t, 'cloudArchive.notFound', '找不到封存牌局。'));
         return;
       }
       setPayload(archive);
-      setError('');
-    } catch (nextError) {
-      setError(String(nextError));
+      setHistoryExpanded(false);
+      setRulesExpanded(false);
+    } catch (error) {
       setPayload(null);
+      setLoadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
     }
   }, [roomId, t]);
 
@@ -319,64 +152,83 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
     let unsubscribe: (() => void) | null = null;
     ensureSession()
       .then((session) => {
+        if (!mountedRef.current) return;
         setSessionUid(session.uid);
         unsubscribe = subscribeMembers(roomId, (members) => {
+          if (!mountedRef.current) return;
           setSyncedMembers(members);
           setReceivedMemberSnapshot(true);
-          if (members.length === 0) {
-            setCloudRoomDeleted(true);
-          }
+          if (members.length === 0) setCloudRoomDeleted(true);
         });
       })
       .catch(() => {});
     return () => unsubscribe?.();
   }, [roomId]);
 
-  const rules = useMemo(
-    () =>
-      parseRules(
-        typeof payload?.room.rulesSnapshot.serializedRules === 'string'
-          ? payload.room.rulesSnapshot.serializedRules
-          : null,
-        'HK',
-      ),
-    [payload?.room.rulesSnapshot.serializedRules],
+  const canonicalResult = useMemo(
+    () => payload ? buildCloudCanonicalResult(payload) : null,
+    [payload],
   );
-
-  const details = useMemo(() => (payload ? buildArchiveDetails(payload, rules, language) : null), [language, payload, rules]);
-  const summary = details?.summary ?? null;
-  const stats = details?.stats ?? null;
-  const currencySymbol = rules.currencySymbol || '';
-  const filteredHandDisplays = useMemo(() => {
-    const displays = details?.handDisplays ?? [];
-    if (handFilter === 'wins') {
-      return displays.filter((entry) => entry.hand.type !== 'draw');
-    }
-    if (handFilter === 'draws') {
-      return displays.filter((entry) => entry.hand.type === 'draw');
-    }
-    return displays;
-  }, [details?.handDisplays, handFilter]);
-  const handSections = useMemo(() => {
-    const sections = new Map<string, ArchiveHandDisplay[]>();
-    filteredHandDisplays.forEach((entry) => {
-      const list = sections.get(entry.windLabel) ?? [];
-      list.push(entry);
-      sections.set(entry.windLabel, list);
+  const projection = canonicalResult?.canonicalValid ? canonicalResult.projection : null;
+  const nameById = useMemo(
+    () => new Map((projection?.players ?? []).map((player) => [player.playerId, player.displayName])),
+    [projection?.players],
+  );
+  const handDisplayList = useMemo<HandDisplay[]>(
+    () => (projection?.hands ?? [])
+      .slice()
+      .sort((left, right) => left.trace.canonicalHandIndex - right.trace.canonicalHandIndex)
+      .map((hand) => ({ hand, windLabel: `${hand.currentRound.wind}風` })),
+    [projection?.hands],
+  );
+  const handSections = useMemo<HandSection[]>(() => {
+    const sections = new Map<string, HandDisplay[]>();
+    handDisplayList.forEach((entry) => {
+      const data = sections.get(entry.windLabel) ?? [];
+      data.push(entry);
+      sections.set(entry.windLabel, data);
     });
-    return Array.from(sections.entries()).map(([title, data]) => ({ title, data }));
-  }, [filteredHandDisplays]);
-  const filterOptions: Array<{ key: HandFilter; label: string }> = useMemo(
-    () => [
-      { key: 'all', label: translateWithFallback(t, 'game.detail.hands.filter.all', '全部') },
-      { key: 'wins', label: translateWithFallback(t, 'game.detail.hands.filter.wins', '食糊') },
-      { key: 'draws', label: translateWithFallback(t, 'game.detail.hands.filter.draws', '流局') },
-    ],
-    [t],
+    return [...sections.entries()].map(([title, data], index) => ({ title, data, isFirst: index === 0 }));
+  }, [handDisplayList]);
+
+  const handCount = projection?.statistics.handsCount ?? 0;
+  const historyCountLabel = translateWithFallback(
+    t,
+    handCount === 1 ? 'game.detail.hands.countOne' : 'game.detail.hands.count',
+    '{count} 鋪',
+    { count: handCount },
   );
-  const handCountText = summary
-    ? translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', { count: summary.handCount })
-    : '';
+  const historyTitle = translateWithFallback(t, 'game.detail.hands.title', '牌局紀錄');
+  const historyAccessibilityLabel = `${historyTitle}${language === 'en' ? ', ' : '，'}${historyCountLabel}`;
+  const zimoHighlight = projection ? formatLeader(projection, projection.statistics.zimoLeaders) : '—';
+  const discardHighlight = projection ? formatLeader(projection, projection.statistics.discardLeaders) : '—';
+
+  const localizedScoringPreset = useMemo(() => {
+    if (!projection) return '—';
+    return projection.rules.scoringPreset === 'traditionalFan'
+      ? translateWithFallback(t, 'game.detail.rules.hkPreset.traditionalFan', '傳統番數')
+      : translateWithFallback(t, 'game.detail.rules.mode.custom', '自訂番數（價錢表）');
+  }, [projection, t]);
+  const localizedGunMode = useMemo(() => {
+    if (!projection) return '—';
+    return projection.rules.gunMode === 'fullGun'
+      ? translateWithFallback(t, 'game.detail.rules.hkGunMode.fullGun', '全銃')
+      : translateWithFallback(t, 'game.detail.rules.hkGunMode.halfGun', '半銃');
+  }, [projection, t]);
+  const localizedStakePreset = useMemo(() => {
+    if (!projection) return '—';
+    if (projection.rules.stakePreset === 'FIVE_ONE') {
+      return translateWithFallback(t, 'game.detail.rules.hkStake.fiveOne', '五一');
+    }
+    if (projection.rules.stakePreset === 'ONE_TWO') {
+      return translateWithFallback(t, 'game.detail.rules.hkStake.oneTwo', '一二蚊');
+    }
+    return translateWithFallback(t, 'game.detail.rules.hkStake.twoFiveChicken', '二五雞');
+  }, [projection, t]);
+
+  const completionDate = payload
+    ? formatDate(payload.room.archiveReadyAt ?? payload.archivedFromCloudAt)
+    : '—';
   const syncMembers = receivedMemberSnapshot ? syncedMembers : payload?.members ?? [];
   const archiveSyncStatus: ArchiveSyncStatus | null = payload
     ? getArchiveSyncStatus(syncMembers, payload.archiveVersion)
@@ -387,7 +239,7 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
     if (!payload || !isHost || !archiveSyncStatus?.isReadyForCloudDeletion || deletingCloudRoom) return;
     Alert.alert(
       translateWithFallback(t, 'cloudArchive.cleanup.confirmTitle', '刪除雲端房間？'),
-      translateWithFallback(t, 'cloudArchive.cleanup.confirmBody', '所有成員已封存到本機。此操作會永久刪除 Firebase 的房間、成員、座位及牌局紀錄；本機紀錄會保留。'),
+      translateWithFallback(t, 'cloudArchive.cleanup.confirmBody', '所有成員已封存到本機。此操作會永久刪除雲端房間；本機紀錄會保留。'),
       [
         { text: translateWithFallback(t, 'game.detail.action.cancel', '取消'), style: 'cancel' },
         {
@@ -398,7 +250,7 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
             setCloudCleanupError('');
             deleteArchivedRoomAfterSync(payload.room.roomId, sessionUid)
               .then(() => setCloudRoomDeleted(true))
-              .catch((nextError) => setCloudCleanupError(String(nextError)))
+              .catch((error) => setCloudCleanupError(error instanceof Error ? error.message : String(error)))
               .finally(() => setDeletingCloudRoom(false));
           },
         },
@@ -407,36 +259,144 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
   }, [archiveSyncStatus?.isReadyForCloudDeletion, deletingCloudRoom, isHost, payload, sessionUid, t]);
 
   const handleShare = useCallback(async () => {
-    if (!payload || !summary) {
-      return;
-    }
-    const rankingLines = summary.rankedPlayers.map(
-      (player, index) => `${index + 1}. ${player.name} ${formatSignedMoney(player.total, currencySymbol)}`,
-    );
+    if (!payload || !projection || sharingRef.current) return;
+    sharingRef.current = true;
+    setSharing(true);
     const message = [
-      payload.room.title,
-      `${summary.roundLabel} · ${handCountText}`,
+      `${payload.room.title} — ${completionDate}`,
       '',
-      `${translateWithFallback(t, 'game.detail.players.title', '玩家排名')}:`,
-      ...rankingLines,
+      translateWithFallback(t, 'game.detail.share.resultTitle', '牌局戰果'),
+      ...buildShareRankingLines(projection),
+      '',
+      `${translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', { count: handCount })} · ${translateWithFallback(t, 'game.detail.stats.draws', '流局')} ${projection.statistics.draws}`,
+      `${translateWithFallback(t, 'game.detail.highlights.topZimo', '最多自摸')}：${zimoHighlight}`,
+      `${translateWithFallback(t, 'game.detail.highlights.topDiscard', '最多出銃')}：${discardHighlight}`,
     ].join('\n');
-    await Share.share({ title: payload.room.title, message });
-  }, [currencySymbol, handCountText, payload, summary, t]);
+    try {
+      await Share.share({ title: payload.room.title, message });
+    } catch {
+      Alert.alert(
+        translateWithFallback(t, 'game.detail.share.failedTitle', '未能分享結果'),
+        translateWithFallback(t, 'game.detail.share.failedMessage', '請稍後再試。'),
+      );
+    } finally {
+      sharingRef.current = false;
+      if (mountedRef.current) setSharing(false);
+    }
+  }, [completionDate, discardHighlight, handCount, payload, projection, t, zimoHighlight]);
+
+  const shareAccessibilityLabel = translateWithFallback(t, 'game.detail.action.shareResult', '分享戰果');
+  const renderHeaderShare = useCallback(() => (
+    <HeaderIconButton
+      testID="cloud-archive-header-share"
+      icon="↥"
+      onPress={() => { handleShare().catch(() => {}); }}
+      accessibilityLabel={shareAccessibilityLabel}
+      disabled={!projection || sharing}
+      fontSize={24}
+    />
+  ), [handleShare, projection, shareAccessibilityLabel, sharing]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: renderHeaderShare,
+      unstable_headerRightItems: () => [{
+        type: 'button',
+        label: shareAccessibilityLabel,
+        accessibilityLabel: shareAccessibilityLabel,
+        icon: { type: 'sfSymbol', name: 'square.and.arrow.up' },
+        variant: 'plain',
+        hidesSharedBackground: true,
+        sharesBackground: false,
+        disabled: !projection || sharing,
+        onPress: () => { handleShare().catch(() => {}); },
+      }],
+    });
+  }, [handleShare, navigation, projection, renderHeaderShare, shareAccessibilityLabel, sharing]);
+
+  const renderHandItem = useCallback(
+    ({ item, index, section }: { item: HandDisplay; index: number; section: HandSection }) => {
+      if (!projection) return null;
+      const hand = item.hand;
+      const winnerName = hand.winnerPlayerId ? nameById.get(hand.winnerPlayerId) ?? '—' : '—';
+      const discarderName = hand.discarderPlayerId ? nameById.get(hand.discarderPlayerId) ?? '—' : null;
+      const summary = getHandSummary(hand, winnerName, discarderName, t);
+      const handNumber = translateWithFallback(t, 'game.detail.timeline.handNumber', '第 {count} 鋪', {
+        count: hand.trace.canonicalHandIndex + 1,
+      });
+      const accessibilityLabel = translateWithFallback(t, 'game.detail.accessibility.timeline', '{round}，{summary}', {
+        round: hand.currentRound.labelZh,
+        summary,
+      });
+      return (
+        <View
+          testID={`cloud-hand-row-${hand.trace.sourceHandId}`}
+          accessible
+          accessibilityLabel={accessibilityLabel}
+          style={[styles.handRow, index === section.data.length - 1 && styles.handRowLast]}
+        >
+          <View style={styles.handTopRow}>
+            <AppText style={styles.handRound}>{hand.currentRound.labelZh}</AppText>
+            <AppText testID={`cloud-hand-number-${hand.trace.sourceHandId}`} style={styles.handIndex}>{handNumber}</AppText>
+          </View>
+          <View testID={`cloud-hand-event-row-${hand.trace.sourceHandId}`} style={styles.handEventRow}>
+            <AppText style={styles.handSummary}>{summary}</AppText>
+            {hand.winnerGainQ !== null ? (
+              <AppText testID={`cloud-hand-gain-${hand.trace.sourceHandId}`} style={styles.handGain}>
+                {formatSignedMoneyQ(hand.winnerGainQ, projection.rules.currencySymbol)}
+              </AppText>
+            ) : null}
+          </View>
+        </View>
+      );
+    },
+    [nameById, projection, t],
+  );
+
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: HandSection }) => (
+      <View
+        testID={`cloud-wind-section-${section.title}`}
+        style={[styles.windSectionHeader, !section.isFirst && styles.windSectionHeaderSpaced]}
+      >
+        <AppText style={styles.windSectionTitle}>{section.title}</AppText>
+      </View>
+    ),
+    [],
+  );
+
+  if (loading) {
+    return (
+      <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
+        <View style={styles.loadingWrap}>
+          <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.loading', '載入中…')}</AppText>
+        </View>
+      </ScreenContainer>
+    );
+  }
 
   if (!payload) {
     return (
-      <ScreenContainer>
+      <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
         <View style={styles.loadingWrap}>
-          <AppText style={error ? styles.errorText : styles.metaText}>
-            {error || translateWithFallback(t, 'game.detail.loading', '載入中…')}
+          <AppText style={styles.errorText}>{loadError || translateWithFallback(t, 'errors.loadGame', '載入對局失敗')}</AppText>
+          <AppButton label={translateWithFallback(t, 'common.back', '返回')} onPress={() => navigation.goBack()} variant="secondary" />
+        </View>
+      </ScreenContainer>
+    );
+  }
+
+  if (!projection) {
+    return (
+      <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
+        <View style={styles.loadingWrap}>
+          <AppText style={styles.unavailableTitle}>
+            {translateWithFallback(t, 'cloudArchive.resultUnavailable.title', '暫時無法確認牌局結果')}
           </AppText>
-          {error ? (
-            <AppButton
-              label={translateWithFallback(t, 'common.back', '返回')}
-              onPress={() => navigation.goBack()}
-              variant="secondary"
-            />
-          ) : null}
+          <AppText style={styles.unavailableBody}>
+            {translateWithFallback(t, 'cloudArchive.resultUnavailable.body', '部分牌局資料不完整，為避免顯示錯誤分數，暫時未能產生可靠結果。')}
+          </AppText>
+          <AppButton label={translateWithFallback(t, 'common.back', '返回')} onPress={() => navigation.goBack()} variant="secondary" />
         </View>
       </ScreenContainer>
     );
@@ -444,508 +404,208 @@ function CloudArchiveDetailScreen({ route, navigation }: Props) {
 
   return (
     <ScreenContainer style={styles.container} includeTopInset={false} horizontalPadding={0}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Card style={styles.card}>
-          <View style={styles.heroTopRow}>
-            <AppText style={styles.heroLabel}>
-              {translateWithFallback(t, 'game.detail.header.title', '對局總結')}
-            </AppText>
-            <View style={styles.statusBadge}>
-              <AppText style={styles.statusBadgeText}>
-                {translateWithFallback(t, 'game.detail.header.statusEnded', '已結束')}
-              </AppText>
-            </View>
-          </View>
-          <AppText style={styles.headerTitle}>{payload.room.title}</AppText>
-          <AppText style={styles.heroSubTitle}>{`${summary?.roundLabel ?? '—'} · ${handCountText}`}</AppText>
-          <AppText style={styles.heroDateText}>
-            {formatDate(payload.room.archiveReadyAt ?? payload.archivedFromCloudAt ?? payload.room.createdAt)}
-          </AppText>
-        </Card>
-
-        <Card style={styles.card}>
-          <AppText style={styles.sectionTitle}>
-            {translateWithFallback(t, 'game.detail.players.title', '玩家排名')}
-          </AppText>
-          {summary?.rankedPlayers.length ? (
-            summary.rankedPlayers.map((player, index) => (
-              <View key={`rank-${player.playerId}`} style={styles.playerRow}>
-                <AppText style={styles.playerRank}>{getRankPrefix(index)}</AppText>
-                <View style={styles.playerMetaWrap}>
-                  <AppText style={styles.playerName}>{player.name}</AppText>
+      <SectionList
+        sections={historyExpanded ? handSections : []}
+        keyExtractor={(item) => item.hand.trace.canonicalHandId}
+        renderItem={renderHandItem}
+        renderSectionHeader={renderSectionHeader}
+        stickySectionHeadersEnabled={false}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+        ListHeaderComponent={(
+          <>
+            <Card style={styles.card}>
+              <View style={styles.heroTopRow}>
+                <AppText style={styles.heroLabel}>{translateWithFallback(t, 'game.detail.header.title', '對局總結')}</AppText>
+                <View style={styles.statusBadge}>
+                  <AppText style={styles.statusBadgeText}>{translateWithFallback(t, 'game.detail.header.statusEnded', '已結束')}</AppText>
                 </View>
-                <AppText style={styles.playerTotal}>{formatSignedMoney(player.total, currencySymbol)}</AppText>
               </View>
-            ))
-          ) : (
-            <AppText style={styles.metaText}>—</AppText>
-          )}
-        </Card>
+              <AppText style={styles.headerTitle}>{payload.room.title}</AppText>
+              <AppText style={styles.heroSubTitle}>
+                {`${projection.finalRound.nextRoundLabelZh} · ${translateWithFallback(t, 'game.detail.header.handsPlayed', '已打 {count} 鋪', { count: handCount })}`}
+              </AppText>
+              <AppText style={styles.heroDateText}>{completionDate}</AppText>
+            </Card>
 
-        <Card style={styles.card}>
-          <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.rules.title', '規則摘要')}</AppText>
-          <AppText style={styles.metaText}>
-            {translateWithFallback(t, 'game.detail.rules.variant', '牌型')}：{getVariantLabel(rules, t)}
-          </AppText>
-          <AppText style={styles.metaText}>
-            {translateWithFallback(t, 'game.detail.rules.currency', '幣別')}：{currencySymbol || rules.currencyCode}
-          </AppText>
-          {typeof rules.minFanToWin === 'number' ? (
-            <AppText style={styles.metaText}>
-              {translateWithFallback(t, 'game.detail.rules.minFan', '最低番數')}：{rules.minFanToWin}
-            </AppText>
-          ) : null}
-          {rules.mode === 'HK' && rules.hk ? (
-            <>
-              <AppText style={styles.metaText}>
-                {translateWithFallback(t, 'game.detail.rules.hkPreset', '計分模式')}：
-                {rules.hk.scoringPreset === 'traditionalFan'
-                  ? translateWithFallback(t, 'game.detail.rules.hkPreset.traditionalFan', '傳統番數')
-                  : translateWithFallback(t, 'game.detail.rules.hkPreset.customTable', '自訂表')}
-              </AppText>
-              <AppText style={styles.metaText}>
-                {translateWithFallback(t, 'game.detail.rules.hkGunMode', '銃制')}：
-                {rules.hk.gunMode === 'halfGun'
-                  ? translateWithFallback(t, 'game.detail.rules.hkGunMode.halfGun', '半銃')
-                  : translateWithFallback(t, 'game.detail.rules.hkGunMode.fullGun', '全銃')}
-              </AppText>
-              {rules.hk.scoringPreset === 'traditionalFan' ? (
-                <AppText style={styles.metaText}>
-                  {translateWithFallback(t, 'game.detail.rules.hkStake', '注碼')}：
-                  {rules.hk.stakePreset === 'FIVE_ONE'
-                    ? translateWithFallback(t, 'game.detail.rules.hkStake.fiveOne', '五一')
-                    : rules.hk.stakePreset === 'ONE_TWO'
-                      ? translateWithFallback(t, 'game.detail.rules.hkStake.oneTwo', '一二蚊')
-                      : translateWithFallback(t, 'game.detail.rules.hkStake.twoFiveChicken', '二五雞')}
-                </AppText>
-              ) : (
-                <AppText style={styles.metaText}>
-                  {translateWithFallback(t, 'game.detail.rules.custom.unitPerFanLabel', '每番金額')}：
-                  {currencySymbol}
-                  {rules.hk.unitPerFan ?? 1}
-                </AppText>
-              )}
-              <AppText style={styles.metaText}>
-                {translateWithFallback(t, 'game.detail.rules.hkCapFan', '爆棚')}：
-                {rules.hk.capFan == null ? '∞' : rules.hk.capFan}
-              </AppText>
-            </>
-          ) : null}
-        </Card>
-
-        <Card style={styles.card}>
-          <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.stats.title', '統計')}</AppText>
-          <AppText style={styles.statsHeadline}>
-            {translateWithFallback(t, 'game.detail.stats.hands', '手數')}：{summary?.handCount ?? 0}
-            {'  ·  '}
-            {translateWithFallback(t, 'game.detail.stats.draws', '流局')}：{stats?.draws ?? 0}
-          </AppText>
-          {summary?.rankedPlayers.map((player) => (
-            <AppText key={`stats-${player.playerId}`} style={styles.statsPlayerLine}>
-              {player.name}：
-              {translateWithFallback(t, 'game.detail.stats.wins', '食糊')} {stats?.winsByPlayerId[player.playerId] ?? 0}
-              {' ｜ '}
-              {translateWithFallback(t, 'game.detail.stats.zimo', '自摸')} {stats?.zimoByPlayerId[player.playerId] ?? 0}
-              {' ｜ '}
-              {translateWithFallback(t, 'game.detail.stats.discards', '出銃')} {stats?.discardByPlayerId[player.playerId] ?? 0}
-            </AppText>
-          ))}
-          <AppText style={styles.statsHighlightLine}>
-            {translateWithFallback(t, 'game.detail.stats.mostDiscard', '最多出銃')}：
-            {formatHighlight(stats?.mostDiscarder ?? null)}
-          </AppText>
-          <AppText style={styles.statsHighlightLine}>
-            {translateWithFallback(t, 'game.detail.stats.mostZimo', '最多自摸')}：
-            {formatHighlight(stats?.mostZimo ?? null)}
-          </AppText>
-        </Card>
-
-        <Card style={styles.card}>
-          <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'cloudArchive.cleanup.title', '雲端清理')}</AppText>
-          {cloudRoomDeleted ? (
-            <AppText style={styles.cloudCleanupSuccess}>
-              {translateWithFallback(t, 'cloudArchive.cleanup.done', '雲端房間已刪除，本機封存會繼續保留。')}
-            </AppText>
-          ) : (
-            <>
-              <AppText style={styles.metaText}>
-                {translateWithFallback(t, 'cloudArchive.cleanup.syncProgress', '本機封存：{synced}/{total} 位成員已完成', {
-                  synced: archiveSyncStatus?.syncedMemberCount ?? 0,
-                  total: archiveSyncStatus?.requiredMemberCount ?? 0,
-                })}
-              </AppText>
-              {archiveSyncStatus?.pendingMemberNames.length ? (
-                <AppText style={styles.metaText}>
-                  {translateWithFallback(t, 'cloudArchive.cleanup.waiting', '等待：{players}', {
-                    players: archiveSyncStatus.pendingMemberNames.join('、'),
+            <Card style={styles.card}>
+              <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.players.title', '玩家排名')}</AppText>
+              {projection.ranking.map((player) => (
+                <View
+                  key={`rank-${player.playerId}`}
+                  accessible
+                  accessibilityLabel={translateWithFallback(t, 'game.detail.accessibility.rank', '第 {rank} 名，{name}，最終 {amount}', {
+                    rank: player.rank,
+                    name: player.displayName,
+                    amount: formatSignedMoneyQ(player.totalQ, projection.rules.currencySymbol),
                   })}
-                </AppText>
-              ) : null}
-              {isHost ? (
-                <AppButton
-                  label={translateWithFallback(t, 'cloudArchive.cleanup.delete', '刪除雲端資料')}
-                  onPress={confirmCloudDeletion}
-                  disabled={!archiveSyncStatus?.isReadyForCloudDeletion || deletingCloudRoom}
-                  variant="secondary"
-                  style={styles.cloudCleanupButton}
-                />
-              ) : (
-                <AppText style={styles.metaText}>
-                  {translateWithFallback(t, 'cloudArchive.cleanup.hostOnly', '全部成員完成後，主持人可刪除雲端資料。')}
-                </AppText>
-              )}
-              {cloudCleanupError ? <AppText style={styles.errorText}>{cloudCleanupError}</AppText> : null}
-            </>
-          )}
-        </Card>
-
-        <Card style={styles.card}>
-          <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.hands.title', '全部牌局')}</AppText>
-          <View style={styles.filterWrap}>
-            {filterOptions.map((option) => {
-              const selected = handFilter === option.key;
-              return (
-                <Pressable
-                  key={option.key}
-                  onPress={() => {
-                    setHandFilter(option.key);
-                    setCollapsedSections({});
-                  }}
-                  style={[styles.filterChip, selected && styles.filterChipActive]}
+                  style={styles.playerRow}
                 >
-                  <AppText style={[styles.filterChipText, selected && styles.filterChipTextActive]}>{option.label}</AppText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          {handSections.length ? (
-            handSections.map((section) => {
-              const collapsed = collapsedSections[section.title] !== false;
-              return (
-                <View key={`section-${section.title}`} style={styles.handSection}>
-                  <Pressable
-                    onPress={() => {
-                      setCollapsedSections((prev) => ({ ...prev, [section.title]: collapsed ? false : true }));
-                    }}
-                    style={styles.windSectionHeader}
-                  >
-                    <AppText style={styles.windSectionTitle}>{section.title}</AppText>
-                    <AppText style={styles.windSectionToggle}>{collapsed ? '＋' : '－'}</AppText>
-                  </Pressable>
-                  {!collapsed
-                    ? section.data.map((entry) => (
-                        <View key={entry.hand.handId} style={styles.handRow}>
-                          <View style={styles.handTopRow}>
-                            <AppText style={styles.handIndex}>#{entry.hand.handIndex + 1}</AppText>
-                            <AppText style={styles.handRound}>{entry.roundLabel}</AppText>
-                          </View>
-                          <View style={styles.handOutcomeRow}>
-                            <AppText style={styles.handOutcomeIcon}>
-                              {entry.hand.type === 'draw' ? '⦿' : entry.hand.type === 'zimo' ? '◎' : '•'}
-                            </AppText>
-                            <AppText style={styles.handOutcomeText}>
-                              {entry.hand.type === 'draw'
-                                ? translateWithFallback(t, 'game.detail.hands.filter.draws', '流局')
-                                : entry.hand.type === 'zimo'
-                                  ? translateWithFallback(t, 'game.detail.stats.zimo', '自摸')
-                                  : translateWithFallback(t, 'game.detail.stats.discards', '出銃')}
-                            </AppText>
-                            {entry.hand.type === 'draw' && entry.hand.dealerAction ? (
-                              <View style={styles.dealerActionBadge}>
-                                <AppText style={styles.dealerActionText}>
-                                  {entry.hand.dealerAction === 'stick'
-                                    ? translateWithFallback(t, 'game.detail.hand.dealerAction.stick', '番莊')
-                                    : translateWithFallback(t, 'game.detail.hand.dealerAction.pass', '過莊')}
-                                </AppText>
-                              </View>
-                            ) : null}
-                          </View>
-                          <AppText style={styles.handMetaText}>
-                            {getArchiveHandSummary(entry.hand, entry.winnerName, entry.discarderName, t)}
-                          </AppText>
-                          <View style={styles.deltaChipsRow}>
-                            {SEAT_GLYPHS.map((seat, seatIndex) => (
-                              <View key={`${entry.hand.handId}-delta-${seat}`} style={styles.deltaChip}>
-                                <AppText style={styles.deltaChipSeat}>{seat}</AppText>
-                                <AppText style={styles.deltaChipValue}>
-                                  {entry.deltasQ
-                                    ? formatSignedMoney(toAmountFromQ(entry.deltasQ[seatIndex] ?? 0), currencySymbol)
-                                    : '—'}
-                                </AppText>
-                              </View>
-                            ))}
-                          </View>
-                        </View>
-                      ))
-                    : null}
+                  <AppText style={styles.playerRank}>{getRankPrefix(player.rank)}</AppText>
+                  <View style={styles.playerMetaWrap}>
+                    <AppText numberOfLines={1} ellipsizeMode="tail" style={styles.playerName}>{player.displayName}</AppText>
+                  </View>
+                  <AppText style={styles.playerTotal}>{formatSignedMoneyQ(player.totalQ, projection.rules.currencySymbol)}</AppText>
                 </View>
-              );
-            })
-          ) : (
-            <AppText style={styles.metaText}>—</AppText>
-          )}
-        </Card>
+              ))}
+            </Card>
 
-        <View style={styles.actionsWrap}>
-          <AppButton
-            label={translateWithFallback(t, 'game.detail.action.share', '分享')}
-            onPress={() => {
-              handleShare().catch((shareError) => console.error('[CloudArchiveDetail] share failed', shareError));
-            }}
-            disabled={!summary}
-          />
-        </View>
-      </ScrollView>
+            <Card style={styles.card}>
+              <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.highlights.title', '牌局統計')}</AppText>
+              <View style={styles.highlightsGrid}>
+                <View style={styles.highlightCell}>
+                  <AppText style={styles.highlightLabel}>{translateWithFallback(t, 'game.detail.stats.hands', '局數')}</AppText>
+                  <AppText style={styles.highlightValue}>{handCount}</AppText>
+                </View>
+                <View style={styles.highlightCell}>
+                  <AppText style={styles.highlightLabel}>{translateWithFallback(t, 'game.detail.stats.draws', '流局')}</AppText>
+                  <AppText style={styles.highlightValue}>{projection.statistics.draws}</AppText>
+                </View>
+                <View style={styles.highlightCell}>
+                  <AppText style={styles.highlightLabel}>{translateWithFallback(t, 'game.detail.highlights.topZimo', '最多自摸')}</AppText>
+                  <AppText style={styles.highlightName}>{zimoHighlight}</AppText>
+                </View>
+                <View style={styles.highlightCell}>
+                  <AppText style={styles.highlightLabel}>{translateWithFallback(t, 'game.detail.highlights.topDiscard', '最多出銃')}</AppText>
+                  <AppText style={styles.highlightName}>{discardHighlight}</AppText>
+                </View>
+              </View>
+            </Card>
+
+            <Pressable
+              testID="cloud-history-toggle"
+              accessibilityRole="button"
+              accessibilityLabel={historyAccessibilityLabel}
+              accessibilityState={{ expanded: historyExpanded, disabled: handCount === 0 }}
+              disabled={handCount === 0}
+              onPress={() => setHistoryExpanded((expanded) => !expanded)}
+              style={styles.historyDisclosure}
+            >
+              <AppText style={styles.historyTitle}>{`${historyTitle} · ${historyCountLabel}`}</AppText>
+              {handCount > 0 ? <AppText style={styles.historyToggle}>{historyExpanded ? '－' : '＋'}</AppText> : null}
+            </Pressable>
+          </>
+        )}
+        ListFooterComponent={(
+          <>
+            <Card style={styles.rulesCard}>
+              <Pressable
+                testID="cloud-rules-toggle"
+                accessibilityRole="button"
+                accessibilityLabel={translateWithFallback(t, 'game.detail.rules.title', '規則摘要')}
+                accessibilityState={{ expanded: rulesExpanded }}
+                onPress={() => setRulesExpanded((expanded) => !expanded)}
+                style={styles.rulesHeader}
+              >
+                <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'game.detail.rules.title', '規則摘要')}</AppText>
+                <AppText style={styles.rulesToggle}>{rulesExpanded ? '－' : '＋'}</AppText>
+              </Pressable>
+              {rulesExpanded ? (
+                <View>
+                  <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.variant', '牌型')}：{translateWithFallback(t, 'newGame.variant.hk', '香港牌')}</AppText>
+                  <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.currency', '幣別')}：{projection.rules.currencySymbol || '—'}</AppText>
+                  <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.minFan', '最低番數')}：{projection.rules.minFanToWin}</AppText>
+                  <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.hkPreset', '計分模式')}：{localizedScoringPreset}</AppText>
+                  {projection.rules.scoringPreset === 'traditionalFan' ? (
+                    <>
+                      <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.hkGunMode', '銃制')}：{localizedGunMode}</AppText>
+                      <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.hkStake', '注碼')}：{localizedStakePreset}</AppText>
+                    </>
+                  ) : (
+                    <>
+                      <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.custom.unitPerFanLabel', '每番金額')}：{projection.rules.currencySymbol}{projection.rules.unitPerFan}</AppText>
+                      <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.custom.multiplierSummary', '自摸：3 份；出銃：2 份')}</AppText>
+                    </>
+                  )}
+                  <AppText style={styles.metaText}>{translateWithFallback(t, 'game.detail.rules.hkCapFan', '爆棚')}：{projection.rules.capFan ?? '∞'}</AppText>
+                </View>
+              ) : null}
+            </Card>
+
+            <Card style={styles.cleanupCard}>
+              <AppText style={styles.sectionTitle}>{translateWithFallback(t, 'cloudArchive.cleanup.title', '雲端清理')}</AppText>
+              {cloudRoomDeleted ? (
+                <AppText style={styles.cloudCleanupSuccess}>{translateWithFallback(t, 'cloudArchive.cleanup.done', '雲端房間已刪除，本機封存會繼續保留。')}</AppText>
+              ) : (
+                <>
+                  <AppText style={styles.metaText}>
+                    {translateWithFallback(t, 'cloudArchive.cleanup.syncProgress', '本機封存：{synced}/{total} 位成員已完成', {
+                      synced: archiveSyncStatus?.syncedMemberCount ?? 0,
+                      total: archiveSyncStatus?.requiredMemberCount ?? 0,
+                    })}
+                  </AppText>
+                  {archiveSyncStatus?.pendingMemberNames.length ? (
+                    <AppText style={styles.metaText}>{translateWithFallback(t, 'cloudArchive.cleanup.waiting', '等待：{players}', { players: archiveSyncStatus.pendingMemberNames.join('、') })}</AppText>
+                  ) : null}
+                  {isHost ? (
+                    <AppButton
+                      label={translateWithFallback(t, 'cloudArchive.cleanup.delete', '刪除雲端資料')}
+                      onPress={confirmCloudDeletion}
+                      disabled={!archiveSyncStatus?.isReadyForCloudDeletion || deletingCloudRoom}
+                      variant="secondary"
+                      style={styles.cloudCleanupButton}
+                    />
+                  ) : (
+                    <AppText style={styles.metaText}>{translateWithFallback(t, 'cloudArchive.cleanup.hostOnly', '全部成員完成後，主持人可刪除雲端資料。')}</AppText>
+                  )}
+                  {cloudCleanupError ? <AppText style={styles.errorText}>{cloudCleanupError}</AppText> : null}
+                </>
+              )}
+            </Card>
+          </>
+        )}
+      />
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  scrollContent: {
-    padding: theme.spacing.lg,
-    paddingBottom: theme.spacing.xl,
-  },
-  loadingWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: theme.spacing.lg,
-  },
-  card: {
-    marginBottom: theme.spacing.md,
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing.sm,
-  },
-  heroLabel: {
-    ...typography.caption,
-    color: theme.colors.textSecondary,
-    fontWeight: '600',
-    letterSpacing: 0.3,
-  },
-  statusBadge: {
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(70,63,56,0.12)',
-  },
-  statusBadgeText: {
-    ...typography.caption,
-    fontWeight: '600',
-    color: theme.colors.textSecondary,
-  },
-  headerTitle: {
-    ...typography.title,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.sm,
-  },
-  heroSubTitle: {
-    ...typography.body,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.sm,
-  },
-  heroDateText: {
-    ...typography.body,
-    color: theme.colors.textSecondary,
-  },
-  sectionTitle: {
-    ...typography.subtitle,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.sm,
-  },
-  playerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing.sm,
-  },
-  playerRank: {
-    width: 34,
-    ...typography.body,
-    color: theme.colors.textSecondary,
-  },
-  playerMetaWrap: {
-    flex: 1,
-  },
-  playerName: {
-    ...typography.subtitle,
-    color: theme.colors.textPrimary,
-    fontWeight: '600',
-  },
-  playerTotal: {
-    ...typography.subtitle,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-  },
-  metaText: {
-    ...typography.body,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.xs,
-  },
-  statsHeadline: {
-    ...typography.body,
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.sm,
-    fontWeight: '600',
-  },
-  statsPlayerLine: {
-    ...typography.body,
-    color: theme.colors.textSecondary,
-    marginBottom: 6,
-  },
-  statsHighlightLine: {
-    ...typography.body,
-    color: theme.colors.textPrimary,
-    marginTop: 4,
-  },
-  filterWrap: {
-    flexDirection: 'row',
-    marginBottom: theme.spacing.sm,
-  },
-  filterChip: {
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    marginRight: theme.spacing.xs,
-    backgroundColor: theme.colors.background,
-  },
-  filterChipActive: {
-    backgroundColor: 'rgba(53,92,86,0.14)',
-    borderColor: 'rgba(53,92,86,0.24)',
-  },
-  filterChipText: {
-    ...typography.caption,
-    color: theme.colors.textSecondary,
-    fontWeight: '600',
-  },
-  filterChipTextActive: {
-    color: theme.colors.textPrimary,
-  },
-  handSection: {
-    marginBottom: theme.spacing.xs,
-  },
-  windSectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing.xs,
-    marginTop: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.xs,
-  },
-  windSectionTitle: {
-    ...typography.body,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-  },
-  windSectionToggle: {
-    ...typography.body,
-    color: theme.colors.textSecondary,
-    fontWeight: '600',
-  },
-  handRow: {
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    padding: theme.spacing.sm,
-    marginBottom: theme.spacing.sm,
-  },
-  handTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  handIndex: {
-    ...typography.body,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-  },
-  handRound: {
-    ...typography.caption,
-    color: theme.colors.textSecondary,
-  },
-  handOutcomeRow: {
-    marginTop: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  handOutcomeIcon: {
-    ...typography.body,
-    color: theme.colors.textPrimary,
-    marginRight: 6,
-  },
-  handOutcomeText: {
-    ...typography.body,
-    fontWeight: '600',
-    color: theme.colors.textPrimary,
-  },
-  dealerActionBadge: {
-    marginLeft: theme.spacing.xs,
-    backgroundColor: 'rgba(53,92,86,0.12)',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  dealerActionText: {
-    ...typography.caption,
-    color: theme.colors.textSecondary,
-    fontWeight: '600',
-  },
-  handMetaText: {
-    marginTop: 6,
-    ...typography.body,
-    color: theme.colors.textSecondary,
-  },
-  deltaChipsRow: {
-    flexDirection: 'row',
-    marginTop: 8,
-  },
-  deltaChip: {
-    flex: 1,
-    marginRight: 4,
-    borderRadius: theme.radius.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingVertical: 4,
-    paddingHorizontal: 6,
-    backgroundColor: theme.colors.background,
-  },
-  deltaChipSeat: {
-    ...typography.caption,
-    color: theme.colors.textSecondary,
-  },
-  deltaChipValue: {
-    marginTop: 2,
-    ...typography.caption,
-    fontWeight: '700',
-    color: theme.colors.textPrimary,
-  },
-  actionsWrap: {
-    marginTop: theme.spacing.sm,
-  },
-  cloudCleanupButton: {
-    marginTop: theme.spacing.xs,
-  },
-  cloudCleanupSuccess: {
-    ...typography.body,
-    color: theme.colors.primary,
-    fontWeight: '600',
-  },
-  errorText: {
-    ...typography.body,
-    color: theme.colors.danger,
-  },
+  container: { flex: 1, backgroundColor: theme.colors.background },
+  scrollContent: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xl },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: theme.spacing.lg },
+  card: { marginBottom: theme.spacing.md },
+  heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: theme.spacing.sm },
+  heroLabel: { ...typography.caption, color: theme.colors.textSecondary, fontWeight: '600', letterSpacing: 0.3 },
+  statusBadge: { paddingHorizontal: theme.spacing.sm, paddingVertical: 4, borderRadius: 999, backgroundColor: 'rgba(70,63,56,0.12)' },
+  statusBadgeText: { ...typography.caption, fontWeight: '600', color: theme.colors.textSecondary },
+  headerTitle: { ...typography.title, fontWeight: '700', color: theme.colors.textPrimary, marginBottom: theme.spacing.sm },
+  heroSubTitle: { ...typography.body, color: theme.colors.textSecondary, marginBottom: theme.spacing.sm },
+  heroDateText: { ...typography.body, color: theme.colors.textSecondary },
+  sectionTitle: { ...typography.subtitle, fontWeight: '700', color: theme.colors.textPrimary, marginBottom: theme.spacing.sm },
+  metaText: { ...typography.body, color: theme.colors.textSecondary, marginBottom: theme.spacing.xs },
+  playerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: theme.spacing.sm },
+  playerRank: { width: 34, ...typography.body, color: theme.colors.textSecondary },
+  playerMetaWrap: { flex: 1, minWidth: 0 },
+  playerName: { ...typography.subtitle, color: theme.colors.textPrimary, fontWeight: '600' },
+  playerTotal: { ...typography.subtitle, color: theme.colors.textPrimary, fontWeight: '700', flexShrink: 0, marginLeft: theme.spacing.sm, fontVariant: ['tabular-nums'] },
+  highlightsGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -theme.spacing.xs },
+  highlightCell: { width: '50%', paddingHorizontal: theme.spacing.xs, paddingVertical: theme.spacing.sm },
+  highlightLabel: { ...typography.caption, color: theme.colors.textSecondary, marginBottom: 2 },
+  highlightValue: { ...typography.subtitle, color: theme.colors.textPrimary, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  highlightName: { ...typography.body, color: theme.colors.textPrimary, fontWeight: '600' },
+  historyDisclosure: { paddingVertical: theme.spacing.sm, paddingRight: theme.spacing.sm, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  historyTitle: { ...typography.subtitle, color: theme.colors.textPrimary, fontWeight: '700', flex: 1, minWidth: 0, marginRight: theme.spacing.sm },
+  historyToggle: { ...typography.body, color: theme.colors.textSecondary, fontWeight: '600', flexShrink: 0, minWidth: 24, textAlign: 'center' },
+  handRow: { paddingTop: theme.spacing.sm, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border },
+  handRowLast: { borderBottomWidth: 0 },
+  windSectionHeader: { paddingTop: theme.spacing.xs, paddingBottom: 2 },
+  windSectionHeaderSpaced: { paddingTop: theme.spacing.lg },
+  windSectionTitle: { ...typography.subtitle, fontWeight: '700', color: theme.colors.textPrimary },
+  handTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  handIndex: { ...typography.caption, color: theme.colors.textSecondary, fontWeight: '400', flexShrink: 0, marginLeft: theme.spacing.sm },
+  handRound: { ...typography.body, color: theme.colors.textPrimary, fontWeight: '600', flex: 1, minWidth: 0 },
+  handEventRow: { marginTop: 4, flexDirection: 'row', alignItems: 'flex-start' },
+  handSummary: { ...typography.body, color: theme.colors.textPrimary, flex: 1, flexShrink: 1, minWidth: 0 },
+  handGain: { ...typography.body, color: theme.colors.textPrimary, fontWeight: '700', flexShrink: 0, marginLeft: theme.spacing.sm, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  rulesCard: { marginTop: theme.spacing.md, marginBottom: theme.spacing.md },
+  rulesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  rulesToggle: { ...typography.body, color: theme.colors.textSecondary, fontWeight: '600', marginBottom: theme.spacing.sm, minWidth: 24, textAlign: 'center' },
+  cleanupCard: { marginBottom: theme.spacing.md },
+  cloudCleanupButton: { marginTop: theme.spacing.xs },
+  cloudCleanupSuccess: { ...typography.body, color: theme.colors.primary, fontWeight: '600' },
+  unavailableTitle: { ...typography.title, color: theme.colors.textPrimary, fontWeight: '700', textAlign: 'center', marginBottom: theme.spacing.sm },
+  unavailableBody: { ...typography.body, color: theme.colors.textSecondary, textAlign: 'center', marginBottom: theme.spacing.lg, maxWidth: 360 },
+  errorText: { ...typography.body, color: theme.colors.danger, marginBottom: theme.spacing.md },
 });
 
 export default CloudArchiveDetailScreen;

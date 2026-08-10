@@ -48,6 +48,13 @@ describe('pure Cloud canonical result characterization', () => {
     }));
 
     expect(replay.handProjections[0].deltasQ).toEqual([48, -16, -16, -16]);
+    expect(projection.hands[0]).toMatchObject({
+      outcome: 'zimo',
+      winnerPlayerId: CLOUD_PLAYER_IDS.east,
+      discarderPlayerId: null,
+      fan: 3,
+      winnerGainQ: 48,
+    });
     expect(projection.players.find((player) => player.playerId === CLOUD_PLAYER_IDS.east)).toMatchObject({
       totalQ: 48, wins: 1, zimoCount: 1,
     });

@@ -70,6 +70,7 @@ import GameTitleSection from './newGameStepper/sections/GameTitleSection';
 import PlayersSection from './newGameStepper/sections/PlayersSection';
 import ScoringSection from './newGameStepper/sections/ScoringSection';
 import { CapMode, ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateContext, SeatMode, StartingDealerMode } from './newGameStepper/types';
+import { filterJoinedSyncPlayers } from './newGameSyncHelpers';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'NewGameStepper'>;
 const MAX_PLAYER_NAME_LENGTH = 10;
@@ -222,7 +223,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     }
 
     return subscribeRoomPlayers(draftRoom.roomId, sessionUid, (nextPlayers) => {
-      setSyncPlayers(nextPlayers.filter((player) => player.kind === 'member'));
+      setSyncPlayers(nextPlayers);
     });
   }, [draftRoom?.roomId, sessionUid]);
 
@@ -318,7 +319,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         time: `${String(Math.floor(syncCooldownSeconds / 60)).padStart(2, '0')}:${String(syncCooldownSeconds % 60).padStart(2, '0')}`,
       })
     : translateWithFallback(t, 'newGame.sync.enable', '加入同步玩家');
-  const joinedSyncPlayers = useMemo(() => syncPlayers.filter((player) => player.kind === 'member'), [syncPlayers]);
+  const joinedSyncPlayers = useMemo(() => filterJoinedSyncPlayers(syncPlayers), [syncPlayers]);
   const assignedSyncPlayerIds = useMemo(
     () => new Set(Object.values(syncSeatAssignments).filter((value): value is string => Boolean(value))),
     [syncSeatAssignments],

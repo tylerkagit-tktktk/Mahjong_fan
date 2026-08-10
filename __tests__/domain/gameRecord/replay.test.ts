@@ -347,6 +347,17 @@ describe('canonical replay validation', () => {
     expectValidationCode(duplicateSeat, 'DUPLICATE_SEAT_IDENTITY');
   });
 
+  it('accepts additional historical identities while every effective lineup remains exactly four seats', () => {
+    const source = record();
+    source.players = [...source.players, { id: 'historical-fifth', displayName: 'Fifth' }];
+
+    const result = replayGameRecord(source);
+
+    expect(result.isValid).toBe(true);
+    expect(result.players).toHaveLength(5);
+    expect(result.finalSeats).toEqual(initialSeats);
+  });
+
   it('enforces a zero-based, continuous canonical hand index', () => {
     const rules = traditionalRules();
     for (const handIndex of [-1, 0.5]) {
@@ -441,6 +452,21 @@ describe('canonical replay validation', () => {
     expect(result.handProjections[0].derivedDealerSeatIndex).toBe(0);
     expect(result.handProjections[0].deltasQ).toEqual([32, -16, -8, -8]);
     expect(result.summary).toBeNull();
+  });
+
+  it('derives dealer state when a source format has no per-hand dealer snapshot', () => {
+    const rules = traditionalRules();
+    const source = record({ rules, timeline: [hand({
+      id: 'dealer-not-stored', handIndex: 0, dealerSeatIndex: 0, outcome: 'discard', rules, winnerSeatIndex: 1, discarderSeatIndex: 0,
+    })] });
+    (source.timeline[0] as CanonicalHandInput).dealerSeatIndex = null;
+
+    const result = replayGameRecord(source);
+
+    expect(result.isValid).toBe(true);
+    expect(result.handProjections[0].derivedDealerSeatIndex).toBe(0);
+    expect(result.finalRound?.dealerSeatIndex).toBe(1);
+    expect(result.validationIssues).toEqual([]);
   });
 
   it('orders validation codes stably within a timeline entry', () => {

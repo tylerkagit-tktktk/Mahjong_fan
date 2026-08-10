@@ -37,7 +37,8 @@ export type CanonicalHandInput = {
   id: string;
   handIndex: number;
   occurredAt: number;
-  dealerSeatIndex: SeatIndex;
+  /** Optional source evidence. Replay always derives the effective dealer from timeline state. */
+  dealerSeatIndex: SeatIndex | null;
   outcome: CanonicalHandOutcome;
   fan: number | null;
   winnerPlayerId: string | null;

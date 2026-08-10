@@ -161,6 +161,16 @@ describe('local GameBundle adapter', () => {
     }
   });
 
+  it('retains the Local adapter invariant of exactly four permanent player rows', () => {
+    const fifthPlayer: Player = {
+      id: 'local-fifth', gameId: EMPTY_GAME_BUNDLE.game.id, name: 'Fifth', seatIndex: 0,
+    };
+    const result = adaptLocalGameBundle(makeBundle({ players: [...GOLDEN_PLAYERS, fifthPlayer] }));
+
+    expect(result.ok).toBe(false);
+    expect(diagnosticCodes(result)).toContain('INVALID_LOCAL_PLAYER');
+  });
+
   it('preserves a non-East starting dealer and canonical zero-based hand index', () => {
     const result = adaptLocalGameBundle(makeBundle({ startingDealerSeatIndex: 2 }));
 

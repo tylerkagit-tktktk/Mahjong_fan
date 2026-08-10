@@ -182,11 +182,11 @@ function normalizePlayers(
   addRecordIssue: (code: ReplayValidationCode, detail: string) => void,
 ): CanonicalPlayer[] | null {
   if (!Array.isArray(rawPlayers)) {
-    addRecordIssue('INVALID_PLAYER_COUNT', 'players must be an array of four identities');
+    addRecordIssue('INVALID_PLAYER_COUNT', 'players must be an array with at least four historical identities');
     return null;
   }
-  if (rawPlayers.length !== 4) {
-    addRecordIssue('INVALID_PLAYER_COUNT', `expected four players, received ${rawPlayers.length}`);
+  if (rawPlayers.length < 4) {
+    addRecordIssue('INVALID_PLAYER_COUNT', `expected at least four historical players, received ${rawPlayers.length}`);
   }
   const players: CanonicalPlayer[] = [];
   const seenIds = new Set<string>();
@@ -392,7 +392,7 @@ export function replayGameRecord(
         if (!isNonNegativeInteger(rawEntry.handIndex)) {
           addTimelineIssue(timelineIndex, rawEntry, 'INVALID_HAND_INDEX', 'hand index must be a non-negative integer');
         }
-        if (!isSeatIndex(rawEntry.dealerSeatIndex)) {
+        if (rawEntry.dealerSeatIndex !== null && !isSeatIndex(rawEntry.dealerSeatIndex)) {
           addTimelineIssue(timelineIndex, rawEntry, 'DEALER_STATE_MISMATCH', 'stored dealer seat is invalid');
         }
         if (rawEntry.outcome !== 'zimo' && rawEntry.outcome !== 'discard' && rawEntry.outcome !== 'draw') {
@@ -603,7 +603,7 @@ export function replayGameRecord(
     const effectiveSeats = cloneSeats(effectiveSeatsByHandIndex.get(source.handIndex) ?? finalSeats);
     const seatByPlayerId = new Map(effectiveSeats.map((seat) => [seat.playerId, seat.seatIndex]));
     const derivedDealerSeatIndex = currentDealerSeatIndex;
-    if (source.dealerSeatIndex !== derivedDealerSeatIndex) {
+    if (source.dealerSeatIndex !== null && source.dealerSeatIndex !== derivedDealerSeatIndex) {
       addTimelineIssue(entry.timelineIndex, source, 'DEALER_STATE_MISMATCH', `expected dealer seat ${derivedDealerSeatIndex}`);
     }
 

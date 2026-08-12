@@ -120,8 +120,17 @@ service cloud.firestore {
         && request.resource.data.status != 'cancelling'
         && hasOnlyChanges([
           'activeLineupVersion', 'currentVersion', 'status', 'updatedAt',
-          'archiveReadyAt', 'archiveVersion', 'expiresAt', 'memberCount'
-        ]);
+          'archiveReadyAt', 'archiveVersion', 'expiresAt', 'memberCount',
+          'rulesSnapshot'
+        ])
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['rulesSnapshot'])
+          || (
+            resource.data.status == 'open'
+            && request.resource.data.status == 'open'
+            && request.resource.data.rulesSnapshot is map
+          )
+        );
     }
 
     function isHostCancellation(roomId) {

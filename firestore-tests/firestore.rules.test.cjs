@@ -236,6 +236,34 @@ describe('room archive rules', () => {
   });
 });
 
+describe('open room rules configuration', () => {
+  test('host can update the existing rules snapshot before the room starts', async () => {
+    await seedRoom('open');
+    const reference = doc(authenticatedDatabase(HOST_UID), 'rooms', ROOM_ID);
+
+    await assertSucceeds(updateDoc(reference, {
+      rulesSnapshot: { serializedRules: 'updated' },
+      updatedAt: 2_000,
+    }));
+  });
+
+  test('members cannot update rules and the host cannot update them after start', async () => {
+    await seedRoom('open');
+    await assertFails(updateDoc(doc(authenticatedDatabase(GUEST_UID), 'rooms', ROOM_ID), {
+      rulesSnapshot: { serializedRules: 'guest-change' },
+      updatedAt: 2_000,
+    }));
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_ID), { status: 'active' });
+    });
+    await assertFails(updateDoc(doc(authenticatedDatabase(HOST_UID), 'rooms', ROOM_ID), {
+      rulesSnapshot: { serializedRules: 'late-change' },
+      updatedAt: 3_000,
+    }));
+  });
+});
+
 describe('temporary player rules', () => {
   test('host can atomically add a temporary player while updating an open room', async () => {
     await seedRoom('open');

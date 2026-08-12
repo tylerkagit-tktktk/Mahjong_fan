@@ -10,16 +10,26 @@ type Props = {
   editAccessibilityLabel: string;
   summaryLines: string[];
   onEdit: () => void;
+  testID?: string;
+  editTestID?: string;
 };
 
-function LocalRulesSummary({ title, editLabel, editAccessibilityLabel, summaryLines, onEdit }: Props) {
+function LocalRulesSummary({
+  title,
+  editLabel,
+  editAccessibilityLabel,
+  summaryLines,
+  onEdit,
+  testID = 'new-game-local-rules-summary',
+  editTestID = 'new-game-local-edit-rules',
+}: Props) {
   return (
-    <View testID="new-game-local-rules-summary">
+    <View testID={testID}>
       <Card style={styles.card}>
         <View style={styles.headerRow}>
           <AppText style={styles.title}>{title}</AppText>
           <Pressable
-            testID="new-game-local-edit-rules"
+            testID={editTestID}
             accessibilityRole="button"
             accessibilityLabel={editAccessibilityLabel}
             hitSlop={8}

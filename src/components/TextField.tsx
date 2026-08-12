@@ -14,6 +14,10 @@ type TextFieldProps = {
   inputRef?: Ref<TextInput>;
   onFocus?: TextInputProps['onFocus'];
   editable?: boolean;
+  maxLength?: number;
+  returnKeyType?: TextInputProps['returnKeyType'];
+  testID?: string;
+  accessibilityLabel?: string;
 };
 
 function TextField({
@@ -25,6 +29,10 @@ function TextField({
   inputRef,
   onFocus,
   editable = true,
+  maxLength,
+  returnKeyType,
+  testID,
+  accessibilityLabel,
 }: TextFieldProps) {
   return (
     <View style={[styles.container, style]}>
@@ -38,6 +46,10 @@ function TextField({
         placeholder={placeholder}
         placeholderTextColor={theme.colors.textSecondary}
         editable={editable}
+        maxLength={maxLength}
+        returnKeyType={returnKeyType}
+        testID={testID}
+        accessibilityLabel={accessibilityLabel ?? label}
       />
     </View>
   );

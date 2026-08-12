@@ -6,6 +6,7 @@ import {
   getRoom,
   recoverHostedRoom,
   ROOM_CREATION_COOLDOWN_MS,
+  updateOpenRoomRules,
 } from '../../../src/services/cloud/roomRepo';
 
 const HOST_UID = 'guard-host';
@@ -60,5 +61,26 @@ describe('guarded room creation', () => {
     expect(await getRoom(created.room.roomId)).toBeNull();
     expect(await getProfile(HOST_UID)).not.toBeNull();
     await expect(recoverHostedRoom(HOST_UID, created.room.roomId)).resolves.toMatchObject({ kind: 'none' });
+  });
+
+  it('lets the host update the existing rules snapshot while the room is open', async () => {
+    const created = await createRoom({
+      hostUid: HOST_UID,
+      hostDisplayName: '房主',
+      title: '改規則房',
+      rulesSnapshot: { serializedRules: 'before' },
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const updated = await updateOpenRoomRules({
+      roomId: created.room.roomId,
+      hostUid: HOST_UID,
+      rulesSnapshot: { serializedRules: 'after' },
+    });
+    expect(updated.rulesSnapshot).toEqual({ serializedRules: 'after' });
+    await expect(getRoom(created.room.roomId)).resolves.toMatchObject({
+      rulesSnapshot: { serializedRules: 'after' },
+    });
   });
 });

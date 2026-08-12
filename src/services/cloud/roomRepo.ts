@@ -244,6 +244,31 @@ export async function createRoom(input: GuardedCreateRoomInput | LegacyCreateRoo
   return result.room;
 }
 
+export async function updateOpenRoomRules(input: {
+  roomId: string;
+  hostUid: string;
+  rulesSnapshot: Record<string, unknown>;
+}): Promise<Room> {
+  return getFirestore().runTransaction(async (transaction) => {
+    const reference = roomRef(input.roomId);
+    const snapshot = await transaction.get(reference);
+    if (!snapshot.exists()) throw new Error('Room not found');
+    const current = snapshot.data() as Room;
+    if (current.hostUid !== input.hostUid) throw new Error('Only host can update room rules');
+    if (current.status !== 'open') throw new Error('Room rules can only be changed before the game starts');
+    const next: Room = {
+      ...current,
+      rulesSnapshot: input.rulesSnapshot,
+      updatedAt: Date.now(),
+    };
+    transaction.update(reference, {
+      rulesSnapshot: next.rulesSnapshot,
+      updatedAt: next.updatedAt,
+    });
+    return next;
+  });
+}
+
 export async function createInvite(roomId: string, hostUid: string): Promise<InvitePayload> {
   const [snapshot, configSnapshot] = await Promise.all([roomRef(roomId).get(), hostConfigRef(roomId).get()]);
   if (!snapshot.exists()) throw new Error('Room not found');

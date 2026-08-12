@@ -3,13 +3,12 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import AppText from '../components/AppText';
 import InviteShareModal from '../components/InviteShareModal';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, Share, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomActionBar from '../components/BottomActionBar';
 import ScreenContainer from '../components/ScreenContainer';
 import TraditionalHkPaytableModal from '../components/TraditionalHkPaytableModal';
 import { createGameWithPlayers } from '../db/repo';
-import { DEBUG_FLAGS } from '../debug/debugFlags';
 import { useAppLanguage } from '../i18n/useAppLanguage';
 import { TranslationKey } from '../i18n/types';
 import { translateWithFallback } from '../i18n/translateWithFallback';
@@ -28,6 +27,7 @@ import {
   recoverHostedRoom,
   startRoom,
   subscribeRoomPlayers,
+  updateOpenRoomRules,
 } from '../services/cloud/roomRepo';
 import type { InvitePayload } from '../services/cloud/roomRepo';
 import { buildInviteShareMessage } from '../services/cloud/inviteShare';
@@ -65,12 +65,18 @@ import {
   rotatePlayersToEast,
 } from './newGameStepper/helpers';
 import CreateConfirmModal from './newGameStepper/sections/CreateConfirmModal';
-import HostNameConfirmModal from './newGameStepper/sections/HostNameConfirmModal';
 import GameTitleSection from './newGameStepper/sections/GameTitleSection';
+import InsufficientPlayersModal from './newGameStepper/sections/InsufficientPlayersModal';
 import LocalRulesEditorModal from './newGameStepper/sections/LocalRulesEditorModal';
 import LocalRulesSummary from './newGameStepper/sections/LocalRulesSummary';
+import MultiplayerHostSetup, {
+  MultiplayerHostPlayer,
+  MultiplayerHostSeat,
+} from './newGameStepper/sections/MultiplayerHostSetup';
+import MultiplayerPreRoomSetup from './newGameStepper/sections/MultiplayerPreRoomSetup';
 import PlayersSection from './newGameStepper/sections/PlayersSection';
 import ScoringSection from './newGameStepper/sections/ScoringSection';
+import TemporaryPlayersModal from './newGameStepper/sections/TemporaryPlayersModal';
 import { CapMode, ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateContext, SeatMode, StartingDealerMode } from './newGameStepper/types';
 import { filterJoinedSyncPlayers } from './newGameSyncHelpers';
 
@@ -78,7 +84,6 @@ type Props = NativeStackScreenProps<RootStackParamList, 'NewGameStepper'>;
 const MAX_PLAYER_NAME_LENGTH = 10;
 const SEAT_KEYS: SeatKey[] = ['0', '1', '2', '3'];
 const EMPTY_SYNC_ASSIGNMENTS: Record<SeatKey, string | null> = { '0': null, '1': null, '2': null, '3': null };
-const DEBUG_SYNC_PLAYER_NAMES = ['測試玩家 A', '測試玩家 B', '測試玩家 C', '測試玩家 D'];
 
 function buildSeatAssignmentsFromPlayerIds(playerIds: Array<string | null> | null): Record<SeatKey, string | null> {
   if (!playerIds) {
@@ -159,15 +164,13 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const [syncBusy, setSyncBusy] = useState(false);
   const [selectedSyncPlayerId, setSelectedSyncPlayerId] = useState('');
   const [syncSeatAssignments, setSyncSeatAssignments] = useState<Record<SeatKey, string | null>>(EMPTY_SYNC_ASSIGNMENTS);
-  const [debugSyncJoinCount, setDebugSyncJoinCount] = useState(0);
-  const [hostNameVisible, setHostNameVisible] = useState(false);
   const [hostDisplayName, setHostDisplayName] = useState('');
   const [hostNameError, setHostNameError] = useState<string | null>(null);
-  const [pendingSyncContext, setPendingSyncContext] = useState<{ trimmedTitle: string; rules: RulesV1 } | null>(null);
   const [syncRetryAt, setSyncRetryAt] = useState<number | null>(null);
   const [pendingCleanupRoomId, setPendingCleanupRoomId] = useState<string | null>(null);
   const [cooldownNow, setCooldownNow] = useState(Date.now());
-  const [multiplayerEntryPending, setMultiplayerEntryPending] = useState(entryMode === 'multiplayer');
+  const [temporaryPlayersVisible, setTemporaryPlayersVisible] = useState(false);
+  const [insufficientPlayersVisible, setInsufficientPlayersVisible] = useState(false);
   const recoveryStartedRef = useRef(false);
 
   useEffect(() => {
@@ -175,12 +178,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       setCurrencyCode(defaultCurrencyCode);
     }
   }, [defaultCurrencyCode, prefill]);
-
-  useEffect(() => {
-    if (entryMode === 'multiplayer') {
-      setMultiplayerEntryPending(true);
-    }
-  }, [entryMode]);
 
   useEffect(() => {
     if (!prefill) {
@@ -228,6 +225,37 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   }, [prefill]);
 
   useEffect(() => {
+    navigation.setOptions({
+      title: draftRoom
+        ? t('newGame.multiplayer.hostTitle')
+        : entryMode === 'multiplayer'
+        ? t('newGame.multiplayer.preRoomTitle')
+        : t('nav.newGame'),
+    });
+  }, [draftRoom, entryMode, navigation, t]);
+
+  useEffect(() => {
+    if (entryMode !== 'multiplayer' || draftRoom || hostDisplayName) {
+      return;
+    }
+    let alive = true;
+    getCurrentSession()
+      .then(async (session) => {
+        if (!session || !alive) return;
+        const profile = await getProfile(session.uid);
+        if (!alive) return;
+        setSessionUid(session.uid);
+        setHostDisplayName(normalizeDisplayName(profile?.displayName, session.uid));
+      })
+      .catch(() => {
+        // Identity is re-checked by the explicit create-room action.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [draftRoom, entryMode, hostDisplayName]);
+
+  useEffect(() => {
     if (!draftRoom?.roomId || !sessionUid) {
       setSyncPlayers([]);
       return;
@@ -235,6 +263,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
 
     return subscribeRoomPlayers(draftRoom.roomId, sessionUid, (nextPlayers) => {
       setSyncPlayers(nextPlayers);
+      setSelectedSyncPlayerId((current) => current || nextPlayers.find((player) => player.isHost)?.playerId || '');
     });
   }, [draftRoom?.roomId, sessionUid]);
 
@@ -291,8 +320,10 @@ function NewGameStepperScreen({ navigation, route }: Props) {
 
   const seatLabels = useMemo(() => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')], [t]);
   const hasDraftRoom = Boolean(draftRoom);
-  const setupLocked = hasDraftRoom;
   const isLocalQuickSetup = entryMode !== 'multiplayer' && !hasDraftRoom;
+  const isMultiplayerPreRoom = entryMode === 'multiplayer' && !hasDraftRoom;
+  const isMultiplayerHostSetup = hasDraftRoom;
+  const usesRulesEditorSheet = isLocalQuickSetup || entryMode === 'multiplayer' || hasDraftRoom;
   const minFanLowerBound = hkScoringPreset === 'customTable' ? 1 : MIN_FAN_MIN;
   const parsedMinFanInput = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
   const parsedCustomCapFan = parseMinFan(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
@@ -332,6 +363,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       })
     : translateWithFallback(t, 'newGame.sync.enable', '加入同步玩家');
   const joinedSyncPlayers = useMemo(() => filterJoinedSyncPlayers(syncPlayers), [syncPlayers]);
+  const realJoinedSyncPlayers = useMemo(() => syncPlayers.filter((player) => player.kind === 'member'), [syncPlayers]);
   const assignedSyncPlayerIds = useMemo(
     () => new Set(Object.values(syncSeatAssignments).filter((value): value is string => Boolean(value))),
     [syncSeatAssignments],
@@ -355,19 +387,54 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       }),
     [joinedSyncPlayers, syncSeatAssignments],
   );
+  const syncedSeatPlayers = useMemo(
+    () =>
+      SEAT_KEYS.map((seatKey) => {
+        const playerId = syncSeatAssignments[seatKey];
+        return playerId ? joinedSyncPlayers.find((player) => player.playerId === playerId) ?? null : null;
+      }),
+    [joinedSyncPlayers, syncSeatAssignments],
+  );
+  const hostSetupPlayers = useMemo<MultiplayerHostPlayer[]>(
+    () =>
+      joinedSyncPlayers.map((player) => ({
+        playerId: player.playerId,
+        displayName: player.displayName,
+        isHost: player.isHost,
+        isSelf: player.isSelf,
+        isTemporary: player.kind === 'temporary',
+      })),
+    [joinedSyncPlayers],
+  );
+  const hostSetupSeatNames = seatMode === 'auto' && autoAssigned ? autoAssigned : players;
+  const hostSetupSeats = useMemo<MultiplayerHostSeat[]>(
+    () =>
+      SEAT_KEYS.map((_, index) => {
+        const syncedPlayer = syncedSeatPlayers[index];
+        const temporaryName = hostSetupSeatNames[index]?.trim() ?? '';
+        return {
+          displayName: syncedPlayer?.displayName ?? (temporaryName || null),
+          isHost: Boolean(syncedPlayer?.isHost),
+          isJoined: syncedPlayer?.kind === 'member',
+          isTemporary: syncedPlayer?.kind === 'temporary' || (!syncedPlayer && Boolean(temporaryName)),
+        };
+      }),
+    [hostSetupSeatNames, syncedSeatPlayers],
+  );
   const screenCopy = {
-    subtitle: translateWithFallback(
-      t,
-      'newGame.headerSubtitle',
-      '先設定規則、玩家同起莊方式；需要同步時，再在玩家區下方加入同步玩家。',
-    ),
     primaryAction: hasDraftRoom
       ? translateWithFallback(t, 'newGame.sync.start', '開始牌局')
+      : isMultiplayerPreRoom
+      ? syncCooldownSeconds > 0
+        ? syncCooldownLabel
+        : t('newGame.multiplayer.create')
       : isLocalQuickSetup
       ? t('newGame.localQuick.start')
       : t('newGame.create'),
     primaryActionBusy: hasDraftRoom
       ? translateWithFallback(t, 'newGame.sync.starting', '開局中...')
+      : isMultiplayerPreRoom
+      ? t('newGame.multiplayer.creating')
       : t('newGame.creating'),
     confirmTitle: hasDraftRoom
       ? translateWithFallback(t, 'newGame.sync.confirmModal.title', '確認開始牌局')
@@ -547,7 +614,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       return;
     }
     if (target.kind === 'minFan') {
-      if (isLocalQuickSetup) {
+      if (usesRulesEditorSheet) {
         setLocalRulesEditorVisible(true);
         setTimeout(() => minFanInputRef.current?.focus(), 360);
         return;
@@ -557,7 +624,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       return;
     }
     if (target.kind === 'unitPerFan') {
-      if (isLocalQuickSetup) {
+      if (usesRulesEditorSheet) {
         setLocalRulesEditorVisible(true);
         setTimeout(() => unitPerFanInputRef.current?.focus(), 360);
         return;
@@ -567,7 +634,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       return;
     }
     if (target.kind === 'capFan') {
-      if (isLocalQuickSetup) {
+      if (usesRulesEditorSheet) {
         setLocalRulesEditorVisible(true);
         setTimeout(() => customCapFanInputRef.current?.focus(), 360);
         return;
@@ -576,7 +643,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       setTimeout(() => customCapFanInputRef.current?.focus(), 120);
       return;
     }
-    if (isLocalQuickSetup) {
+    if (usesRulesEditorSheet) {
       setLocalRulesEditorVisible(true);
       return;
     }
@@ -854,12 +921,15 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     setSyncPlayers([]);
     setSelectedSyncPlayerId('');
     setSyncSeatAssignments(EMPTY_SYNC_ASSIGNMENTS);
-    setDebugSyncJoinCount(0);
   };
 
   const restoreOpenSyncRoom = useCallback(async (room: Room, nextInvite: InvitePayload) => {
-    const localDraft = await loadActiveHostedRoomDraft(room.roomId);
+    const [localDraft, profile] = await Promise.all([
+      loadActiveHostedRoomDraft(room.roomId),
+      getProfile(room.hostUid),
+    ]);
     setSessionUid(room.hostUid);
+    setHostDisplayName(normalizeDisplayName(profile?.displayName, room.hostUid));
     setDraftRoom(room);
     setInvite(nextInvite);
     setTitle(room.title);
@@ -1063,9 +1133,15 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     if (!draftContext || syncBusy || loading || hasDraftRoom) {
       return;
     }
+    const confirmedName = hostDisplayName.trim();
+    if (confirmedName.length < 1 || confirmedName.length > MAX_PLAYER_NAME_LENGTH) {
+      setHostNameError(t('newGame.sync.hostNameInvalid'));
+      return;
+    }
 
     try {
       setSyncBusy(true);
+      setHostNameError(null);
       const session = await ensureSession('google');
       setSessionUid(session.uid);
       const recovered = await recoverHostedRoom(session.uid);
@@ -1088,70 +1164,42 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         setCooldownNow(Date.now());
         return;
       }
-      const profile = await getProfile(session.uid);
-      setHostDisplayName(normalizeDisplayName(profile?.displayName, session.uid));
-      setHostNameError(null);
-      setPendingSyncContext(draftContext);
-      setHostNameVisible(true);
-      setFormError(null);
-    } catch (error) {
-      console.error('[Cloud] enable sync failed', error);
-      setFormError(t('errors.createGame'));
-    } finally {
-      setSyncBusy(false);
-    }
-  };
-
-  const handleConfirmHostName = async () => {
-    const confirmedName = hostDisplayName.trim();
-    if (!pendingSyncContext || !sessionUid || confirmedName.length < 1 || confirmedName.length > MAX_PLAYER_NAME_LENGTH) {
-      setHostNameError(translateWithFallback(t, 'newGame.sync.hostNameInvalid', '名稱需要 1–10 個字。'));
-      return;
-    }
-    try {
-      setSyncBusy(true);
-      setHostNameError(null);
-      await updateProfile(sessionUid, { displayName: confirmedName });
+      await updateProfile(session.uid, { displayName: confirmedName });
       const result = await createRoom({
-        hostUid: sessionUid,
+        hostUid: session.uid,
         hostDisplayName: confirmedName,
-        title: pendingSyncContext.trimmedTitle,
+        title: draftContext.trimmedTitle,
         memberCap: 8,
         rulesSnapshot: {
-          title: pendingSyncContext.trimmedTitle,
-          currencyCode: pendingSyncContext.rules.currencyCode,
-          currencySymbol: pendingSyncContext.rules.currencySymbol,
-          mode: pendingSyncContext.rules.mode,
-          serializedRules: serializeRules(pendingSyncContext.rules),
+          title: draftContext.trimmedTitle,
+          currencyCode: draftContext.rules.currencyCode,
+          currencySymbol: draftContext.rules.currencySymbol,
+          mode: draftContext.rules.mode,
+          serializedRules: serializeRules(draftContext.rules),
         },
       });
       if (!result.ok) {
         if (result.code === 'RATE_LIMITED') {
           setSyncRetryAt(result.retryAt);
           setCooldownNow(Date.now());
-          setHostNameVisible(false);
           return;
         }
         if (result.code === 'CLEANUP_IN_PROGRESS') {
-          await deleteRoomAndFallbackToLocal(result.roomId, sessionUid);
-          setHostNameVisible(false);
+          await deleteRoomAndFallbackToLocal(result.roomId, session.uid);
           return;
         }
         throw new Error(result.message);
       }
       if (result.room.status === 'active') {
-        setHostNameVisible(false);
         navigation.replace('MultiplayerGameTable', { roomId: result.room.roomId });
         return;
       }
       if (!result.invite) throw new Error('Open room invite is missing');
       await restoreOpenSyncRoom(result.room, result.invite);
-      setHostNameVisible(false);
-      setPendingSyncContext(null);
-      setDebugSyncJoinCount(0);
+      setFormError(null);
     } catch (error) {
-      console.error('[Cloud] confirm sync host name failed', error);
-      setHostNameError(translateWithFallback(t, 'newGame.sync.createFailed', '未能建立同步房，請稍後再試。'));
+      console.error('[Cloud] create multiplayer room failed', error);
+      setFormError(t('newGame.sync.createFailed'));
     } finally {
       setSyncBusy(false);
     }
@@ -1199,16 +1247,12 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       return;
     }
     Alert.alert(
-      translateWithFallback(t, 'newGame.sync.cancelConfirmTitle', '取消同步？'),
-      translateWithFallback(
-        t,
-        'newGame.sync.cancelConfirmMessage',
-        '取消後會刪除這個同步房，並回到純本地建局狀態。',
-      ),
+      t('newGame.multiplayer.cancelConfirmTitle'),
+      t('newGame.multiplayer.cancelConfirmMessage'),
       [
-        { text: translateWithFallback(t, 'newGame.sync.cancelConfirmStay', '繼續保留'), style: 'cancel' },
+        { text: t('newGame.multiplayer.cancelConfirmStay'), style: 'cancel' },
         {
-          text: translateWithFallback(t, 'newGame.sync.cancelConfirmAction', '刪除同步房'),
+          text: t('newGame.multiplayer.cancelConfirmAction'),
           style: 'destructive',
           onPress: () => {
             setSyncBusy(true);
@@ -1226,28 +1270,77 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     );
   };
 
-  const handleAddDebugSyncPlayer = async () => {
-    if (!DEBUG_FLAGS.enableSyncTestTools || !draftRoom || !sessionUid || syncBusy) {
+  const handleSaveTemporaryPlayers = (nextNames: string[]) => {
+    const normalized = SEAT_KEYS.map((_, index) => {
+      if (syncedSeatPlayers[index]) {
+        return players[index] ?? '';
+      }
+      return (nextNames[index] ?? '').trim().slice(0, MAX_PLAYER_NAME_LENGTH);
+    });
+    setPlayers(normalized);
+    setAutoNames(normalized);
+    setAutoAssigned(null);
+    setAutoAssignedPlayerIds(null);
+    setPlayersError(null);
+    setStartingDealerSourceIndex(null);
+    setTemporaryPlayersVisible(false);
+  };
+
+  const handleReturnToLocalScoring = async () => {
+    if (!draftRoom || !sessionUid || syncBusy) {
       return;
     }
-
+    const context = validateDraftRoomPrerequisites();
+    if (!context) {
+      setInsufficientPlayersVisible(false);
+      return;
+    }
     try {
       setSyncBusy(true);
-      const playerNumber = debugSyncJoinCount + 1;
-      const displayName = DEBUG_SYNC_PLAYER_NAMES[debugSyncJoinCount] ?? `測試玩家 ${playerNumber}`;
-      // A dev-only player is not an authenticated Firebase user. Model it as a
-      // temporary player so the host stays within the same permission boundary.
-      await addTemporaryPlayers({
-        roomId: draftRoom.roomId,
-        createdByUid: sessionUid,
-        displayNames: [displayName],
+      await deleteRoomAndFallbackToLocal(draftRoom.roomId, sessionUid);
+      clearDraftSyncState();
+      setInsufficientPlayersVisible(false);
+      navigation.replace('NewGameStepper', {
+        entryMode: 'local',
+        prefill: {
+          title: context.trimmedTitle,
+          currencyCode: context.rules.currencyCode,
+          serializedRules: serializeRules(context.rules),
+        },
       });
-      setDebugSyncJoinCount(playerNumber);
-    } catch (error) {
-      Alert.alert(
-        translateWithFallback(t, 'newGame.sync.debugAddFailedTitle', '加入虛擬真人玩家失敗'),
-        String(error),
-      );
+    } catch {
+      setFormError(t('errors.createGame'));
+    } finally {
+      setSyncBusy(false);
+    }
+  };
+
+  const handleCloseRulesEditor = async () => {
+    if (!draftRoom || !sessionUid) {
+      setLocalRulesEditorVisible(false);
+      return;
+    }
+    const context = validateDraftRoomPrerequisites();
+    if (!context) {
+      return;
+    }
+    try {
+      setSyncBusy(true);
+      const nextRoom = await updateOpenRoomRules({
+        roomId: draftRoom.roomId,
+        hostUid: sessionUid,
+        rulesSnapshot: {
+          title: context.trimmedTitle,
+          currencyCode: context.rules.currencyCode,
+          currencySymbol: context.rules.currencySymbol,
+          mode: context.rules.mode,
+          serializedRules: serializeRules(context.rules),
+        },
+      });
+      setDraftRoom(nextRoom);
+      setLocalRulesEditorVisible(false);
+    } catch {
+      setFormError(t('newGame.multiplayer.rulesUpdateFailed'));
     } finally {
       setSyncBusy(false);
     }
@@ -1264,26 +1357,14 @@ function NewGameStepperScreen({ navigation, route }: Props) {
 
         const realPlayerCount = syncPlayers.filter((player) => player.kind === 'member').length;
         if (realPlayerCount <= 1) {
-          await deleteRoomAndFallbackToLocal(draftRoom.roomId, session.uid);
-          clearDraftSyncState();
-          await createGameWithPlayers(
-            {
-              id: context.gameId,
-              title: context.trimmedTitle,
-              createdAt: Date.now(),
-              currencySymbol: context.rules.currencySymbol,
-              variant: context.rules.variant,
-              rulesJson: serializeRules(context.rules),
-              startingDealerSeatIndex: 0,
-              languageOverride: null,
-            },
-            context.playerInputs,
-          );
-          navigation.replace('GameTable', { gameId: context.gameId });
-          return true;
+          setInsufficientPlayersVisible(true);
+          return false;
         }
 
-        const realSeatsCount = Object.values(syncSeatAssignments).filter(Boolean).length;
+        const realPlayerIds = new Set(syncPlayers.filter((player) => player.kind === 'member').map((player) => player.playerId));
+        const realSeatsCount = Object.values(syncSeatAssignments).filter(
+          (playerId): playerId is string => Boolean(playerId) && realPlayerIds.has(playerId as string),
+        ).length;
         if (realSeatsCount < 2) {
           setFormError(
             translateWithFallback(
@@ -1445,8 +1526,34 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   };
 
   const handlePressCreate = () => {
+    if (isMultiplayerPreRoom) {
+      handleEnableSync().catch((error) => {
+        console.error('[NewGame] multiplayer room create failed', error);
+      });
+      return;
+    }
+    if (draftRoom && realJoinedSyncPlayers.length < 2) {
+      setInsufficientPlayersVisible(true);
+      return;
+    }
+    if (draftRoom) {
+      const realPlayerIds = new Set(realJoinedSyncPlayers.map((player) => player.playerId));
+      const assignedRealSeats = Object.values(syncSeatAssignments).filter(
+        (playerId) => Boolean(playerId) && realPlayerIds.has(playerId as string),
+      ).length;
+      if (assignedRealSeats < 2) {
+        setFormError(t('newGame.multiplayer.needTwoSeats'));
+        return;
+      }
+    }
     const context = validateAndResolveCreatePayload();
     if (!context) {
+      if (
+        draftRoom &&
+        SEAT_KEYS.some((_, index) => !syncedSeatDisplayNames[index] && !(hostSetupSeatNames[index]?.trim()))
+      ) {
+        setTemporaryPlayersVisible(true);
+      }
       return;
     }
     if (isLocalQuickSetup) {
@@ -1468,7 +1575,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     const success = await executeCreateGame(pendingPayload);
     if (success) {
       setPendingPayload(null);
-    } else {
+    } else if (realJoinedSyncPlayers.length >= 2) {
       setConfirmVisible(true);
     }
     setConfirmBusy(false);
@@ -1566,38 +1673,217 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets
         >
-        <View
-          testID="new-game-title-section"
-          onLayout={(event) => {
-            sectionY.current.title = event.nativeEvent.layout.y;
-          }}
-        >
-          {!isLocalQuickSetup ? (
-            <View style={styles.headerBlock}>
-              <AppText style={styles.headerSubtitle}>{screenCopy.subtitle}</AppText>
+        {isMultiplayerPreRoom ? (
+          <>
+            <View
+              testID="new-game-title-section"
+              onLayout={(event) => {
+                sectionY.current.title = event.nativeEvent.layout.y;
+              }}
+            >
+              <MultiplayerPreRoomSetup
+                title={title}
+                titleLabel={t('newGame.gameTitle')}
+                titlePlaceholder={t('newGame.gameTitlePlaceholder')}
+                titleError={titleError}
+                titleInputRef={titleInputRef}
+                hostName={hostDisplayName}
+                hostNameLabel={t('newGame.multiplayer.hostNameLabel')}
+                hostNamePlaceholder={t('newGame.multiplayer.hostNamePlaceholder')}
+                hostNameError={hostNameError}
+                disabled={loading || syncBusy}
+                onTitleChange={(value) => {
+                  setTitle(value);
+                  setTitleError(null);
+                }}
+                onHostNameChange={(value) => {
+                  setHostDisplayName(value);
+                  setHostNameError(null);
+                }}
+              />
             </View>
-          ) : null}
-          <GameTitleSection
-            label={t('newGame.gameTitle')}
-            value={title}
-            placeholder={t('newGame.gameTitlePlaceholder')}
-            onChangeText={(value) => {
-              setTitle(value);
-              setTitleError(null);
-            }}
-            inputRef={titleInputRef}
-            error={titleError}
-            disabled={setupLocked || loading}
-          />
-        </View>
+            <LocalRulesSummary
+              testID="new-game-multiplayer-rules-summary"
+              editTestID="new-game-multiplayer-edit-rules"
+              title={t('newGame.localQuick.rulesTitle')}
+              editLabel={t('newGame.localQuick.rulesEdit')}
+              editAccessibilityLabel={localRulesEditAccessibilityLabel}
+              summaryLines={localRulesSummaryLines}
+              onEdit={() => setLocalRulesEditorVisible(true)}
+            />
+            <View style={styles.preRoomHelper}>
+              <AppText style={styles.preRoomHelperText}>{t('newGame.multiplayer.preRoomHelper')}</AppText>
+            </View>
+          </>
+        ) : isMultiplayerHostSetup && draftRoom ? (
+          <>
+            <View
+              testID="new-game-players-section"
+              onLayout={(event) => {
+                sectionY.current.players = event.nativeEvent.layout.y;
+              }}
+            >
+              <MultiplayerHostSetup
+                joinedCount={realJoinedSyncPlayers.length}
+                hostName={realJoinedSyncPlayers.find((player) => player.isHost)?.displayName || hostDisplayName || '-'}
+                seatLabels={seatLabels}
+                seats={hostSetupSeats}
+                players={hostSetupPlayers}
+                benchPlayerNames={benchSyncPlayers.map((player) => player.displayName)}
+                selectedPlayerId={selectedSyncPlayerId}
+                selectedPlayerName={selectedSyncPlayer?.displayName ?? null}
+                seatMode={seatMode}
+                startingDealerMode={startingDealerMode}
+                startingDealerSourceIndex={startingDealerSourceIndex}
+                autoAssigned={autoAssigned}
+                disabled={loading || syncBusy}
+                inviteBusy={inviteBusy}
+                playersError={playersError}
+                labels={{
+                  shareInvite: t('newGame.multiplayer.shareInvite'),
+                  inviteLoading: t('roomLobby.hostTools.inviteLoading'),
+                  joinedCount: t('newGame.multiplayer.joinedCount'),
+                  host: t('newGame.multiplayer.host'),
+                  you: t('roomLobby.member.self'),
+                  joined: t('newGame.multiplayer.joined'),
+                  temporary: t('newGame.multiplayer.temporary'),
+                  waiting: t('newGame.multiplayer.waiting'),
+                  seatArrangement: t('newGame.multiplayer.seatArrangement'),
+                  selectedHint: t('newGame.multiplayer.selectedHint'),
+                  selectedHintWithName: t('newGame.multiplayer.selectedHintWithName'),
+                  benchTitle: t('roomLobby.bench.title'),
+                  keepBench: t('newGame.multiplayer.keepBench'),
+                  addTemporary: t('newGame.multiplayer.addTemporary'),
+                  seatModeTitle: t('newGame.seatModeTitle'),
+                  seatModeManual: t('newGame.seatMode.manual'),
+                  seatModeAuto: t('newGame.seatMode.auto'),
+                  autoSeatConfirm: t('newGame.autoSeatConfirm'),
+                  autoSeatReshuffle: t('newGame.autoSeatReshuffle'),
+                  startingDealerRandom: t('newGame.startingDealerMode.random'),
+                  startingDealerManual: t('newGame.startingDealerMode.manual'),
+                  chooseDealer: t('newGame.multiplayer.chooseDealer'),
+                  cancelRoom: t('newGame.multiplayer.cancelRoom'),
+                }}
+                onShareInvite={() => {
+                  handleOpenInviteShare().catch((error) => console.error('[NewGame] share invite failed', error));
+                }}
+                onSelectPlayer={handleSelectSyncPlayer}
+                onAssignPlayerToSeat={(index) => handleAssignSyncPlayerToSeat(SEAT_KEYS[index])}
+                onKeepBench={() => {
+                  if (selectedSyncPlayerId) handleKeepPlayerOnBench(selectedSyncPlayerId);
+                }}
+                onAddTemporary={() => setTemporaryPlayersVisible(true)}
+                onSeatModeChange={handleSeatModeChange}
+                onStartingDealerModeChange={handleStartingDealerModeChange}
+                onConfirmAutoSeat={handleConfirmAutoSeat}
+                onSelectStartingDealer={handleSelectStartingDealer}
+                onCancelRoom={handleCancelSync}
+              />
+            </View>
+            <LocalRulesSummary
+              testID="new-game-multiplayer-rules-summary"
+              editTestID="new-game-multiplayer-edit-rules"
+              title={t('newGame.localQuick.rulesTitle')}
+              editLabel={t('newGame.localQuick.rulesEdit')}
+              editAccessibilityLabel={localRulesEditAccessibilityLabel}
+              summaryLines={localRulesSummaryLines}
+              onEdit={() => setLocalRulesEditorVisible(true)}
+            />
+          </>
+        ) : (
+          <>
+            <View
+              testID="new-game-title-section"
+              onLayout={(event) => {
+                sectionY.current.title = event.nativeEvent.layout.y;
+              }}
+            >
+              <GameTitleSection
+                label={t('newGame.gameTitle')}
+                value={title}
+                placeholder={t('newGame.gameTitlePlaceholder')}
+                onChangeText={(value) => {
+                  setTitle(value);
+                  setTitleError(null);
+                }}
+                inputRef={titleInputRef}
+                error={titleError}
+                disabled={loading}
+              />
+            </View>
+            <View
+              testID="new-game-players-section"
+              onLayout={(event) => {
+                sectionY.current.players = event.nativeEvent.layout.y;
+              }}
+            >
+              <PlayersSection
+                quickSetup
+                showSyncControl={false}
+                seatMode={seatMode}
+                seatLabels={seatLabels}
+                players={players}
+                autoNames={autoNames}
+                autoAssigned={autoAssigned}
+                startingDealerMode={startingDealerMode}
+                startingDealerSourceIndex={startingDealerSourceIndex}
+                playersError={playersError}
+                disabled={loading}
+                manualPlayerRefs={manualPlayerRefs}
+                autoPlayerRefs={autoPlayerRefs}
+                labels={{
+                  sectionTitle: t('newGame.players'),
+                  seatModeTitle: t('newGame.seatModeTitle'),
+                  seatModeManual: t('newGame.seatMode.manual'),
+                  seatModeAuto: t('newGame.seatMode.auto'),
+                  playerManualHintPrefix: t('newGame.playerManualHintPrefix'),
+                  playerManualHintSuffix: t('newGame.playerManualHintSuffix'),
+                  playerAutoHintPrefix: t('newGame.playerAutoHintPrefix'),
+                  playerAutoHintSuffix: t('newGame.playerAutoHintSuffix'),
+                  playerNameBySeatSuffix: t('newGame.playerNameBySeatSuffix'),
+                  playerOrderPrefix: t('newGame.playerOrderPrefix'),
+                  playerOrderSuffix: t('newGame.playerOrderSuffix'),
+                  autoSeatConfirm: t('newGame.autoSeatConfirm'),
+                  autoSeatReshuffle: t('newGame.autoSeatReshuffle'),
+                  autoSeatResult: t('newGame.autoSeatResult'),
+                  autoSeatResultManualTitle: t('newGame.autoSeatResultManualTitle'),
+                  autoSeatResultHint: t('newGame.autoSeatResultHint'),
+                  autoSeatDealerExample: t('newGame.autoSeatDealerExample'),
+                  manualSeatCaption: t('newGame.manualSeatCaption'),
+                  startingDealerModeRandom: t('newGame.startingDealerMode.random'),
+                  startingDealerModeManual: t('newGame.startingDealerMode.manual'),
+                  autoFlowHint: t('newGame.autoFlowHint'),
+                  dealerBadge: t('newGame.dealerBadge'),
+                }}
+                onSeatModeChange={handleSeatModeChange}
+                onSetPlayer={handleSetPlayer}
+                onSetAutoName={handleSetAutoName}
+                onConfirmAutoSeat={handleConfirmAutoSeat}
+                onStartingDealerModeChange={handleStartingDealerModeChange}
+                onSelectStartingDealer={handleSelectStartingDealer}
+                onPlayersErrorLayout={(event) => {
+                  sectionY.current.playersError = sectionY.current.players + event.nativeEvent.layout.y;
+                }}
+              />
+            </View>
+            <LocalRulesSummary
+              title={t('newGame.localQuick.rulesTitle')}
+              editLabel={t('newGame.localQuick.rulesEdit')}
+              editAccessibilityLabel={localRulesEditAccessibilityLabel}
+              summaryLines={localRulesSummaryLines}
+              onEdit={() => setLocalRulesEditorVisible(true)}
+            />
+          </>
+        )}
 
         <LocalRulesEditorModal
-          inline={!isLocalQuickSetup}
           visible={localRulesEditorVisible}
           title={t('newGame.localQuick.rulesEditorTitle')}
           closeLabel={t('newGame.localQuick.rulesClose')}
           doneLabel={t('newGame.localQuick.rulesDone')}
-          onClose={() => setLocalRulesEditorVisible(false)}
+          onClose={() => {
+            handleCloseRulesEditor().catch((error) => console.error('[NewGame] close rules editor failed', error));
+          }}
         >
           <View
             testID="new-game-scoring-section"
@@ -1623,7 +1909,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             sampleEffectiveFan={sampleEffectiveFan}
             sampleZimoEach={sampleZimoEach}
             sampleDiscarder={sampleDiscarder}
-            disabled={loading || setupLocked}
+            disabled={loading || syncBusy}
             minFanInputRef={minFanInputRef}
             unitPerFanInputRef={unitPerFanInputRef}
             customCapFanInputRef={customCapFanInputRef}
@@ -1729,133 +2015,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           </View>
         </LocalRulesEditorModal>
 
-        <View
-          testID="new-game-players-section"
-          onLayout={(event) => {
-            const playersSectionY = event.nativeEvent.layout.y;
-            sectionY.current.players = playersSectionY;
-            if (multiplayerEntryPending && !hasDraftRoom) {
-              setMultiplayerEntryPending(false);
-              setTimeout(() => scrollToY(playersSectionY), 80);
-            }
-          }}
-        >
-          <PlayersSection
-            quickSetup={isLocalQuickSetup}
-            showSyncControl={!isLocalQuickSetup}
-            seatMode={seatMode}
-            seatLabels={seatLabels}
-            players={players}
-            autoNames={autoNames}
-            autoAssigned={autoAssigned}
-            startingDealerMode={startingDealerMode}
-            startingDealerSourceIndex={startingDealerSourceIndex}
-            playersError={playersError}
-            disabled={loading}
-            manualPlayerRefs={manualPlayerRefs}
-            autoPlayerRefs={autoPlayerRefs}
-            labels={{
-              sectionTitle: t('newGame.players'),
-              seatModeTitle: t('newGame.seatModeTitle'),
-              seatModeManual: t('newGame.seatMode.manual'),
-              seatModeAuto: t('newGame.seatMode.auto'),
-              playerManualHintPrefix: t('newGame.playerManualHintPrefix'),
-              playerManualHintSuffix: t('newGame.playerManualHintSuffix'),
-              playerAutoHintPrefix: t('newGame.playerAutoHintPrefix'),
-              playerAutoHintSuffix: t('newGame.playerAutoHintSuffix'),
-              playerNameBySeatSuffix: t('newGame.playerNameBySeatSuffix'),
-              playerOrderPrefix: t('newGame.playerOrderPrefix'),
-              playerOrderSuffix: t('newGame.playerOrderSuffix'),
-              autoSeatConfirm: t('newGame.autoSeatConfirm'),
-              autoSeatReshuffle: t('newGame.autoSeatReshuffle'),
-              autoSeatResult: t('newGame.autoSeatResult'),
-              autoSeatResultManualTitle: t('newGame.autoSeatResultManualTitle'),
-              autoSeatResultHint: t('newGame.autoSeatResultHint'),
-              autoSeatDealerExample: t('newGame.autoSeatDealerExample'),
-              manualSeatCaption: t('newGame.manualSeatCaption'),
-              startingDealerModeRandom: t('newGame.startingDealerMode.random'),
-              startingDealerModeManual: t('newGame.startingDealerMode.manual'),
-              autoFlowHint: t('newGame.autoFlowHint'),
-              dealerBadge: t('newGame.dealerBadge'),
-              syncEnable:
-                entryMode === 'multiplayer' && !hasDraftRoom
-                  ? translateWithFallback(t, 'newGame.sync.entryAction', '開多人枱')
-                  : syncCooldownLabel,
-              syncEnableBusy: translateWithFallback(t, 'newGame.sync.enabling', '建立同步房中...'),
-              syncJoinedPlayersTitle: translateWithFallback(t, 'newGame.sync.joinedPlayersTitle', '已加入玩家'),
-              syncJoinedPlayersHint: translateWithFallback(
-                t,
-                'newGame.sync.joinedPlayersHint',
-                '其他玩家加入後，會出現在這裡供你安排到座位或留在後備。',
-              ),
-              syncSelectedPlayerHint: translateWithFallback(
-                t,
-                'newGame.sync.selectPlayerHint',
-                '點選一位已加入玩家，再點東南西北其中一格安排上枱。',
-              ),
-              syncSelectedPlayerHintWithName: translateWithFallback(
-                t,
-                'newGame.sync.selectedPlayerHintWithName',
-                '已選 {name}，而家可以點東南西北其中一格安排上枱。',
-              ),
-              syncSeatAssigned: translateWithFallback(t, 'newGame.sync.syncedSeatLabel', '已同步'),
-              syncBenchTitle: translateWithFallback(t, 'roomLobby.bench.title', '後備區'),
-              syncKeepBench: translateWithFallback(t, 'newGame.sync.keepBench', '留在後備'),
-              syncYou: t('roomLobby.member.self'),
-              syncHost: t('roomLobby.member.host'),
-            }}
-            onSeatModeChange={handleSeatModeChange}
-            onSetPlayer={handleSetPlayer}
-            onSetAutoName={handleSetAutoName}
-            onConfirmAutoSeat={handleConfirmAutoSeat}
-            onStartingDealerModeChange={handleStartingDealerModeChange}
-            onSelectStartingDealer={handleSelectStartingDealer}
-            syncEnabled={hasDraftRoom}
-            syncEntryIntent={entryMode === 'multiplayer' && !hasDraftRoom}
-            syncBusy={syncBusy}
-            syncEnableDisabled={syncCooldownSeconds > 0}
-            syncedSeatDisplayNames={syncedSeatDisplayNames}
-            joinedSyncPlayers={joinedSyncPlayers.map((player) => ({
-              playerId: player.playerId,
-              displayName: player.displayName,
-              isHost: player.isHost,
-              isSelf: player.isSelf,
-            }))}
-            selectedSyncPlayerId={selectedSyncPlayerId}
-            selectedSyncPlayerName={selectedSyncPlayer?.displayName ?? null}
-            benchPlayerNames={benchSyncPlayers.map((player) => player.displayName)}
-            onEnableSync={() => {
-              handleEnableSync().catch((error) => {
-                console.error('[NewGame] enable sync failed', error);
-              });
-            }}
-            onSelectSyncPlayer={handleSelectSyncPlayer}
-            onAssignSyncPlayerToSeat={(seatIndex) => {
-              const seatKey = SEAT_KEYS[seatIndex];
-              if (!seatKey) {
-                return;
-              }
-              handleAssignSyncPlayerToSeat(seatKey);
-            }}
-            onKeepSyncPlayerOnBench={() => {
-              if (selectedSyncPlayerId) {
-                handleKeepPlayerOnBench(selectedSyncPlayerId);
-              }
-            }}
-            onPlayersErrorLayout={(event) => {
-              sectionY.current.playersError = sectionY.current.players + event.nativeEvent.layout.y;
-            }}
-          />
-        </View>
-        {isLocalQuickSetup ? (
-          <LocalRulesSummary
-            title={t('newGame.localQuick.rulesTitle')}
-            editLabel={t('newGame.localQuick.rulesEdit')}
-            editAccessibilityLabel={localRulesEditAccessibilityLabel}
-            summaryLines={localRulesSummaryLines}
-            onEdit={() => setLocalRulesEditorVisible(true)}
-          />
-        ) : null}
         <TraditionalHkPaytableModal
           visible={stakePaytableVisible}
           rules={stakePaytableRules}
@@ -1866,73 +2025,20 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         </ScrollView>
 
         <BottomActionBar
-          primaryLabel={loading ? screenCopy.primaryActionBusy : screenCopy.primaryAction}
+          primaryLabel={loading || syncBusy ? screenCopy.primaryActionBusy : screenCopy.primaryAction}
           onPrimaryPress={handlePressCreate}
-          disabled={loading || confirmBusy || syncBusy}
-          primaryTestID={hasDraftRoom ? 'new-game-start-synced-room' : 'new-game-create-local'}
-          primaryAccessibilityLabel={screenCopy.primaryAction}
-          topContent={
-            hasDraftRoom ? (
-              <View style={styles.syncToolbar}>
-                <View style={styles.syncToolbarRoomCode}>
-                  <AppText style={styles.syncToolbarLabel}>
-                    {translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}
-                  </AppText>
-                  <AppText selectable style={styles.syncToolbarValue}>
-                    {draftRoom?.roomId ?? '-'}
-                  </AppText>
-                </View>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.syncToolbarActions}
-                >
-                  {DEBUG_FLAGS.enableSyncTestTools ? (
-                    <Pressable
-                      onPress={() => {
-                        handleAddDebugSyncPlayer().catch((error) => {
-                          console.error('[NewGame] add debug sync player failed', error);
-                        });
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel={translateWithFallback(t, 'newGame.sync.debugAddPlayer', '加入虛擬真人玩家')}
-                      accessibilityState={{ disabled: syncBusy }}
-                      disabled={syncBusy}
-                      testID="new-game-debug-add-temporary-player"
-                      style={styles.syncToolbarButton}
-                    >
-                      <AppText style={styles.syncToolbarButtonText}>
-                        {translateWithFallback(t, 'newGame.sync.debugAddPlayer', '加入虛擬真人玩家')}
-                      </AppText>
-                    </Pressable>
-                  ) : null}
-                  <Pressable
-                    onPress={() => {
-                      handleOpenInviteShare().catch((error) => {
-                        console.error('[NewGame] share invite failed', error);
-                      });
-                    }}
-                    disabled={draftRoom?.status !== 'open' || syncBusy || inviteBusy}
-                    style={styles.syncToolbarButton}
-                  >
-                    <AppText style={styles.syncToolbarButtonText}>
-                      {inviteBusy
-                        ? translateWithFallback(t, 'roomLobby.hostTools.inviteLoading', '準備邀請中...')
-                        : translateWithFallback(t, 'roomLobby.hostTools.shareInvite', '分享邀請')}
-                    </AppText>
-                  </Pressable>
-                  <Pressable onPress={handleCancelSync} style={styles.syncToolbarButton}>
-                    <AppText style={styles.syncToolbarButtonText}>
-                      {translateWithFallback(t, 'newGame.sync.cancelConfirmAction', '取消同步')}
-                    </AppText>
-                  </Pressable>
-                </ScrollView>
-              </View>
-            ) : null
+          disabled={loading || confirmBusy || syncBusy || (isMultiplayerPreRoom && syncCooldownSeconds > 0)}
+          primaryTestID={
+            hasDraftRoom
+              ? 'new-game-start-synced-room'
+              : isMultiplayerPreRoom
+              ? 'new-game-create-multiplayer-room'
+              : 'new-game-create-local'
           }
+          primaryAccessibilityLabel={screenCopy.primaryAction}
         />
 
-        {!isLocalQuickSetup ? (
+        {hasDraftRoom ? (
           <CreateConfirmModal
             visible={confirmVisible}
             busy={confirmBusy}
@@ -1955,33 +2061,40 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             }}
           />
         ) : null}
-        <HostNameConfirmModal
-          visible={hostNameVisible}
-          value={hostDisplayName}
-          busy={syncBusy}
-          error={hostNameError}
+        <TemporaryPlayersModal
+          visible={temporaryPlayersVisible}
+          values={players}
+          seatLabels={seatLabels}
+          assignedPlayerNames={syncedSeatDisplayNames}
           labels={{
-            title: translateWithFallback(t, 'newGame.sync.hostNameTitle', '確認你的名稱'),
-            message: translateWithFallback(t, 'newGame.sync.hostNameMessage', '其他玩家會用呢個名稱認出你。確認後先會建立同步房。'),
-            inputLabel: translateWithFallback(t, 'newGame.sync.hostNameLabel', '房主名稱'),
-            placeholder: translateWithFallback(t, 'newGame.sync.hostNamePlaceholder', '輸入 1–10 個字'),
-            cancel: translateWithFallback(t, 'common.cancel', '取消'),
-            confirm: translateWithFallback(t, 'newGame.sync.hostNameConfirm', '確認並建立房間'),
-            confirming: translateWithFallback(t, 'newGame.sync.enabling', '建立中...'),
+            title: t('newGame.multiplayer.temporaryTitle'),
+            message: t('newGame.multiplayer.temporaryMessage'),
+            inputSuffix: t('newGame.multiplayer.temporaryInputSuffix'),
+            joined: t('newGame.multiplayer.joined'),
+            cancel: t('common.cancel'),
+            save: t('newGame.multiplayer.temporarySave'),
           }}
-          onChange={(value) => {
-            setHostDisplayName(value);
-            setHostNameError(null);
+          onCancel={() => setTemporaryPlayersVisible(false)}
+          onSave={handleSaveTemporaryPlayers}
+        />
+        <InsufficientPlayersModal
+          visible={insufficientPlayersVisible}
+          busy={syncBusy}
+          labels={{
+            title: t('newGame.multiplayer.insufficientTitle'),
+            message: t('newGame.multiplayer.insufficientMessage'),
+            invite: t('newGame.multiplayer.inviteFriends'),
+            returnLocal: t('newGame.multiplayer.returnLocal'),
+            cancel: t('common.cancel'),
           }}
-          onCancel={() => {
-            if (syncBusy) return;
-            setHostNameVisible(false);
-            setPendingSyncContext(null);
-            setHostNameError(null);
+          onInvite={() => {
+            setInsufficientPlayersVisible(false);
+            handleOpenInviteShare().catch((error) => console.error('[NewGame] share invite failed', error));
           }}
-          onConfirm={() => {
-            handleConfirmHostName().catch((error) => console.error('[NewGame] host name confirm failed', error));
+          onReturnLocal={() => {
+            handleReturnToLocalScoring().catch((error) => console.error('[NewGame] return local failed', error));
           }}
+          onCancel={() => setInsufficientPlayersVisible(false)}
         />
         <InviteShareModal
           visible={inviteShareVisible}
@@ -2023,49 +2136,19 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: GRID.x2,
   },
-  headerBlock: {
+  preRoomHelper: {
     marginBottom: GRID.x2,
-    gap: 4,
-  },
-  headerSubtitle: {
-    ...typography.body,
-    color: theme.colors.textSecondary,
-    lineHeight: 20,
-  },
-  syncToolbar: {
-    gap: GRID.x1_5,
-  },
-  syncToolbarRoomCode: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: GRID.x1,
-  },
-  syncToolbarLabel: {
-    ...typography.caption,
-    color: theme.colors.textSecondary,
-  },
-  syncToolbarValue: {
-    ...typography.body,
-    color: theme.colors.textPrimary,
-    fontWeight: '700',
-  },
-  syncToolbarActions: {
-    flexDirection: 'row',
-    gap: GRID.x1,
-    paddingRight: GRID.x1,
-  },
-  syncToolbarButton: {
-    borderRadius: 999,
+    paddingHorizontal: GRID.x2,
+    paddingVertical: GRID.x1_5,
+    borderRadius: theme.radius.md,
     borderWidth: 1,
-    borderColor: theme.colors.primary,
-    paddingHorizontal: GRID.x1_5,
-    paddingVertical: GRID.x1,
-    backgroundColor: theme.colors.surface,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.primaryLight,
   },
-  syncToolbarButtonText: {
-    ...typography.caption,
-    color: theme.colors.primary,
-    fontWeight: '700',
+  preRoomHelperText: {
+    color: theme.colors.primaryDark,
+    fontSize: theme.fontSize.sm,
+    lineHeight: 21,
   },
   errorText: {
     ...typography.body,

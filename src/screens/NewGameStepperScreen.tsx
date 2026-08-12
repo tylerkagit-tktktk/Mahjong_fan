@@ -1501,7 +1501,14 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       : hkStakePreset === 'FIVE_ONE'
       ? t('newGame.hkStakePreset.fiveOne')
       : t('newGame.hkStakePreset.oneTwo');
-  const localGunSummary = hkGunMode === 'halfGun' ? t('newGame.hkGunMode.half') : t('newGame.hkGunMode.full');
+  const localScoringSummary =
+    hkScoringPreset === 'traditionalFan'
+      ? t('newGame.hkPreset.traditional')
+      : t('newGame.localQuick.summary.customScoring');
+  const localGunSummary =
+    hkGunMode === 'halfGun'
+      ? t('game.detail.rules.hkGunMode.halfGun')
+      : t('game.detail.rules.hkGunMode.fullGun');
   const localCapSummaryValue =
     hkScoringPreset === 'traditionalFan'
       ? capFan
@@ -1515,12 +1522,12 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const localMinFanSummary = t('newGame.localQuick.summary.minFan').replace('{count}', String(minFanForHint));
   const localRulesSummaryLines =
     hkScoringPreset === 'traditionalFan'
-      ? [`${t('newGame.mode.hk')} · ${localStakeSummary} · ${localGunSummary}`, `${localMinFanSummary} · ${localCapSummary}`]
+      ? [`${localScoringSummary} · ${localStakeSummary} · ${localGunSummary}`, `${localMinFanSummary} · ${localCapSummary}`]
       : [
-          `${t('newGame.mode.hk')} · ${t('newGame.hkPreset.custom')} · ${localGunSummary}`,
-          `${t('newGame.localQuick.summary.unitPerFan')
+          `${localScoringSummary} · ${t('newGame.localQuick.summary.unitPerFan')
             .replace('{symbol}', currencySymbol)
-            .replace('{amount}', String(parsedUnitPerFan ?? unitPerFan))} · ${localMinFanSummary} · ${localCapSummary}`,
+            .replace('{amount}', String(parsedUnitPerFan ?? unitPerFan))}`,
+          `${localMinFanSummary} · ${localCapSummary}`,
         ];
   const localRulesEditAccessibilityLabel = t('newGame.localQuick.rulesEditAccessibility').replace(
     '{rules}',

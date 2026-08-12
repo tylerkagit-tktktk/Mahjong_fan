@@ -11,6 +11,9 @@ import SegmentedControl from '../../src/components/SegmentedControl';
 import StepperNumberInput from '../../src/components/StepperNumberInput';
 import { createGameWithPlayers } from '../../src/db/repo';
 
+type MockLanguage = 'zh-Hant' | 'zh-Hans' | 'en';
+let mockLanguage: MockLanguage = 'zh-Hant';
+
 jest.mock('@react-navigation/native', () => {
   const ReactLib = require('react');
   return {
@@ -27,11 +30,15 @@ jest.mock('../../src/settings/useAppPreferences', () => ({
 }));
 
 jest.mock('../../src/i18n/useAppLanguage', () => {
-  const locale = require('../../src/i18n/locales/zh-Hant.json');
-  const translate = (key: string) => locale[key] ?? key;
+  const locales = {
+    'zh-Hant': require('../../src/i18n/locales/zh-Hant.json'),
+    'zh-Hans': require('../../src/i18n/locales/zh-Hans.json'),
+    en: require('../../src/i18n/locales/en.json'),
+  };
+  const translate = (key: string) => locales[mockLanguage][key] ?? key;
   return {
     useAppLanguage: () => ({
-      language: 'zh-Hant',
+      language: mockLanguage,
       t: translate,
     }),
   };
@@ -105,6 +112,7 @@ function nativeText(tree: renderer.ReactTestRenderer): string {
 
 describe('NewGameStepper Local Quick Setup', () => {
   beforeEach(() => {
+    mockLanguage = 'zh-Hant';
     jest.clearAllMocks();
     mockedCreateGameWithPlayers.mockResolvedValue(undefined);
   });
@@ -125,8 +133,8 @@ describe('NewGameStepper Local Quick Setup', () => {
       'new-game-local-rules-summary',
     ]);
     expect(tree.root.findAllByProps({ testID: 'new-game-scoring-section' })).toHaveLength(0);
-    expect(nativeText(tree)).toContain('香港牌 · 二五雞 · 全銃制');
-    expect(nativeText(tree)).toContain('3番起 · 10番封頂');
+    expect(nativeText(tree)).toContain('傳統番數 · 二五雞 · 全銃');
+    expect(nativeText(tree)).toContain('3番起糊 · 10番爆棚');
     expect(nativeText(tree)).not.toContain('加入同步玩家');
     expect(nativeText(tree)).not.toContain('先設定規則、玩家同起莊方式');
 
@@ -178,14 +186,36 @@ describe('NewGameStepper Local Quick Setup', () => {
 
     await act(async () => tree.root.findByProps({ testID: 'new-game-local-rules-done' }).props.onPress());
     expect(tree.root.findAllByProps({ testID: 'new-game-local-rules-editor' })).toHaveLength(0);
-    expect(nativeText(tree)).toContain('香港牌 · 五一 · 半銃制');
-    expect(nativeText(tree)).toContain('5番起 · 13番封頂');
+    expect(nativeText(tree)).toContain('傳統番數 · 五一 · 半銃');
+    expect(nativeText(tree)).toContain('5番起糊 · 13番爆棚');
 
     await act(async () => tree.root.findByProps({ testID: 'new-game-local-edit-rules' }).props.onPress());
     controls = tree.root.findAllByType(SegmentedControl);
     expect(controls[1].props.value).toBe('halfGun');
     expect(controls[2].props.value).toBe('FIVE_ONE');
     expect(controls[3].props.value).toBe(13);
+
+    await act(async () => tree.unmount());
+  });
+
+  it('summarizes custom scoring with only the settings editable in custom mode', async () => {
+    const { tree } = await renderScreen();
+
+    await act(async () => tree.root.findByProps({ testID: 'new-game-local-edit-rules' }).props.onPress());
+    let controls = tree.root.findAllByType(SegmentedControl);
+    await act(async () => controls[0].props.onChange('customTable'));
+    await act(async () => tree.root.findByProps({ testID: 'new-game-local-rules-done' }).props.onPress());
+
+    const summaryText = nativeText(tree);
+    expect(summaryText).toContain('自訂番數 · 每番 HK$1');
+    expect(summaryText).toContain('3番起糊 · 10番爆棚');
+    expect(summaryText).not.toContain('傳統番數');
+    expect(summaryText).not.toContain('二五雞');
+    expect(summaryText).not.toContain('全銃');
+
+    await act(async () => tree.root.findByProps({ testID: 'new-game-local-edit-rules' }).props.onPress());
+    controls = tree.root.findAllByType(SegmentedControl);
+    expect(controls[0].props.value).toBe('customTable');
 
     await act(async () => tree.unmount());
   });
@@ -250,6 +280,7 @@ describe('NewGameStepper Local Quick Setup', () => {
       'newGame.localQuick.rulesClose',
       'newGame.localQuick.rulesDone',
       'newGame.localQuick.start',
+      'newGame.localQuick.summary.customScoring',
       'newGame.localQuick.summary.minFan',
       'newGame.localQuick.summary.cap',
       'newGame.localQuick.summary.noCap',
@@ -260,6 +291,23 @@ describe('NewGameStepper Local Quick Setup', () => {
       expect(en[key]).toBeTruthy();
       expect(zhHans[key]).toBeTruthy();
       expect(zhHant[key]).toBeTruthy();
+    }
+  });
+
+  it('renders concise default summary copy in every supported locale', async () => {
+    const expectedByLanguage: Record<MockLanguage, [string, string]> = {
+      'zh-Hant': ['傳統番數 · 二五雞 · 全銃', '3番起糊 · 10番爆棚'],
+      'zh-Hans': ['传统番数 · 二五鸡 · 全铳', '3番起糊 · 10番爆棚'],
+      en: ['Traditional fan · 2-5 Chicken · Full Gun', 'Win at 3 fan · Boom cap at 10 fan'],
+    };
+
+    for (const language of Object.keys(expectedByLanguage) as MockLanguage[]) {
+      mockLanguage = language;
+      const { tree } = await renderScreen();
+      const summaryText = nativeText(tree);
+      expect(summaryText).toContain(expectedByLanguage[language][0]);
+      expect(summaryText).toContain(expectedByLanguage[language][1]);
+      await act(async () => tree.unmount());
     }
   });
 });

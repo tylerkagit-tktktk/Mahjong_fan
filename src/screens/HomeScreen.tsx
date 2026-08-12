@@ -111,7 +111,7 @@ function HomeScreen({ navigation }: Props) {
     createMultiplayer: translateWithFallback(t, 'home.createMultiplayer', '開多人枱'),
     createMultiplayerHint: translateWithFallback(t, 'home.createMultiplayerHint', '邀朋友加入'),
     joinMultiplayer: translateWithFallback(t, 'home.joinMultiplayer', '加入牌局'),
-    joinMultiplayerHint: translateWithFallback(t, 'home.joinMultiplayerHint', '掃碼 / 輸入邀請碼'),
+    joinMultiplayerHint: translateWithFallback(t, 'home.joinMultiplayerHint', '使用邀請連結'),
     historyAll: translateWithFallback(t, 'home.historyAllCantonese', '所有戰績'),
     settings: translateWithFallback(t, 'nav.settings', '設定'),
     promptTitle: translateWithFallback(t, 'home.activeGameModal.title', '有局打緊喎'),
@@ -320,7 +320,7 @@ function HomeScreen({ navigation }: Props) {
 
               <Pressable
                 testID="home-join-multiplayer"
-                onPress={() => navigation.navigate('JoinInvite', {})}
+                onPress={() => navigation.navigate('JoinLanding')}
                 accessibilityRole="button"
                 accessibilityLabel={`${copy.joinMultiplayer}，${copy.joinMultiplayerHint}`}
                 style={({ pressed }) => [styles.multiplayerRow, pressed && styles.secondaryPressed]}

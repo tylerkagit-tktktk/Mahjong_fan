@@ -10,6 +10,7 @@ const formalRoutes = [
   'GameTable',
   'GameDashboard',
   'History',
+  'JoinLanding',
   'JoinInvite',
   'RoomLobby',
   'MultiplayerGameTable',

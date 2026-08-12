@@ -157,6 +157,9 @@ describe('HomeScreen joined-room recovery', () => {
     expect(zhHant['home.multiplayer']).toBe('多人牌局');
     expect(zhHans['home.multiplayer']).toBe('多人牌局');
     expect(en['home.multiplayer']).toBe('Multiplayer');
+    expect(zhHant['home.joinMultiplayerHint']).toBe('使用邀請連結');
+    expect(zhHans['home.joinMultiplayerHint']).toBe('使用邀请连结');
+    expect(en['home.joinMultiplayerHint']).toBe('Use an invite link');
 
     await act(async () => {
       localAction.props.onPress();
@@ -169,7 +172,8 @@ describe('HomeScreen joined-room recovery', () => {
 
     expect(navigation.navigate).toHaveBeenCalledWith('NewGameStepper');
     expect(navigation.navigate).toHaveBeenCalledWith('NewGameStepper', { entryMode: 'multiplayer' });
-    expect(navigation.navigate).toHaveBeenCalledWith('JoinInvite', {});
+    expect(navigation.navigate).toHaveBeenCalledWith('JoinLanding');
+    expect(navigation.navigate).not.toHaveBeenCalledWith('JoinInvite', {});
     expect(navigation.navigate).toHaveBeenCalledWith('History');
     expect(navigation.navigate).toHaveBeenCalledWith('Settings');
 

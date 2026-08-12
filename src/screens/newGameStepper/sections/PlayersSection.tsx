@@ -21,6 +21,8 @@ type SyncPlayerChip = {
 
 type Props = {
   allowNameEdit?: boolean;
+  quickSetup?: boolean;
+  showSyncControl?: boolean;
   seatMode: SeatMode;
   seatLabels: string[];
   players: string[];
@@ -91,6 +93,8 @@ type Props = {
 
 function PlayersSection({
   allowNameEdit = true,
+  quickSetup = false,
+  showSyncControl = true,
   seatMode,
   seatLabels,
   players,
@@ -145,7 +149,7 @@ function PlayersSection({
   };
 
   const syncAutoSeatSelectable = syncEnabled && Boolean(selectedSyncPlayerId) && Boolean(onAssignSyncPlayerToSeat);
-  const syncEntryControl = !syncEnabled ? (
+  const syncEntryControl = showSyncControl && !syncEnabled ? (
     <View style={styles.syncBlock}>
       <AppButton
         label={syncBusy ? labels.syncEnableBusy ?? '建立同步房中...' : labels.syncEnable ?? '加入同步玩家'}
@@ -205,10 +209,17 @@ function PlayersSection({
             value={players[index]}
             onChangeText={(value) => onSetPlayer(index, value.slice(0, MAX_PLAYER_NAME_LENGTH))}
             placeholder={`${label}${labels.playerNameBySeatSuffix}`}
+            accessibilityLabel={`${label}${labels.playerNameBySeatSuffix}`}
             placeholderTextColor={theme.colors.textSecondary}
             editable={!disabled && !syncSeatSelectable}
             maxLength={MAX_PLAYER_NAME_LENGTH}
             returnKeyType={index === 3 ? 'done' : 'next'}
+            blurOnSubmit={index === 3}
+            onSubmitEditing={
+              quickSetup && index < PLAYER_COUNT - 1
+                ? () => manualPlayerRefs.current[index + 1]?.focus()
+                : undefined
+            }
           />
         ) : (
           <View style={styles.playerReadonlyWrap}>
@@ -226,10 +237,10 @@ function PlayersSection({
   return (
     <Card style={styles.card}>
       <AppText style={styles.sectionTitle}>{labels.sectionTitle}</AppText>
-      {seatMode === 'manual' ? <AppText style={styles.captionText}>{labels.manualSeatCaption}</AppText> : null}
+      {seatMode === 'manual' && !quickSetup ? <AppText style={styles.captionText}>{labels.manualSeatCaption}</AppText> : null}
       {syncEntryIntent ? syncEntryControl : null}
 
-      {allowNameEdit ? (
+      {allowNameEdit && !quickSetup ? (
         <>
           <AppText style={styles.inputLabel}>{labels.seatModeTitle}</AppText>
           <SegmentedControl<SeatMode>
@@ -246,11 +257,13 @@ function PlayersSection({
 
       {effectiveSeatMode === 'manual' ? (
         <View style={styles.playersList}>
-          <AppText style={styles.helperText}>
-            {allowNameEdit
-              ? `${labels.playerManualHintPrefix}${PLAYER_COUNT}${labels.playerManualHintSuffix}`
-              : labels.playerManualHintPrefix}
-          </AppText>
+          {!quickSetup ? (
+            <AppText style={styles.helperText}>
+              {allowNameEdit
+                ? `${labels.playerManualHintPrefix}${PLAYER_COUNT}${labels.playerManualHintSuffix}`
+                : labels.playerManualHintPrefix}
+            </AppText>
+          ) : null}
           {playersError ? (
             <AppText onLayout={onPlayersErrorLayout} style={styles.inlineErrorText}>
               {playersError}
@@ -297,10 +310,17 @@ function PlayersSection({
                 value={value}
                 onChangeText={(next) => onSetAutoName(index, next.slice(0, MAX_PLAYER_NAME_LENGTH))}
                 placeholder={`${labels.playerOrderPrefix}${index + 1}${labels.playerOrderSuffix}`}
+                accessibilityLabel={`${labels.playerOrderPrefix}${index + 1}${labels.playerOrderSuffix}`}
                 placeholderTextColor={theme.colors.textSecondary}
                 editable={!disabled}
                 maxLength={MAX_PLAYER_NAME_LENGTH}
                 returnKeyType={index === 3 ? 'done' : 'next'}
+                blurOnSubmit={index === 3}
+                onSubmitEditing={
+                  quickSetup && index < PLAYER_COUNT - 1
+                    ? () => autoPlayerRefs.current[index + 1]?.focus()
+                    : undefined
+                }
               />
             </Pressable>
           ))}
@@ -386,6 +406,21 @@ function PlayersSection({
           ) : null}
         </View>
       )}
+
+      {allowNameEdit && quickSetup ? (
+        <View style={styles.quickSeatMode}>
+          <AppText style={styles.inputLabel}>{labels.seatModeTitle}</AppText>
+          <SegmentedControl<SeatMode>
+            options={[
+              { value: 'manual', label: labels.seatModeManual },
+              { value: 'auto', label: labels.seatModeAuto },
+            ]}
+            value={seatMode}
+            onChange={onSeatModeChange}
+            disabled={disabled}
+          />
+        </View>
+      ) : null}
 
       {syncEnabled ? (
         <View style={styles.syncBlock}>
@@ -528,6 +563,9 @@ const styles = StyleSheet.create({
   },
   blockSpacing: {
     marginTop: GRID.x1_5,
+  },
+  quickSeatMode: {
+    marginTop: GRID.x1,
   },
   confirmButtonSpacing: {
     marginTop: GRID.x2,

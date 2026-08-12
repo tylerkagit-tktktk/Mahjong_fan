@@ -67,6 +67,8 @@ import {
 import CreateConfirmModal from './newGameStepper/sections/CreateConfirmModal';
 import HostNameConfirmModal from './newGameStepper/sections/HostNameConfirmModal';
 import GameTitleSection from './newGameStepper/sections/GameTitleSection';
+import LocalRulesEditorModal from './newGameStepper/sections/LocalRulesEditorModal';
+import LocalRulesSummary from './newGameStepper/sections/LocalRulesSummary';
 import PlayersSection from './newGameStepper/sections/PlayersSection';
 import ScoringSection from './newGameStepper/sections/ScoringSection';
 import { CapMode, ConfirmField, ConfirmSections, InvalidTarget, PreparedCreateContext, SeatMode, StartingDealerMode } from './newGameStepper/types';
@@ -144,6 +146,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const [localRulesEditorVisible, setLocalRulesEditorVisible] = useState(false);
   const [stakePaytableVisible, setStakePaytableVisible] = useState(false);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [pendingPayload, setPendingPayload] = useState<PreparedCreateContext | null>(null);
@@ -289,6 +292,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const seatLabels = useMemo(() => [t('seat.east'), t('seat.south'), t('seat.west'), t('seat.north')], [t]);
   const hasDraftRoom = Boolean(draftRoom);
   const setupLocked = hasDraftRoom;
+  const isLocalQuickSetup = entryMode !== 'multiplayer' && !hasDraftRoom;
   const minFanLowerBound = hkScoringPreset === 'customTable' ? 1 : MIN_FAN_MIN;
   const parsedMinFanInput = parseMinFan(minFanInput, minFanLowerBound, MIN_FAN_MAX);
   const parsedCustomCapFan = parseMinFan(customCapFanInput, CAP_FAN_MIN, CAP_FAN_MAX);
@@ -359,6 +363,8 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     ),
     primaryAction: hasDraftRoom
       ? translateWithFallback(t, 'newGame.sync.start', '開始牌局')
+      : isLocalQuickSetup
+      ? t('newGame.localQuick.start')
       : t('newGame.create'),
     primaryActionBusy: hasDraftRoom
       ? translateWithFallback(t, 'newGame.sync.starting', '開局中...')
@@ -541,18 +547,37 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       return;
     }
     if (target.kind === 'minFan') {
+      if (isLocalQuickSetup) {
+        setLocalRulesEditorVisible(true);
+        setTimeout(() => minFanInputRef.current?.focus(), 360);
+        return;
+      }
       scrollToY(sectionY.current.scoring);
       setTimeout(() => minFanInputRef.current?.focus(), 120);
       return;
     }
     if (target.kind === 'unitPerFan') {
+      if (isLocalQuickSetup) {
+        setLocalRulesEditorVisible(true);
+        setTimeout(() => unitPerFanInputRef.current?.focus(), 360);
+        return;
+      }
       scrollToY(sectionY.current.scoring);
       setTimeout(() => unitPerFanInputRef.current?.focus(), 120);
       return;
     }
     if (target.kind === 'capFan') {
+      if (isLocalQuickSetup) {
+        setLocalRulesEditorVisible(true);
+        setTimeout(() => customCapFanInputRef.current?.focus(), 360);
+        return;
+      }
       scrollToY(sectionY.current.scoring);
       setTimeout(() => customCapFanInputRef.current?.focus(), 120);
+      return;
+    }
+    if (isLocalQuickSetup) {
+      setLocalRulesEditorVisible(true);
       return;
     }
     scrollToY(sectionY.current.scoring);
@@ -1424,6 +1449,12 @@ function NewGameStepperScreen({ navigation, route }: Props) {
     if (!context) {
       return;
     }
+    if (isLocalQuickSetup) {
+      executeCreateGame(context).catch((error) => {
+        console.error('[NewGame] local quick setup create failed', error);
+      });
+      return;
+    }
     setPendingPayload(context);
     setConfirmVisible(true);
   };
@@ -1464,6 +1495,37 @@ function NewGameStepperScreen({ navigation, route }: Props) {
 
   const confirmSections = pendingPayload ? buildConfirmSections(pendingPayload) : null;
   const scoringHintLines = getStakePresetHintLines(hkStakePreset, hkGunMode, minFanForHint, capFan, t);
+  const localStakeSummary =
+    hkStakePreset === 'TWO_FIVE_CHICKEN'
+      ? t('newGame.hkStakePreset.twoFiveChicken')
+      : hkStakePreset === 'FIVE_ONE'
+      ? t('newGame.hkStakePreset.fiveOne')
+      : t('newGame.hkStakePreset.oneTwo');
+  const localGunSummary = hkGunMode === 'halfGun' ? t('newGame.hkGunMode.half') : t('newGame.hkGunMode.full');
+  const localCapSummaryValue =
+    hkScoringPreset === 'traditionalFan'
+      ? capFan
+      : customCapMode === 'fanCap'
+      ? parsedCustomCapFan ?? customCapFan
+      : null;
+  const localCapSummary =
+    localCapSummaryValue === null
+      ? t('newGame.localQuick.summary.noCap')
+      : t('newGame.localQuick.summary.cap').replace('{count}', String(localCapSummaryValue));
+  const localMinFanSummary = t('newGame.localQuick.summary.minFan').replace('{count}', String(minFanForHint));
+  const localRulesSummaryLines =
+    hkScoringPreset === 'traditionalFan'
+      ? [`${t('newGame.mode.hk')} · ${localStakeSummary} · ${localGunSummary}`, `${localMinFanSummary} · ${localCapSummary}`]
+      : [
+          `${t('newGame.mode.hk')} · ${t('newGame.hkPreset.custom')} · ${localGunSummary}`,
+          `${t('newGame.localQuick.summary.unitPerFan')
+            .replace('{symbol}', currencySymbol)
+            .replace('{amount}', String(parsedUnitPerFan ?? unitPerFan))} · ${localMinFanSummary} · ${localCapSummary}`,
+        ];
+  const localRulesEditAccessibilityLabel = t('newGame.localQuick.rulesEditAccessibility').replace(
+    '{rules}',
+    localRulesSummaryLines.join(', '),
+  );
   const stakePaytableRules = useMemo<RulesV1 | null>(() => {
     if (hkScoringPreset !== 'traditionalFan') {
       return null;
@@ -1498,13 +1560,16 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           automaticallyAdjustKeyboardInsets
         >
         <View
+          testID="new-game-title-section"
           onLayout={(event) => {
             sectionY.current.title = event.nativeEvent.layout.y;
           }}
         >
-          <View style={styles.headerBlock}>
-            <AppText style={styles.headerSubtitle}>{screenCopy.subtitle}</AppText>
-          </View>
+          {!isLocalQuickSetup ? (
+            <View style={styles.headerBlock}>
+              <AppText style={styles.headerSubtitle}>{screenCopy.subtitle}</AppText>
+            </View>
+          ) : null}
           <GameTitleSection
             label={t('newGame.gameTitle')}
             value={title}
@@ -1519,11 +1584,20 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           />
         </View>
 
-        <View
-          onLayout={(event) => {
-            sectionY.current.scoring = event.nativeEvent.layout.y;
-          }}
+        <LocalRulesEditorModal
+          inline={!isLocalQuickSetup}
+          visible={localRulesEditorVisible}
+          title={t('newGame.localQuick.rulesEditorTitle')}
+          closeLabel={t('newGame.localQuick.rulesClose')}
+          doneLabel={t('newGame.localQuick.rulesDone')}
+          onClose={() => setLocalRulesEditorVisible(false)}
         >
+          <View
+            testID="new-game-scoring-section"
+            onLayout={(event) => {
+              sectionY.current.scoring = event.nativeEvent.layout.y;
+            }}
+          >
           <ScoringSection
             hkScoringPreset={hkScoringPreset}
             hkGunMode={hkGunMode}
@@ -1645,9 +1719,11 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             onSampleFanIncrement={() => adjustSampleFan(1)}
             onSampleFanDecrement={() => adjustSampleFan(-1)}
           />
-        </View>
+          </View>
+        </LocalRulesEditorModal>
 
         <View
+          testID="new-game-players-section"
           onLayout={(event) => {
             const playersSectionY = event.nativeEvent.layout.y;
             sectionY.current.players = playersSectionY;
@@ -1658,6 +1734,8 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           }}
         >
           <PlayersSection
+            quickSetup={isLocalQuickSetup}
+            showSyncControl={!isLocalQuickSetup}
             seatMode={seatMode}
             seatLabels={seatLabels}
             players={players}
@@ -1762,6 +1840,15 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             }}
           />
         </View>
+        {isLocalQuickSetup ? (
+          <LocalRulesSummary
+            title={t('newGame.localQuick.rulesTitle')}
+            editLabel={t('newGame.localQuick.rulesEdit')}
+            editAccessibilityLabel={localRulesEditAccessibilityLabel}
+            summaryLines={localRulesSummaryLines}
+            onEdit={() => setLocalRulesEditorVisible(true)}
+          />
+        ) : null}
         <TraditionalHkPaytableModal
           visible={stakePaytableVisible}
           rules={stakePaytableRules}
@@ -1838,27 +1925,29 @@ function NewGameStepperScreen({ navigation, route }: Props) {
           }
         />
 
-        <CreateConfirmModal
-          visible={confirmVisible}
-          busy={confirmBusy}
-          sections={confirmSections}
-          labels={{
-            title: screenCopy.confirmTitle,
-            subtitle: screenCopy.confirmSubtitle,
-            sectionGame: t('newGame.confirmModal.section.game'),
-            sectionScoring: t('newGame.confirmModal.section.scoring'),
-            sectionPlayers: t('newGame.confirmModal.section.players'),
-            backToEdit: t('newGame.confirmModal.action.backToEdit'),
-            confirmCreate: screenCopy.confirmAction,
-            creating: screenCopy.primaryActionBusy,
-          }}
-          onClose={() => setConfirmVisible(false)}
-          onConfirm={() => {
-            handleConfirmCreate().catch((error) => {
-              console.error('[NewGame] confirm create failed', error);
-            });
-          }}
-        />
+        {!isLocalQuickSetup ? (
+          <CreateConfirmModal
+            visible={confirmVisible}
+            busy={confirmBusy}
+            sections={confirmSections}
+            labels={{
+              title: screenCopy.confirmTitle,
+              subtitle: screenCopy.confirmSubtitle,
+              sectionGame: t('newGame.confirmModal.section.game'),
+              sectionScoring: t('newGame.confirmModal.section.scoring'),
+              sectionPlayers: t('newGame.confirmModal.section.players'),
+              backToEdit: t('newGame.confirmModal.action.backToEdit'),
+              confirmCreate: screenCopy.confirmAction,
+              creating: screenCopy.primaryActionBusy,
+            }}
+            onClose={() => setConfirmVisible(false)}
+            onConfirm={() => {
+              handleConfirmCreate().catch((error) => {
+                console.error('[NewGame] confirm create failed', error);
+              });
+            }}
+          />
+        ) : null}
         <HostNameConfirmModal
           visible={hostNameVisible}
           value={hostDisplayName}

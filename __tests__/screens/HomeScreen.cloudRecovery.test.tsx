@@ -1,6 +1,9 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 import HomeScreen from '../../src/screens/HomeScreen';
+import en from '../../src/i18n/locales/en.json';
+import zhHans from '../../src/i18n/locales/zh-Hans.json';
+import zhHant from '../../src/i18n/locales/zh-Hant.json';
 import { ensureSession, getCurrentSession } from '../../src/services/cloud/authRepo';
 import { getRoom } from '../../src/services/cloud/roomRepo';
 import {
@@ -127,6 +130,56 @@ describe('HomeScreen joined-room recovery', () => {
 
     expect(mockedClearActiveJoinedRoomPointer).toHaveBeenCalledWith(pointer);
     expect(navigation.replace).not.toHaveBeenCalled();
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
+  it('exposes the local, multiplayer, invite, history, and settings entry points', async () => {
+    const { tree, navigation } = await renderScreen();
+
+    const localAction = tree.root.findByProps({ testID: 'home-start-local' });
+    const multiplayerAction = tree.root.findByProps({ testID: 'home-create-multiplayer' });
+    const joinAction = tree.root.findByProps({ testID: 'home-join-multiplayer' });
+    const historyAction = tree.root.findByProps({ testID: 'home-history' });
+    const settingsAction = tree.root.findByProps({ testID: 'home-settings' });
+
+    expect(localAction.props.accessibilityRole).toBe('button');
+    expect(localAction.props.accessibilityLabel).toContain('開始記分');
+    expect(multiplayerAction.props.accessibilityRole).toBe('button');
+    expect(multiplayerAction.props.accessibilityLabel).toContain('開多人枱');
+    expect(joinAction.props.accessibilityRole).toBe('button');
+    expect(joinAction.props.accessibilityLabel).toContain('加入牌局');
+    expect(historyAction.props.accessibilityLabel).toBe('所有戰績');
+    expect(zhHant['home.historyAllCantonese']).toBe('所有戰績');
+    expect(zhHans['home.historyAllCantonese']).toBe('所有战绩');
+    expect(en['home.historyAllCantonese']).toBe('All records');
+    expect(zhHant['home.multiplayer']).toBe('多人牌局');
+    expect(zhHans['home.multiplayer']).toBe('多人牌局');
+    expect(en['home.multiplayer']).toBe('Multiplayer');
+
+    await act(async () => {
+      localAction.props.onPress();
+      await Promise.resolve();
+    });
+    multiplayerAction.props.onPress();
+    joinAction.props.onPress();
+    historyAction.props.onPress();
+    settingsAction.props.onPress();
+
+    expect(navigation.navigate).toHaveBeenCalledWith('NewGameStepper');
+    expect(navigation.navigate).toHaveBeenCalledWith('NewGameStepper', { entryMode: 'multiplayer' });
+    expect(navigation.navigate).toHaveBeenCalledWith('JoinInvite', {});
+    expect(navigation.navigate).toHaveBeenCalledWith('History');
+    expect(navigation.navigate).toHaveBeenCalledWith('Settings');
+
+    const renderedText = tree.root
+      .findAllByType('Text' as any)
+      .map((node) => node.children.join(''))
+      .join(' ');
+    expect(renderedText).not.toContain('最近戰績');
+    expect(renderedText).not.toContain('小工具');
+
     await act(async () => {
       tree.unmount();
     });

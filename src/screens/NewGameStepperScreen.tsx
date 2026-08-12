@@ -112,6 +112,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const { defaultCurrencyCode } = useAppPreferences();
   const insets = useSafeAreaInsets();
   const prefill = route.params?.prefill;
+  const entryMode = route.params?.entryMode;
 
   const [title, setTitle] = useState(prefill?.title ?? '');
   const [seatMode, setSeatMode] = useState<SeatMode>('manual');
@@ -163,6 +164,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   const [syncRetryAt, setSyncRetryAt] = useState<number | null>(null);
   const [pendingCleanupRoomId, setPendingCleanupRoomId] = useState<string | null>(null);
   const [cooldownNow, setCooldownNow] = useState(Date.now());
+  const [multiplayerEntryPending, setMultiplayerEntryPending] = useState(entryMode === 'multiplayer');
   const recoveryStartedRef = useRef(false);
 
   useEffect(() => {
@@ -170,6 +172,12 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       setCurrencyCode(defaultCurrencyCode);
     }
   }, [defaultCurrencyCode, prefill]);
+
+  useEffect(() => {
+    if (entryMode === 'multiplayer') {
+      setMultiplayerEntryPending(true);
+    }
+  }, [entryMode]);
 
   useEffect(() => {
     if (!prefill) {
@@ -1641,7 +1649,12 @@ function NewGameStepperScreen({ navigation, route }: Props) {
 
         <View
           onLayout={(event) => {
-            sectionY.current.players = event.nativeEvent.layout.y;
+            const playersSectionY = event.nativeEvent.layout.y;
+            sectionY.current.players = playersSectionY;
+            if (multiplayerEntryPending && !hasDraftRoom) {
+              setMultiplayerEntryPending(false);
+              setTimeout(() => scrollToY(playersSectionY), 80);
+            }
           }}
         >
           <PlayersSection
@@ -1679,7 +1692,10 @@ function NewGameStepperScreen({ navigation, route }: Props) {
               startingDealerModeManual: t('newGame.startingDealerMode.manual'),
               autoFlowHint: t('newGame.autoFlowHint'),
               dealerBadge: t('newGame.dealerBadge'),
-              syncEnable: syncCooldownLabel,
+              syncEnable:
+                entryMode === 'multiplayer' && !hasDraftRoom
+                  ? translateWithFallback(t, 'newGame.sync.entryAction', '開多人枱')
+                  : syncCooldownLabel,
               syncEnableBusy: translateWithFallback(t, 'newGame.sync.enabling', '建立同步房中...'),
               syncJoinedPlayersTitle: translateWithFallback(t, 'newGame.sync.joinedPlayersTitle', '已加入玩家'),
               syncJoinedPlayersHint: translateWithFallback(
@@ -1710,6 +1726,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             onStartingDealerModeChange={handleStartingDealerModeChange}
             onSelectStartingDealer={handleSelectStartingDealer}
             syncEnabled={hasDraftRoom}
+            syncEntryIntent={entryMode === 'multiplayer' && !hasDraftRoom}
             syncBusy={syncBusy}
             syncEnableDisabled={syncCooldownSeconds > 0}
             syncedSeatDisplayNames={syncedSeatDisplayNames}

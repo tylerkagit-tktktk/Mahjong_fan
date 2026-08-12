@@ -5,6 +5,7 @@ export type RootStackParamList = {
   History: undefined;
   NewGameStepper:
     | {
+        entryMode?: 'local' | 'multiplayer';
         prefill?: {
           title: string;
           currencyCode?: CurrencyCode;

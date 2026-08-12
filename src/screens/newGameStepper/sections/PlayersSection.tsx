@@ -74,6 +74,7 @@ type Props = {
   onStartingDealerModeChange: (mode: StartingDealerMode) => void;
   onSelectStartingDealer: (index: number) => void;
   syncEnabled?: boolean;
+  syncEntryIntent?: boolean;
   syncBusy?: boolean;
   syncEnableDisabled?: boolean;
   syncedSeatDisplayNames?: Array<string | null>;
@@ -109,6 +110,7 @@ function PlayersSection({
   onStartingDealerModeChange,
   onSelectStartingDealer,
   syncEnabled = false,
+  syncEntryIntent = false,
   syncBusy = false,
   syncEnableDisabled = false,
   syncedSeatDisplayNames = [],
@@ -143,6 +145,16 @@ function PlayersSection({
   };
 
   const syncAutoSeatSelectable = syncEnabled && Boolean(selectedSyncPlayerId) && Boolean(onAssignSyncPlayerToSeat);
+  const syncEntryControl = !syncEnabled ? (
+    <View style={styles.syncBlock}>
+      <AppButton
+        label={syncBusy ? labels.syncEnableBusy ?? '建立同步房中...' : labels.syncEnable ?? '加入同步玩家'}
+        onPress={() => onEnableSync?.()}
+        disabled={disabled || syncBusy || syncEnableDisabled}
+        variant="secondary"
+      />
+    </View>
+  ) : null;
 
   const renderManualSeatRow = (label: string, index: number) => {
     const syncedDisplayName = syncedSeatDisplayNames[index];
@@ -215,6 +227,7 @@ function PlayersSection({
     <Card style={styles.card}>
       <AppText style={styles.sectionTitle}>{labels.sectionTitle}</AppText>
       {seatMode === 'manual' ? <AppText style={styles.captionText}>{labels.manualSeatCaption}</AppText> : null}
+      {syncEntryIntent ? syncEntryControl : null}
 
       {allowNameEdit ? (
         <>
@@ -432,16 +445,7 @@ function PlayersSection({
             />
           </View>
         </View>
-      ) : (
-        <View style={styles.syncBlock}>
-          <AppButton
-            label={syncBusy ? labels.syncEnableBusy ?? '建立同步房中...' : labels.syncEnable ?? '加入同步玩家'}
-            onPress={() => onEnableSync?.()}
-            disabled={disabled || syncBusy || syncEnableDisabled}
-            variant="secondary"
-          />
-        </View>
-      )}
+      ) : syncEntryIntent ? null : syncEntryControl}
     </Card>
   );
 }

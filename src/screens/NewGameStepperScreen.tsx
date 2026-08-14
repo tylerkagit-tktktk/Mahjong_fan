@@ -968,6 +968,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
   }, []);
 
   useEffect(() => {
+    if (entryMode !== 'multiplayer') return;
     if (recoveryStartedRef.current) return;
     recoveryStartedRef.current = true;
     loadActiveHostedRoomPointer()
@@ -997,10 +998,11 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         setFormError(translateWithFallback(t, 'newGame.sync.restoreFailed', '未能恢復上次同步房，請稍後再試。'));
       })
       .finally(() => setSyncBusy(false));
-  }, [navigation, restoreOpenSyncRoom, t]);
+  }, [entryMode, navigation, restoreOpenSyncRoom, t]);
 
   useFocusEffect(
     useCallback(() => {
+      if (entryMode !== 'multiplayer') return undefined;
       let alive = true;
 
       loadPendingHostedRoomCleanup()
@@ -1057,7 +1059,7 @@ function NewGameStepperScreen({ navigation, route }: Props) {
       return () => {
         alive = false;
       };
-    }, [t]),
+    }, [entryMode, t]),
   );
 
   const handleKeepPlayerOnBench = (playerId: string) => {

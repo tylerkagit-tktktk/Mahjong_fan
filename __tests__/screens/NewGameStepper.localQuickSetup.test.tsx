@@ -23,7 +23,7 @@ import {
 } from '../../src/services/cloud/roomRepo';
 import { updateProfile } from '../../src/services/cloud/profileRepo';
 import { getCurrentSession } from '../../src/services/cloud/authRepo';
-import { loadActiveHostedRoomPointer } from '../../src/services/cloud/storage';
+import { loadActiveHostedRoomPointer, loadPendingHostedRoomCleanup } from '../../src/services/cloud/storage';
 
 type MockLanguage = 'zh-Hant' | 'zh-Hans' | 'en';
 let mockLanguage: MockLanguage = 'zh-Hant';
@@ -109,6 +109,7 @@ const mockedUpdateProfile = updateProfile as jest.MockedFunction<typeof updatePr
 const mockedGetCurrentSession = getCurrentSession as jest.MockedFunction<typeof getCurrentSession>;
 const mockedRecoverHostedRoom = recoverHostedRoom as jest.MockedFunction<typeof recoverHostedRoom>;
 const mockedLoadActiveHostedRoomPointer = loadActiveHostedRoomPointer as jest.MockedFunction<typeof loadActiveHostedRoomPointer>;
+const mockedLoadPendingHostedRoomCleanup = loadPendingHostedRoomCleanup as jest.MockedFunction<typeof loadPendingHostedRoomCleanup>;
 
 const MULTIPLAYER_ROOM_ID = 'room_1700000000000_abcdef';
 
@@ -133,6 +134,12 @@ const multiplayerInvite = {
   token: 'invite-token',
   expiresAt: Date.now() + 60_000,
   deepLink: `mahjongfan://join?roomId=${MULTIPLAYER_ROOM_ID}&token=invite-token`,
+};
+
+const hostedRoomPointer = {
+  roomId: MULTIPLAYER_ROOM_ID,
+  uid: 'host-1',
+  updatedAt: 1,
 };
 
 async function renderScreen(entryMode?: 'local' | 'multiplayer') {
@@ -313,6 +320,80 @@ describe('NewGameStepper Local Quick Setup', () => {
     expect(mockedCreateGameWithPlayers.mock.calls[0][1].map((player) => player.name)).toEqual(['東家', '南家', '西家', '北家']);
     expect(navigation.replace).toHaveBeenCalledWith('GameTable', expect.objectContaining({ gameId: expect.any(String) }));
     expect(tree.root.findAllByProps({ testID: 'create-confirm-modal' })).toHaveLength(0);
+
+    await act(async () => tree.unmount());
+  });
+
+  it('keeps Local entry in Local Quick Setup when an open hosted-room pointer exists', async () => {
+    mockedLoadActiveHostedRoomPointer.mockResolvedValue(hostedRoomPointer);
+    mockedGetCurrentSession.mockResolvedValue({ uid: 'host-1', provider: 'google' });
+    mockedRecoverHostedRoom.mockResolvedValue({ kind: 'open', room: multiplayerRoom, invite: multiplayerInvite });
+
+    const { tree, navigation } = await renderScreen('local');
+
+    expect(tree.root.findByProps({ testID: 'new-game-players-section' })).toBeTruthy();
+    expect(tree.root.findAllByProps({ testID: 'new-game-multiplayer-host-setup' })).toHaveLength(0);
+    expect(mockedLoadActiveHostedRoomPointer).not.toHaveBeenCalled();
+    expect(mockedGetCurrentSession).not.toHaveBeenCalled();
+    expect(mockedRecoverHostedRoom).not.toHaveBeenCalled();
+    expect(mockedDeleteRoomAndFallbackToLocal).not.toHaveBeenCalled();
+    expect(mockedLoadPendingHostedRoomCleanup).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalledWith('MultiplayerGameTable', expect.anything());
+
+    await act(async () => tree.unmount());
+  });
+
+  it('keeps Local entry in Local Quick Setup when an active hosted-room pointer exists', async () => {
+    mockedLoadActiveHostedRoomPointer.mockResolvedValue(hostedRoomPointer);
+    mockedGetCurrentSession.mockResolvedValue({ uid: 'host-1', provider: 'google' });
+    mockedRecoverHostedRoom.mockResolvedValue({ kind: 'active', room: { ...multiplayerRoom, status: 'active' } });
+
+    const { tree, navigation } = await renderScreen();
+
+    expect(tree.root.findByProps({ testID: 'new-game-players-section' })).toBeTruthy();
+    expect(mockedLoadActiveHostedRoomPointer).not.toHaveBeenCalled();
+    expect(mockedGetCurrentSession).not.toHaveBeenCalled();
+    expect(mockedRecoverHostedRoom).not.toHaveBeenCalled();
+    expect(mockedDeleteRoomAndFallbackToLocal).not.toHaveBeenCalled();
+    expect(mockedLoadPendingHostedRoomCleanup).not.toHaveBeenCalled();
+    expect(navigation.replace).not.toHaveBeenCalledWith('MultiplayerGameTable', expect.anything());
+
+    await act(async () => tree.unmount());
+  });
+
+  it('recovers an open hosted room only for Multiplayer entry', async () => {
+    mockedLoadActiveHostedRoomPointer.mockResolvedValue(hostedRoomPointer);
+    mockedGetCurrentSession.mockResolvedValue({ uid: 'host-1', provider: 'google' });
+    mockedRecoverHostedRoom.mockResolvedValue({ kind: 'open', room: multiplayerRoom, invite: multiplayerInvite });
+
+    const { tree, navigation } = await renderScreen('multiplayer');
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockedLoadActiveHostedRoomPointer).toHaveBeenCalledTimes(1);
+    expect(mockedRecoverHostedRoom).toHaveBeenCalledWith('host-1', MULTIPLAYER_ROOM_ID);
+    expect(tree.root.findByProps({ testID: 'new-game-multiplayer-host-setup' })).toBeTruthy();
+    expect(navigation.replace).not.toHaveBeenCalledWith('MultiplayerGameTable', expect.anything());
+
+    await act(async () => tree.unmount());
+  });
+
+  it('navigates an active hosted room only for Multiplayer entry', async () => {
+    mockedLoadActiveHostedRoomPointer.mockResolvedValue(hostedRoomPointer);
+    mockedGetCurrentSession.mockResolvedValue({ uid: 'host-1', provider: 'google' });
+    mockedRecoverHostedRoom.mockResolvedValue({ kind: 'active', room: { ...multiplayerRoom, status: 'active' } });
+
+    const { tree, navigation } = await renderScreen('multiplayer');
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockedLoadActiveHostedRoomPointer).toHaveBeenCalledTimes(1);
+    expect(mockedRecoverHostedRoom).toHaveBeenCalledWith('host-1', MULTIPLAYER_ROOM_ID);
+    expect(navigation.replace).toHaveBeenCalledWith('MultiplayerGameTable', { roomId: MULTIPLAYER_ROOM_ID });
 
     await act(async () => tree.unmount());
   });

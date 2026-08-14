@@ -20,6 +20,8 @@ import {
   type ReplaceLastHandInput,
 } from '../domain/gameRecord/localMutation';
 import { isLocalGameMutable } from '../domain/gameRecord/localLifecycle';
+import { adaptLocalGameBundle } from '../domain/gameRecord/localAdapter';
+import { replayGameRecord } from '../domain/gameRecord/replay';
 import { getRoundLabel } from '../models/dealer';
 import {
   aggregatePlayerTotalsQByTimeline,
@@ -1905,8 +1907,7 @@ export type GameResultSummarySnapshot = {
   playersCount: number;
 };
 
-/** Pure extraction of the existing ended-game summary calculation for characterization tests. */
-export function buildGameResultSummarySnapshot(bundle: GameBundle): GameResultSummarySnapshot {
+function buildLegacyGameResultSummarySnapshot(bundle: GameBundle): GameResultSummarySnapshot {
   const orderedHands = bundle.hands.slice().sort((a, b) => a.handIndex - b.handIndex);
   const seatTotalsQ: number[] = [0, 0, 0, 0];
   orderedHands.forEach((hand) => {
@@ -1954,6 +1955,43 @@ export function buildGameResultSummarySnapshot(bundle: GameBundle): GameResultSu
     }, {}),
     playersCount: bundle.players.length,
   };
+}
+
+function buildCanonicalExplicitReseatResultSummary(bundle: GameBundle): GameResultSummarySnapshot | null {
+  if (bundle.game.seatBoundaryHistoryMode !== 'explicit' || (bundle.seatBoundaries?.length ?? 0) === 0) {
+    return null;
+  }
+
+  const adapted = adaptLocalGameBundle(bundle);
+  if (!adapted.ok) {
+    return null;
+  }
+  const replay = replayGameRecord(adapted.snapshot);
+  if (!replay.isValid || !replay.summary) {
+    return null;
+  }
+
+  const namesByPlayerId = new Map(replay.players.map((player) => [player.playerId, player.displayName]));
+  const { winnerPlayerId, loserPlayerId, playerTotalsQ } = replay.summary;
+  const symbol = bundle.game.currencySymbol ?? '';
+  const winnerTotalQ = winnerPlayerId ? playerTotalsQ[winnerPlayerId] ?? 0 : 0;
+  const loserTotalQ = loserPlayerId ? playerTotalsQ[loserPlayerId] ?? 0 : 0;
+
+  return {
+    winnerText: `${winnerPlayerId ? namesByPlayerId.get(winnerPlayerId) ?? '—' : '—'} ${formatSignedMoney(winnerTotalQ / 4, symbol)}`,
+    loserText: `${loserPlayerId ? namesByPlayerId.get(loserPlayerId) ?? '—' : '—'} ${formatSignedMoney(loserTotalQ / 4, symbol)}`,
+    seatTotalsQ: [...replay.summary.seatTotalsQ],
+    playerTotalsQ: { ...playerTotalsQ },
+    playersCount: replay.summary.playersCount,
+  };
+}
+
+/**
+ * Persist a canonical result cache when an explicit local reseat changed player-seat identity.
+ * Games without a persisted boundary retain their legacy-compatible result projection.
+ */
+export function buildGameResultSummarySnapshot(bundle: GameBundle): GameResultSummarySnapshot {
+  return buildCanonicalExplicitReseatResultSummary(bundle) ?? buildLegacyGameResultSummarySnapshot(bundle);
 }
 
 function normalizeError(error: unknown, context: string): Error {

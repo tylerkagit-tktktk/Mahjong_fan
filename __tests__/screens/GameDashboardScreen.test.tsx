@@ -189,6 +189,81 @@ function createAuthoritativeCanonicalBundle() {
   };
 }
 
+function createExplicitReseatCanonicalBundle() {
+  const base = createEndedBundle();
+  const gameId = 'g-explicit-reseat-dashboard';
+  const rules = traditionalRules({ gunMode: 'halfGun' });
+  const deltasQ = computeHkSettlement({
+    rules,
+    fan: 3,
+    settlementType: 'discard',
+    winnerSeatIndex: 0,
+    discarderSeatIndex: 1,
+  }).deltasQ;
+  return {
+    ...base,
+    game: {
+      ...base.game,
+      id: gameId,
+      title: 'Explicit Reseat Dashboard Match',
+      rulesJson: JSON.stringify(rules),
+      currentRoundLabelZh: '東風東局',
+      handsCount: 2,
+      seatBoundaryHistoryMode: 'explicit',
+      initialSeatMappingJson: JSON.stringify({ 0: 'p0', 1: 'p1', 2: 'p2', 3: 'p3' }),
+      resultSummaryJson: JSON.stringify({
+        winnerText: 'North +HK$6',
+        loserText: 'South -HK$6',
+        seatTotalsQ: [64, -32, -16, -16],
+        playerTotalsQ: { p0: 16, p1: -24, p2: -16, p3: 24 },
+        playersCount: 4,
+      }),
+    },
+    players: [
+      { id: 'p3', gameId, name: 'North', seatIndex: 0 },
+      { id: 'p0', gameId, name: 'East', seatIndex: 1 },
+      { id: 'p1', gameId, name: 'South', seatIndex: 2 },
+      { id: 'p2', gameId, name: 'West', seatIndex: 3 },
+    ],
+    hands: [
+      {
+        ...base.hands[0],
+        id: 'explicit-before',
+        gameId,
+        handIndex: 0,
+        dealerSeatIndex: 0,
+        winnerSeatIndex: 0,
+        winnerPlayerId: 'p0',
+        discarderPlayerId: 'p1',
+        deltasJson: JSON.stringify({ unit: 'Q', values: deltasQ }),
+        computedJson: JSON.stringify({ settlementType: 'discard', fan: 3 }),
+        nextRoundLabelZh: '東風東局',
+      },
+      {
+        ...base.hands[0],
+        id: 'explicit-after',
+        gameId,
+        handIndex: 1,
+        dealerSeatIndex: 0,
+        winnerSeatIndex: 0,
+        winnerPlayerId: 'p3',
+        discarderPlayerId: 'p0',
+        deltasJson: JSON.stringify({ unit: 'Q', values: deltasQ }),
+        computedJson: JSON.stringify({ settlementType: 'discard', fan: 3 }),
+        nextRoundLabelZh: '東風東局',
+      },
+    ],
+    seatBoundaries: [{
+      id: `${gameId}:seat-boundary:1`,
+      gameId,
+      effectiveFromHandIndex: 1,
+      seatMapping: { 0: 'p3', 1: 'p0', 2: 'p1', 3: 'p2' },
+      reason: 'confirmed_reseat',
+      createdAt: 1735690500000,
+    }],
+  };
+}
+
 function createActiveBundle() {
   const ended = createEndedBundle();
   return {
@@ -592,6 +667,44 @@ describe('GameDashboardScreen', () => {
     const timelineText = root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
     expect(timelineText).toContain('東風東局');
     expect(timelineText).toContain('東風南局');
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('shares explicit-reseat totals and ranking from the canonical dashboard projection', async () => {
+    const bundle = createExplicitReseatCanonicalBundle();
+    expect(replayLocalGameBundle(bundle as any).authoritative).toBe(true);
+    mockedGetGameBundle.mockResolvedValueOnce(bundle as any);
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameDashboardScreen navigation={navigation} route={{ key: 'explicit-reseat', name: 'GameDashboard', params: { gameId: bundle.game.id } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    const text = tree!.root.findAllByType(Text).map((node) => String(node.props.children)).join('\n');
+    expect(text).toContain('North');
+    expect(text).toContain('+HK$6');
+    expect(text).toContain('East');
+    expect(text).toContain('+HK$4');
+    expect(text).toContain('South');
+    expect(text).toContain('-HK$6');
+
+    const shareSpy = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' as never });
+    await act(async () => {
+      await getHeaderShareItem().onPress();
+    });
+    const payload = shareSpy.mock.calls[0][0] as { message: string };
+    expect(payload.message).toContain('1. North +HK$6');
+    expect(payload.message).toContain('2. East +HK$4');
+    expect(payload.message).toContain('3. West -HK$4');
+    expect(payload.message).toContain('4. South -HK$6');
+    expect(payload.message).not.toContain('North +HK$16');
+    shareSpy.mockRestore();
 
     await act(async () => {
       tree!.unmount();

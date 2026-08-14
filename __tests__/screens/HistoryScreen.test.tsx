@@ -224,6 +224,35 @@ describe('HistoryScreen delete confirm', () => {
     });
   });
 
+  it('renders the canonical explicit-reseat winner and loser stored in the local result snapshot', async () => {
+    mockedListGames.mockResolvedValueOnce([
+      makeGame({
+        id: 'explicit-reseat-history',
+        title: 'Explicit Reseat History',
+        resultSummaryJson: JSON.stringify({
+          winnerText: 'North +HK$6',
+          loserText: 'South -HK$6',
+          playerTotalsQ: { p0: 16, p1: -24, p2: -16, p3: 24 },
+          seatTotalsQ: [64, -32, -16, -16],
+          playersCount: 4,
+        }),
+      }),
+    ] as any);
+
+    const { tree } = await renderHistory();
+    const text = tree.root.findAllByType(Text).map((node) => {
+      const children = node.props.children;
+      return Array.isArray(children) ? children.join('') : String(children);
+    }).join('\n');
+
+    expect(text).toContain('North +HK$6  ｜  South -HK$6');
+    expect(text).not.toContain('North +HK$16');
+
+    await act(async () => {
+      tree.unmount();
+    });
+  });
+
   it('deletes a cloud archive without deleting local games', async () => {
     mockedListGames.mockResolvedValueOnce([
       makeGame({ id: 'g1', title: 'Local Game', createdAt: NOW - 60 * 60 * 1000 }),

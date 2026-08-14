@@ -670,6 +670,25 @@ function GameTableScreen({ route, navigation }: Props) {
       : t('gameTable.correction.unavailable')
     : null;
 
+  const applySavedLocalHand = useCallback((inserted: GameBundle['hands'][number], nextRoundLabelZh: string) => {
+    if (!bundle) {
+      return;
+    }
+    const hands = [...bundle.hands, inserted];
+    const nextBundle: GameBundle = {
+      ...bundle,
+      game: {
+        ...bundle.game,
+        currentRoundLabelZh: nextRoundLabelZh,
+        handsCount: hands.length,
+        gameState: bundle.game.gameState === 'draft' ? 'active' : bundle.game.gameState,
+      },
+      hands,
+    };
+    setBundle(nextBundle);
+    setTableAuthoritative(replayLocalGameBundle(nextBundle).authoritative);
+  }, [bundle]);
+
   const handleCorrectionReplace = useCallback(async (intent: {
     outcome: 'discard' | 'zimo' | 'draw'; fan?: number; winnerPlayerId?: string; discarderPlayerId?: string; dealerAction?: 'stick' | 'pass';
   }) => {
@@ -842,19 +861,7 @@ function GameTableScreen({ route, navigation }: Props) {
         nextRoundLabelZh,
       });
 
-      setBundle((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        return {
-          ...prev,
-          game: {
-            ...prev.game,
-            currentRoundLabelZh: nextRoundLabelZh,
-          },
-          hands: [...prev.hands, inserted],
-        };
-      });
+      applySavedLocalHand(inserted, nextRoundLabelZh);
       setTotalsQ((prev) => [
         prev[0] + settlement.deltasQ[0],
         prev[1] + settlement.deltasQ[1],
@@ -913,19 +920,7 @@ function GameTableScreen({ route, navigation }: Props) {
         nextRoundLabelZh,
       });
 
-      setBundle((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        return {
-          ...prev,
-          game: {
-            ...prev.game,
-            currentRoundLabelZh: nextRoundLabelZh,
-          },
-          hands: [...prev.hands, inserted],
-        };
-      });
+      applySavedLocalHand(inserted, nextRoundLabelZh);
 
       setDealerSeatIndex((prev) => {
         if (dealerAction === 'stick') {
@@ -1066,7 +1061,7 @@ function GameTableScreen({ route, navigation }: Props) {
                 { width: tableSize, height: tableSize, marginTop: tableVerticalOffset },
               ]}
             >
-              <View style={[styles.tableOuter, { width: tableSize, height: tableSize }]} onLayout={onTableLayout}>
+              <View testID="game-table-board" style={[styles.tableOuter, { width: tableSize, height: tableSize }]} onLayout={onTableLayout}>
                 <View style={styles.tableBoard} pointerEvents="none">
                   <View style={styles.tableBoardInset} />
                 </View>
@@ -1174,6 +1169,7 @@ function GameTableScreen({ route, navigation }: Props) {
               <AppText style={styles.sectionTitle}>{t('addHand.settlementType')}</AppText>
               <View style={styles.modeRow}>
                 <Pressable
+                  testID="record-hand-discard"
                   style={[styles.modeButton, settlementType === 'discard' ? styles.modeButtonActive : null]}
                   onPress={() => setSettlementType('discard')}
                   disabled={saving}
@@ -1183,6 +1179,7 @@ function GameTableScreen({ route, navigation }: Props) {
                   </AppText>
                 </Pressable>
                 <Pressable
+                  testID="record-hand-zimo"
                   style={[styles.modeButton, settlementType === 'zimo' ? styles.modeButtonActive : null]}
                   onPress={() => {
                     setSettlementType('zimo');
@@ -1356,6 +1353,7 @@ function PlayerPanel({
 
   return (
     <Pressable
+      testID={`game-table-player-${seatIndex}`}
       style={[styles.playerPanel, style, disabled ? styles.playerPanelDisabled : null]}
       onPress={onPress}
       disabled={disabled}

@@ -3,9 +3,9 @@ import renderer, { act } from 'react-test-renderer';
 import { Alert } from 'react-native';
 import AppButton from '../../src/components/AppButton';
 import GameTableScreen from '../../src/screens/GameTableScreen';
-import { endGame, getGameBundle, replaceLastHand } from '../../src/db/repo';
+import { endGame, getGameBundle, insertHand, removeLastHand, replaceLastHand } from '../../src/db/repo';
 import { computeHkSettlement } from '../../src/domain/hk/settlement';
-import { traditionalRules } from '../../test-support/gameRecord/fixtures';
+import { EMPTY_GAME_BUNDLE, traditionalRules } from '../../test-support/gameRecord/fixtures';
 
 jest.mock('../../src/db/repo', () => ({
   endGame: jest.fn(),
@@ -46,6 +46,8 @@ jest.mock('react-native-safe-area-context', () => {
 
 const mockedGetGameBundle = getGameBundle as jest.MockedFunction<typeof getGameBundle>;
 const mockedEndGame = endGame as jest.MockedFunction<typeof endGame>;
+const mockedInsertHand = insertHand as jest.MockedFunction<typeof insertHand>;
+const mockedRemoveLastHand = removeLastHand as jest.MockedFunction<typeof removeLastHand>;
 const mockedReplaceLastHand = replaceLastHand as jest.MockedFunction<typeof replaceLastHand>;
 
 function createBundle() {
@@ -125,11 +127,46 @@ function createBundleWithHand() {
   };
 }
 
+function createAuthoritativeBundle() {
+  return {
+    game: {
+      ...EMPTY_GAME_BUNDLE.game,
+      title: 'Game 1',
+      gameState: 'draft',
+    },
+    players: EMPTY_GAME_BUNDLE.players.map((player) => ({ ...player })),
+    hands: [],
+    seatBoundaries: [],
+  };
+}
+
+function createZimoHand() {
+  const rules = traditionalRules();
+  const deltasQ = computeHkSettlement({
+    rules, fan: 3, settlementType: 'zimo', winnerSeatIndex: 0, discarderSeatIndex: null,
+  }).deltasQ;
+  return {
+    id: 'h0', gameId: EMPTY_GAME_BUNDLE.game.id, handIndex: 0, dealerSeatIndex: 0, windIndex: 0, roundNumber: 1,
+    isDraw: false, winnerSeatIndex: 0, discarderSeatIndex: null, type: 'fan', winnerPlayerId: 'player-east', discarderPlayerId: null,
+    inputValue: deltasQ[0] / 4, deltasJson: JSON.stringify({ unit: 'Q', values: deltasQ }),
+    nextRoundLabelZh: '東風東局', computedJson: JSON.stringify({ settlementType: 'zimo', fan: 3, effectiveFan: 3 }),
+    createdAt: 1735689600001,
+  };
+}
+
+function layoutTable(tree: renderer.ReactTestRenderer) {
+  tree.root.findByProps({ testID: 'game-table-board' }).props.onLayout({
+    nativeEvent: { layout: { x: 0, y: 0, width: 240, height: 240 } },
+  });
+}
+
 describe('GameTableScreen end game flow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedGetGameBundle.mockResolvedValue(createBundle() as any);
     mockedEndGame.mockResolvedValue();
+    mockedInsertHand.mockResolvedValue(createZimoHand() as any);
+    mockedRemoveLastHand.mockResolvedValue({ ok: true } as any);
     mockedReplaceLastHand.mockResolvedValue({ ok: true } as any);
   });
 
@@ -210,6 +247,119 @@ describe('GameTableScreen end game flow', () => {
     });
     expect(mockedGetGameBundle).toHaveBeenCalledTimes(2);
     alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('shows correction for the persisted newest hand without remounting the table', async () => {
+    mockedGetGameBundle.mockResolvedValue(createAuthoritativeBundle() as any);
+    const navigation = { setOptions: jest.fn(), replace: jest.fn(), navigate: jest.fn(), goBack: jest.fn() } as any;
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameTableScreen navigation={navigation} route={{ key: 'same-screen', name: 'GameTable', params: { gameId: 'game-1' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      layoutTable(tree!);
+    });
+
+    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-correction' })).toThrow();
+
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'game-table-player-0' }).props.onPress();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'record-hand-zimo' }).props.onPress();
+    });
+    await act(async () => {
+      await tree!.root.findAllByType(AppButton).find((button) => button.props.label === 'addHand.save')!.props.onPress();
+    });
+
+    expect(mockedInsertHand).toHaveBeenCalledTimes(1);
+    expect(tree!.root.findByProps({ testID: 'local-last-hand-correction' })).toBeTruthy();
+
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'local-last-hand-correction' }).props.onPress();
+    });
+    expect(tree!.root.findByProps({ testID: 'local-last-hand-correction-modal' })).toBeTruthy();
+    expect(tree!.root.findByProps({ testID: 'local-last-hand-save' }).props.disabled).toBe(false);
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('hides correction after deleting the only hand', async () => {
+    mockedGetGameBundle
+      .mockResolvedValueOnce(createBundleWithHand() as any)
+      .mockResolvedValueOnce(createAuthoritativeBundle() as any);
+    const navigation = { setOptions: jest.fn(), replace: jest.fn(), navigate: jest.fn(), goBack: jest.fn() } as any;
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameTableScreen navigation={navigation} route={{ key: 'delete-last', name: 'GameTable', params: { gameId: 'game-1' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'local-last-hand-correction' }).props.onPress();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'local-last-hand-undo' }).props.onPress();
+    });
+
+    const [, , buttons] = alertSpy.mock.calls[0];
+    const deleteButton = (buttons as Array<{ text: string; style?: string; onPress?: () => void | Promise<void> }>).find(
+      (button) => button.style === 'destructive',
+    );
+    await act(async () => {
+      await deleteButton?.onPress?.();
+    });
+
+    expect(mockedRemoveLastHand).toHaveBeenCalledWith({
+      action: 'remove', gameId: 'game-1', expectedHandId: 'h0', expectedHandIndex: 0, expectedHandsCount: 1,
+    });
+    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-correction' })).toThrow();
+
+    alertSpy.mockRestore();
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('does not expose correction when hand persistence fails', async () => {
+    mockedGetGameBundle.mockResolvedValue(createAuthoritativeBundle() as any);
+    mockedInsertHand.mockRejectedValueOnce(new Error('write failed'));
+    const navigation = { setOptions: jest.fn(), replace: jest.fn(), navigate: jest.fn(), goBack: jest.fn() } as any;
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameTableScreen navigation={navigation} route={{ key: 'failed-save', name: 'GameTable', params: { gameId: 'game-1' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      layoutTable(tree!);
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'game-table-player-0' }).props.onPress();
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'record-hand-zimo' }).props.onPress();
+    });
+    await act(async () => {
+      await tree!.root.findAllByType(AppButton).find((button) => button.props.label === 'addHand.save')!.props.onPress();
+    });
+
+    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-correction' })).toThrow();
+
     await act(async () => {
       tree!.unmount();
     });

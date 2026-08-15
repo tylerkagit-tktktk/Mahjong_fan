@@ -18,9 +18,28 @@ jest.mock('../../src/db/repo', () => ({
 
 jest.mock('../../src/i18n/useAppLanguage', () => ({
   useAppLanguage: () => ({
-    t: (key: string) => key === 'gameTable.endGame.message'
-      ? "Once ended, this game's result will be locked. You won't be able to edit or undo hands or reopen the game."
-      : key,
+    t: (key: string) => ({
+      'gameTable.endGame.message': "Once ended, this game's result will be locked. You won't be able to edit or undo hands or reopen the game.",
+      'gameTable.recordingHint.title': '點贏家記低呢鋪',
+      'gameTable.recordingHint.body': '撳贏家嗰格就可以開始記錄',
+      'gameTable.previousHand.label': '上一鋪',
+      'gameTable.previousHand.edit': '修正',
+      'gameTable.previousHand.accessibilityLabel': '上一鋪：{summary}',
+      'gameTable.previousHand.summary.zimo': '{winner} · 自摸 · {fan}番',
+      'gameTable.previousHand.summary.discard': '{winner} 食糊 · {discarder} 出銃 · {fan}番',
+      'gameTable.previousHand.summary.draw': '{draw} · {dealerAction}',
+      'gameTable.previousHand.unknownPlayer': '未知玩家',
+      'gameTable.previousHand.fanUnknown': '—',
+      'gameTable.correction.summary.draw': '流局',
+      'gameTable.draw.stick': '留莊',
+      'gameTable.draw.pass': '過莊',
+      'gameTable.overflow.title': '更多選項',
+      'gameTable.overflow.gameInfo': '牌局資料',
+      'gameTable.overflow.rulesInfo': '規則說明',
+      'gameTable.overflow.accessibilityLabel': '更多選項',
+      'gameTable.gameInfo.title': '牌局資料',
+      'gameTable.rulesInfo.title': '規則說明',
+    } as Record<string, string>)[key] ?? key,
     language: 'zh-Hant',
     setLanguage: jest.fn(),
   }),
@@ -160,6 +179,11 @@ function layoutTable(tree: renderer.ReactTestRenderer) {
   });
 }
 
+function openOverflow(navigation: { setOptions: jest.Mock }) {
+  const options = navigation.setOptions.mock.calls.at(-1)?.[0];
+  options.headerRight().props.onPress();
+}
+
 describe('GameTableScreen end game flow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -188,13 +212,11 @@ describe('GameTableScreen end game flow', () => {
       await Promise.resolve();
     });
 
-    const endButton = tree!.root
-      .findAllByType(AppButton)
-      .find((button) => button.props.label === 'gameTable.action.endGame');
-    expect(endButton).toBeTruthy();
-
     await act(async () => {
-      endButton!.props.onPress();
+      openOverflow(navigation);
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'game-table-overflow-end' }).props.onPress();
     });
 
     const [, , buttons] = alertSpy.mock.calls[0];
@@ -217,6 +239,97 @@ describe('GameTableScreen end game flow', () => {
     });
   });
 
+  it('keeps the first-hand table focused on winner-card recording', async () => {
+    const navigation = { setOptions: jest.fn(), replace: jest.fn(), navigate: jest.fn(), goBack: jest.fn() } as any;
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameTableScreen navigation={navigation} route={{ key: 'initial', name: 'GameTable', params: { gameId: 'game-1' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    expect(tree!.root.findByProps({ children: '點贏家記低呢鋪' })).toBeTruthy();
+    expect(tree!.root.findByProps({ children: '撳贏家嗰格就可以開始記錄' })).toBeTruthy();
+    expect(tree!.root.findAllByType(AppButton).some((button) => button.props.label === 'gameTable.action.draw')).toBe(true);
+    expect(tree!.root.findAllByType(AppButton).some((button) => button.props.label === 'gameTable.action.endGame')).toBe(false);
+    expect(navigation.setOptions.mock.calls.at(-1)?.[0].headerRight).toBeDefined();
+    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-summary' })).toThrow();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it.each([
+    ['self-draw', () => ({
+      ...createAuthoritativeBundle(),
+      game: { ...createAuthoritativeBundle().game, gameState: 'active', handsCount: 1 },
+      hands: [createZimoHand()],
+    }), 'East · 自摸 · 3番'],
+    ['discard', createBundleWithHand, 'B 食糊 · A 出銃 · 3番'],
+    ['draw', () => ({
+      ...createBundle(),
+      game: { ...createBundle().game, handsCount: 1 },
+      hands: [{
+        ...createZimoHand(),
+        isDraw: true,
+        winnerPlayerId: null,
+        discarderPlayerId: null,
+        type: 'draw',
+        computedJson: JSON.stringify({ settlementType: 'draw', dealerAction: 'stick' }),
+      }],
+    }), '流局 · 留莊'],
+  ])('renders the actual persisted %s as the previous-hand summary', async (_kind, makeBundle, expectedSummary) => {
+    mockedGetGameBundle.mockResolvedValue(makeBundle() as any);
+    const navigation = { setOptions: jest.fn(), replace: jest.fn(), navigate: jest.fn(), goBack: jest.fn() } as any;
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameTableScreen navigation={navigation} route={{ key: `summary-${_kind}`, name: 'GameTable', params: { gameId: 'game-1' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+
+    expect(tree!.root.findByProps({ testID: 'local-last-hand-summary' })).toBeTruthy();
+    expect(tree!.root.findByProps({ children: expectedSummary })).toBeTruthy();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
+  it('opens read-only game and rules information from overflow without persistence', async () => {
+    const navigation = { setOptions: jest.fn(), replace: jest.fn(), navigate: jest.fn(), goBack: jest.fn() } as any;
+
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <GameTableScreen navigation={navigation} route={{ key: 'overflow', name: 'GameTable', params: { gameId: 'game-1' } } as any} />,
+      );
+      await Promise.resolve();
+    });
+    await act(async () => {
+      openOverflow(navigation);
+    });
+    expect(tree!.root.findByProps({ testID: 'game-table-overflow-info' })).toBeTruthy();
+    expect(tree!.root.findByProps({ testID: 'game-table-overflow-rules' })).toBeTruthy();
+    expect(tree!.root.findByProps({ testID: 'game-table-overflow-end' })).toBeTruthy();
+    expect(mockedEndGame).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'game-table-overflow-info' }).props.onPress();
+    });
+    expect(tree!.root.findByProps({ children: '牌局資料' })).toBeTruthy();
+    expect(mockedEndGame).not.toHaveBeenCalled();
+
+    await act(async () => {
+      tree!.unmount();
+    });
+  });
+
   it('sends only a guarded correction intent and reloads the canonical local table', async () => {
     const bundle = createBundleWithHand();
     mockedGetGameBundle.mockResolvedValue(bundle as any);
@@ -232,7 +345,7 @@ describe('GameTableScreen end game flow', () => {
     });
 
     await act(async () => {
-      tree!.root.findByProps({ testID: 'local-last-hand-correction' }).props.onPress();
+      tree!.root.findByProps({ testID: 'local-last-hand-summary' }).props.onPress();
       await Promise.resolve();
     });
     expect(tree!.root.findByProps({ testID: 'local-last-hand-correction-modal' })).toBeTruthy();
@@ -267,7 +380,7 @@ describe('GameTableScreen end game flow', () => {
       layoutTable(tree!);
     });
 
-    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-correction' })).toThrow();
+    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-summary' })).toThrow();
 
     await act(async () => {
       tree!.root.findByProps({ testID: 'game-table-player-0' }).props.onPress();
@@ -280,10 +393,11 @@ describe('GameTableScreen end game flow', () => {
     });
 
     expect(mockedInsertHand).toHaveBeenCalledTimes(1);
-    expect(tree!.root.findByProps({ testID: 'local-last-hand-correction' })).toBeTruthy();
+    expect(tree!.root.findByProps({ testID: 'local-last-hand-summary' })).toBeTruthy();
+    expect(tree!.root.findByProps({ children: 'East · 自摸 · 3番' })).toBeTruthy();
 
     await act(async () => {
-      tree!.root.findByProps({ testID: 'local-last-hand-correction' }).props.onPress();
+      tree!.root.findByProps({ testID: 'local-last-hand-summary' }).props.onPress();
     });
     expect(tree!.root.findByProps({ testID: 'local-last-hand-correction-modal' })).toBeTruthy();
     expect(tree!.root.findByProps({ testID: 'local-last-hand-save' }).props.disabled).toBe(false);
@@ -308,7 +422,7 @@ describe('GameTableScreen end game flow', () => {
       await Promise.resolve();
     });
     await act(async () => {
-      tree!.root.findByProps({ testID: 'local-last-hand-correction' }).props.onPress();
+      tree!.root.findByProps({ testID: 'local-last-hand-summary' }).props.onPress();
     });
     await act(async () => {
       tree!.root.findByProps({ testID: 'local-last-hand-undo' }).props.onPress();
@@ -325,7 +439,8 @@ describe('GameTableScreen end game flow', () => {
     expect(mockedRemoveLastHand).toHaveBeenCalledWith({
       action: 'remove', gameId: 'game-1', expectedHandId: 'h0', expectedHandIndex: 0, expectedHandsCount: 1,
     });
-    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-correction' })).toThrow();
+    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-summary' })).toThrow();
+    expect(tree!.root.findByProps({ children: '點贏家記低呢鋪' })).toBeTruthy();
 
     alertSpy.mockRestore();
     await act(async () => {
@@ -358,7 +473,7 @@ describe('GameTableScreen end game flow', () => {
       await tree!.root.findAllByType(AppButton).find((button) => button.props.label === 'addHand.save')!.props.onPress();
     });
 
-    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-correction' })).toThrow();
+    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-summary' })).toThrow();
 
     await act(async () => {
       tree!.unmount();
@@ -381,7 +496,7 @@ describe('GameTableScreen end game flow', () => {
       await Promise.resolve();
     });
 
-    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-correction' })).toThrow();
+    expect(() => tree!.root.findByProps({ testID: 'local-last-hand-summary' })).toThrow();
     await act(async () => {
       tree!.unmount();
     });
@@ -413,13 +528,12 @@ describe('GameTableScreen end game flow', () => {
       await Promise.resolve();
     });
 
-    const endButton = tree!.root
-      .findAllByType(AppButton)
-      .find((button) => button.props.label === 'gameTable.action.endGame');
-
     await act(async () => {
-      endButton!.props.onPress();
-      endButton!.props.onPress();
+      openOverflow(navigation);
+    });
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'game-table-overflow-end' }).props.onPress();
+      tree!.root.findByProps({ testID: 'game-table-overflow-end' }).props.onPress();
     });
 
     const [, , buttons] = alertSpy.mock.calls[0];

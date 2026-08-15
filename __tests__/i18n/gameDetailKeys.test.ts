@@ -60,4 +60,37 @@ describe('game detail i18n keys', () => {
     expect(zhHans['game.detail.hands.count']).toBe('{{count}} 铺');
     expect(zhHans['game.detail.hands.countOne']).toBe('{{count}} 铺');
   });
+
+  it('keeps Active Table previous-hand and overflow copy complete across supported locales', () => {
+    const activeTableKeys = [
+      'gameTable.recordingHint.title',
+      'gameTable.recordingHint.body',
+      'gameTable.previousHand.label',
+      'gameTable.previousHand.edit',
+      'gameTable.previousHand.summary.zimo',
+      'gameTable.previousHand.summary.discard',
+      'gameTable.previousHand.summary.draw',
+      'gameTable.overflow.accessibilityLabel',
+      'gameTable.overflow.gameInfo',
+      'gameTable.overflow.rulesInfo',
+      'gameTable.gameInfo.readOnly',
+      'gameTable.rulesInfo.readOnly',
+    ] as const;
+    for (const key of activeTableKeys) {
+      expect(en[key]).toBeTruthy();
+      expect(zhHant[key]).toBeTruthy();
+      expect(zhHans[key]).toBeTruthy();
+    }
+  });
+
+  it('uses 鋪 / 铺 only for player-facing Mahjong hand copy', () => {
+    expect(zhHant['gameTable.correction.title']).toBe('修正上一鋪');
+    expect(zhHant['gameTable.correction.lastHand']).toBe('第 {count} 鋪');
+    expect(zhHant['game.detail.hand.nextRound']).toBe('下一鋪');
+    expect(zhHans['gameTable.correction.title']).toBe('修正上一铺');
+    expect(zhHans['gameTable.correction.lastHand']).toBe('第 {count} 铺');
+    expect(zhHans['game.detail.hand.nextRound']).toBe('下一铺');
+    expect(en['gameTable.correction.title']).toBe('Correct last hand');
+    expect(en['gameTable.correction.lastHand']).toBe('Hand {count}');
+  });
 });

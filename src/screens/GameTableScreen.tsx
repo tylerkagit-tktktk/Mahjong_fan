@@ -7,6 +7,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AppButton from '../components/AppButton';
 import Card from '../components/Card';
+import HeaderIconButton from '../components/HeaderIconButton';
 import PillGroup from '../components/PillGroup';
 import ScreenContainer from '../components/ScreenContainer';
 import { endGame, getGameBundle, insertHand, removeLastHand, replaceLastHand, updateGamePlayerSeats } from '../db/repo';
@@ -70,6 +71,11 @@ type RuleSummaryMeta = {
   isHkTraditional: boolean;
 };
 
+type LastHandSummary = {
+  details: string;
+  accessibilityLabel: string;
+};
+
 type PlayerPanelProps = {
   seatIndex: number;
   name: string;
@@ -100,6 +106,23 @@ const WIND_COLOR = {
 } as const;
 const WIND_HONOR_COLORS = [WIND_COLOR.east, WIND_COLOR.south, WIND_COLOR.west, WIND_COLOR.north] as const;
 
+function makeOverflowHeader(
+  onPress: () => void,
+  accessibilityLabel: string,
+) {
+  return function GameTableOverflowHeader() {
+    return (
+      <HeaderIconButton
+        icon="•••"
+        onPress={onPress}
+        accessibilityLabel={accessibilityLabel}
+        fontSize={17}
+        testID="game-table-overflow"
+      />
+    );
+  };
+}
+
 function GameTableScreen({ route, navigation }: Props) {
   const { gameId } = route.params;
   const { t } = useAppLanguage();
@@ -127,6 +150,9 @@ function GameTableScreen({ route, navigation }: Props) {
     height: number;
   } | null>(null);
   const [showStakePaytable, setShowStakePaytable] = useState(false);
+  const [overflowVisible, setOverflowVisible] = useState(false);
+  const [gameInfoVisible, setGameInfoVisible] = useState(false);
+  const [rulesInfoVisible, setRulesInfoVisible] = useState(false);
   const [paytableRows, setPaytableRows] = useState<PaytableRow[]>([]);
   const [paytableMeta, setPaytableMeta] = useState<PaytableMeta | null>(null);
   const [reseatVisible, setReseatVisible] = useState(false);
@@ -580,8 +606,12 @@ function GameTableScreen({ route, navigation }: Props) {
   useLayoutEffect(() => {
     navigation.setOptions({
       title: gameTitle,
+      headerRight: makeOverflowHeader(
+        () => setOverflowVisible(true),
+        t('gameTable.overflow.accessibilityLabel'),
+      ),
     });
-  }, [gameTitle, navigation]);
+  }, [gameTitle, navigation, t]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -669,6 +699,118 @@ function GameTableScreen({ route, navigation }: Props) {
       ? t('gameTable.correction.boundaryBlocked')
       : t('gameTable.correction.unavailable')
     : null;
+
+  const latestHand = useMemo(
+    () => bundle?.hands.slice().sort((left, right) => left.handIndex - right.handIndex).at(-1) ?? null,
+    [bundle?.hands],
+  );
+
+  const lastHandSummary = useMemo<LastHandSummary | null>(() => {
+    if (!latestHand) {
+      return null;
+    }
+
+    let computed: { settlementType?: unknown; fan?: unknown; dealerAction?: unknown } = {};
+    try {
+      const parsed = JSON.parse(latestHand.computedJson) as unknown;
+      if (isRecord(parsed)) {
+        computed = parsed;
+      }
+    } catch {
+      // Existing persisted hand data remains readable even if old computed detail is absent.
+    }
+
+    const winnerName = latestHand.winnerPlayerId
+      ? bundle?.players.find((player) => player.id === latestHand.winnerPlayerId)?.name ?? t('gameTable.previousHand.unknownPlayer')
+      : t('gameTable.previousHand.unknownPlayer');
+    const discarderName = latestHand.discarderPlayerId
+      ? bundle?.players.find((player) => player.id === latestHand.discarderPlayerId)?.name ?? t('gameTable.previousHand.unknownPlayer')
+      : t('gameTable.previousHand.unknownPlayer');
+    const fan = typeof computed.fan === 'number' && Number.isInteger(computed.fan)
+      ? computed.fan
+      : null;
+    const fanText = fan === null ? t('gameTable.previousHand.fanUnknown') : String(fan);
+
+    if (latestHand.isDraw || computed.settlementType === 'draw') {
+      const dealerAction = computed.dealerAction === 'pass'
+        ? t('gameTable.draw.pass')
+        : t('gameTable.draw.stick');
+      const details = t('gameTable.previousHand.summary.draw')
+        .replace('{draw}', t('gameTable.correction.summary.draw'))
+        .replace('{dealerAction}', dealerAction);
+      return {
+        details,
+        accessibilityLabel: t('gameTable.previousHand.accessibilityLabel').replace('{summary}', details),
+      };
+    }
+
+    if (computed.settlementType === 'zimo' || latestHand.type === 'zimo') {
+      const details = t('gameTable.previousHand.summary.zimo')
+        .replace('{winner}', winnerName)
+        .replace('{fan}', fanText);
+      return {
+        details,
+        accessibilityLabel: t('gameTable.previousHand.accessibilityLabel').replace('{summary}', details),
+      };
+    }
+
+    const details = t('gameTable.previousHand.summary.discard')
+      .replace('{winner}', winnerName)
+      .replace('{discarder}', discarderName)
+      .replace('{fan}', fanText);
+    return {
+      details,
+      accessibilityLabel: t('gameTable.previousHand.accessibilityLabel').replace('{summary}', details),
+    };
+  }, [bundle?.players, latestHand, t]);
+
+  const gameInfoRows = useMemo(() => {
+    if (!bundle) {
+      return [];
+    }
+    const rows = [
+      [t('gameTable.gameInfo.gameName'), gameTitle],
+      [t('gameTable.gameInfo.currentRound'), roundLabel ?? '—'],
+      [t('gameTable.gameInfo.handsPlayed'), handCountLabel],
+      [t('gameTable.gameInfo.players'), bundle.players
+        .slice()
+        .sort((left, right) => left.seatIndex - right.seatIndex)
+        .map((player) => `${WIND_HONOR_GLYPHS[player.seatIndex] ?? ''} ${player.name}`.trim())
+        .join(' · ')],
+    ];
+    if (rulesSummaryMeta) {
+      rows.push(
+        [t('game.detail.rules.hkPreset'), rulesSummaryMeta.scoringLabel],
+        [t('game.detail.rules.hkStake'), rulesSummaryMeta.stakeLabel],
+        [t('game.detail.rules.hkGunMode'), rulesSummaryMeta.gunLabel],
+      );
+    }
+    if (rulesSummaryStats) {
+      rows.push(
+        [t('game.detail.rules.minFan'), rulesSummaryStats.minFanText],
+        [t('game.detail.rules.hkCapFan'), rulesSummaryStats.capText],
+      );
+    }
+    return rows;
+  }, [bundle, gameTitle, handCountLabel, roundLabel, rulesSummaryMeta, rulesSummaryStats, t]);
+
+  const rulesInfoRows = useMemo(() => {
+    if (!rulesSummaryMeta) {
+      return [];
+    }
+    const rows = [
+      [t('game.detail.rules.hkPreset'), rulesSummaryMeta.scoringLabel],
+      [t('game.detail.rules.hkStake'), rulesSummaryMeta.stakeLabel],
+      [t('game.detail.rules.hkGunMode'), rulesSummaryMeta.gunLabel],
+    ];
+    if (rulesSummaryStats) {
+      rows.push(
+        [t('game.detail.rules.minFan'), rulesSummaryStats.minFanText],
+        [t('game.detail.rules.hkCapFan'), rulesSummaryStats.capText],
+      );
+    }
+    return rows;
+  }, [rulesSummaryMeta, rulesSummaryStats, t]);
 
   const applySavedLocalHand = useCallback((inserted: GameBundle['hands'][number], nextRoundLabelZh: string) => {
     if (!bundle) {
@@ -1108,31 +1250,39 @@ function GameTableScreen({ route, navigation }: Props) {
         </View>
 
         <View style={[styles.footerArea, { paddingBottom: insets.bottom + GRID.x2 }]}>
+          {lastHandSummary && !isEnded ? (
+            <Pressable
+              testID="local-last-hand-summary"
+              style={styles.lastHandSummaryCard}
+              onPress={() => setCorrectionVisible(true)}
+              disabled={saving || correctionPending || refreshBlocked}
+              accessibilityRole="button"
+              accessibilityLabel={`${lastHandSummary.accessibilityLabel}. ${t('gameTable.previousHand.edit')}`}
+              accessibilityState={{ disabled: saving || correctionPending || refreshBlocked }}
+            >
+              <View style={styles.lastHandSummaryContent}>
+                <AppText style={styles.lastHandSummaryLabel}>{t('gameTable.previousHand.label')}</AppText>
+                <AppText style={styles.lastHandSummaryDetails} numberOfLines={2}>{lastHandSummary.details}</AppText>
+              </View>
+              <View style={styles.lastHandSummaryEdit}>
+                <AppText style={styles.lastHandSummaryEditText}>{t('gameTable.previousHand.edit')}</AppText>
+                <AppText style={styles.lastHandSummaryChevron}>›</AppText>
+              </View>
+            </Pressable>
+          ) : !isEnded ? (
+            <View style={styles.recordingHint} accessible={false} accessibilityElementsHidden>
+              <AppText style={styles.recordingHintTitle}>{t('gameTable.recordingHint.title')}</AppText>
+              <AppText style={styles.recordingHintBody}>{t('gameTable.recordingHint.body')}</AppText>
+            </View>
+          ) : null}
           {footerLabel ? <AppText style={styles.elapsedText}>{footerLabel}</AppText> : null}
 
           <View style={styles.footerButtonsRow}>
-            {bundle && bundle.game.gameState === 'active' && bundle.hands.length > 0 ? (
-              <AppButton
-                label={t('gameTable.correction.action')}
-                onPress={() => setCorrectionVisible(true)}
-                disabled={saving || correctionPending || refreshBlocked}
-                variant="secondary"
-                style={styles.footerButton}
-                testID="local-last-hand-correction"
-                accessibilityLabel={t('gameTable.correction.action')}
-              />
-            ) : null}
             <AppButton
               label={t('gameTable.action.draw')}
               onPress={handleDrawActionPress}
               disabled={saving || !bundle || isEnded || refreshBlocked}
               variant="secondary"
-              style={styles.footerButton}
-            />
-            <AppButton
-              label={t('gameTable.action.endGame')}
-              onPress={handleEndGame}
-              disabled={saving || endingGame || isEnded || refreshBlocked}
               style={styles.footerButton}
             />
           </View>
@@ -1268,6 +1418,101 @@ function GameTableScreen({ route, navigation }: Props) {
         onUndo={handleCorrectionUndo}
       />
 
+      <Modal transparent animationType="fade" visible={overflowVisible} onRequestClose={() => setOverflowVisible(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setOverflowVisible(false)}>
+          <Pressable style={styles.overflowSheet} onPress={(event) => event.stopPropagation()} accessibilityViewIsModal>
+            <AppText style={styles.sheetTitle}>{t('gameTable.overflow.title')}</AppText>
+            <Pressable
+              testID="game-table-overflow-info"
+              style={styles.overflowAction}
+              onPress={() => {
+                setOverflowVisible(false);
+                setGameInfoVisible(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={t('gameTable.overflow.gameInfo')}
+            >
+              <AppText style={styles.overflowActionText}>{t('gameTable.overflow.gameInfo')}</AppText>
+              <AppText style={styles.overflowActionChevron}>›</AppText>
+            </Pressable>
+            <Pressable
+              testID="game-table-overflow-rules"
+              style={styles.overflowAction}
+              onPress={() => {
+                setOverflowVisible(false);
+                setRulesInfoVisible(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={t('gameTable.overflow.rulesInfo')}
+            >
+              <AppText style={styles.overflowActionText}>{t('gameTable.overflow.rulesInfo')}</AppText>
+              <AppText style={styles.overflowActionChevron}>›</AppText>
+            </Pressable>
+            <View style={styles.overflowDivider} />
+            <Pressable
+              testID="game-table-overflow-end"
+              style={styles.overflowAction}
+              onPress={() => {
+                setOverflowVisible(false);
+                handleEndGame();
+              }}
+              disabled={saving || endingGame || isEnded || refreshBlocked}
+              accessibilityRole="button"
+              accessibilityLabel={t('gameTable.action.endGame')}
+              accessibilityHint={t('gameTable.overflow.endGameHint')}
+              accessibilityState={{ disabled: saving || endingGame || isEnded || refreshBlocked }}
+            >
+              <AppText style={styles.overflowDestructiveText}>{t('gameTable.action.endGame')}</AppText>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal transparent animationType="slide" visible={gameInfoVisible} onRequestClose={() => setGameInfoVisible(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setGameInfoVisible(false)}>
+          <Pressable style={styles.infoSheet} onPress={(event) => event.stopPropagation()} accessibilityViewIsModal>
+            <View style={styles.sheetHeaderRow}>
+              <AppText style={styles.sheetTitle}>{t('gameTable.gameInfo.title')}</AppText>
+              <Pressable onPress={() => setGameInfoVisible(false)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('gameTable.sheet.close')}>
+                <AppText style={styles.sheetClose}>×</AppText>
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.infoSheetScroll}>
+              {gameInfoRows.map(([label, value]) => (
+                <View key={label} style={styles.infoRow}>
+                  <AppText style={styles.infoRowLabel}>{label}</AppText>
+                  <AppText style={styles.infoRowValue}>{value}</AppText>
+                </View>
+              ))}
+              <AppText style={styles.readOnlyInfo}>{t('gameTable.gameInfo.readOnly')}</AppText>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal transparent animationType="slide" visible={rulesInfoVisible} onRequestClose={() => setRulesInfoVisible(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setRulesInfoVisible(false)}>
+          <Pressable style={styles.infoSheet} onPress={(event) => event.stopPropagation()} accessibilityViewIsModal>
+            <View style={styles.sheetHeaderRow}>
+              <AppText style={styles.sheetTitle}>{t('gameTable.rulesInfo.title')}</AppText>
+              <Pressable onPress={() => setRulesInfoVisible(false)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('gameTable.sheet.close')}>
+                <AppText style={styles.sheetClose}>×</AppText>
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.infoSheetScroll}>
+              <AppText style={styles.rulesInfoDescription}>{t('gameTable.rulesInfo.description')}</AppText>
+              {rulesInfoRows.map(([label, value]) => (
+                <View key={label} style={styles.infoRow}>
+                  <AppText style={styles.infoRowLabel}>{label}</AppText>
+                  <AppText style={styles.infoRowValue}>{value}</AppText>
+                </View>
+              ))}
+              <AppText style={styles.readOnlyInfo}>{t('gameTable.rulesInfo.readOnly')}</AppText>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <ReseatFlow
         visible={reseatVisible}
         allowNameEdit={reseatAllowNameEdit}
@@ -1357,6 +1602,9 @@ function PlayerPanel({
       style={[styles.playerPanel, style, disabled ? styles.playerPanelDisabled : null]}
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={t('gameTable.player.recordWinner').replace('{name}', name)}
+      accessibilityState={disabled === undefined ? undefined : { disabled }}
     >
       <View style={styles.playerPanelCard}>
         <AppText style={styles.playerName}>
@@ -1730,12 +1978,73 @@ const styles = StyleSheet.create({
   footerButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    columnGap: GRID.x2,
+    justifyContent: 'center',
     marginTop: GRID.x1,
   },
   footerButton: {
+    width: '100%',
+  },
+  recordingHint: {
+    alignItems: 'center',
+    paddingHorizontal: GRID.x2,
+    marginBottom: GRID.x1,
+  },
+  recordingHintTitle: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  recordingHintBody: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  lastHandSummaryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.md,
+    paddingHorizontal: GRID.x2,
+    paddingVertical: GRID.x1_5,
+    marginBottom: GRID.x1,
+  },
+  lastHandSummaryContent: {
     flex: 1,
+    minWidth: 0,
+    paddingRight: GRID.x1,
+  },
+  lastHandSummaryLabel: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  lastHandSummaryDetails: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
+    lineHeight: 21,
+  },
+  lastHandSummaryEdit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 44,
+  },
+  lastHandSummaryEditText: {
+    ...typography.body,
+    color: theme.colors.primary,
+    fontWeight: '700',
+  },
+  lastHandSummaryChevron: {
+    color: theme.colors.primary,
+    fontSize: 24,
+    lineHeight: 24,
+    marginLeft: 2,
   },
   elapsedText: {
     ...typography.caption,
@@ -1749,6 +2058,104 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
     justifyContent: 'center',
     paddingHorizontal: GRID.x2,
+  },
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    justifyContent: 'flex-end',
+  },
+  overflowSheet: {
+    backgroundColor: theme.colors.background,
+    borderTopLeftRadius: theme.radius.lg,
+    borderTopRightRadius: theme.radius.lg,
+    paddingTop: GRID.x2,
+    paddingBottom: GRID.x3,
+    paddingHorizontal: GRID.x2,
+  },
+  sheetTitle: {
+    ...typography.subtitle,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+  },
+  overflowAction: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border,
+  },
+  overflowActionText: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
+  },
+  overflowActionChevron: {
+    fontSize: 24,
+    lineHeight: 24,
+    color: theme.colors.textSecondary,
+  },
+  overflowDivider: {
+    height: GRID.x1,
+  },
+  overflowDestructiveText: {
+    ...typography.body,
+    color: theme.colors.danger,
+    fontWeight: '700',
+  },
+  infoSheet: {
+    maxHeight: '82%',
+    backgroundColor: theme.colors.background,
+    borderTopLeftRadius: theme.radius.lg,
+    borderTopRightRadius: theme.radius.lg,
+    paddingHorizontal: GRID.x2,
+    paddingTop: GRID.x2,
+    paddingBottom: GRID.x3,
+  },
+  sheetHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: GRID.x1,
+  },
+  sheetClose: {
+    width: 44,
+    height: 44,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    fontSize: 28,
+    lineHeight: 42,
+    color: theme.colors.textSecondary,
+  },
+  infoSheetScroll: {
+    paddingBottom: GRID.x1,
+  },
+  infoRow: {
+    paddingVertical: GRID.x1_5,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border,
+  },
+  infoRowLabel: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+    marginBottom: 2,
+  },
+  infoRowValue: {
+    ...typography.body,
+    color: theme.colors.textPrimary,
+    fontWeight: '600',
+  },
+  readOnlyInfo: {
+    ...typography.caption,
+    color: theme.colors.textSecondary,
+    marginTop: GRID.x2,
+    textAlign: 'center',
+  },
+  rulesInfoDescription: {
+    ...typography.body,
+    color: theme.colors.textSecondary,
+    lineHeight: 21,
+    marginBottom: GRID.x1,
   },
   modalCard: {
     backgroundColor: theme.colors.background,

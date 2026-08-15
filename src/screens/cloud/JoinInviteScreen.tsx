@@ -95,12 +95,12 @@ function JoinInviteScreen({ navigation, route }: Props) {
       case 'loading':
         return {
           title: translateWithFallback(t, 'joinInvite.loadingTitle', '處理邀請中'),
-          body: translateWithFallback(t, 'joinInvite.loadingBody', '正在檢查房間代碼同邀請資料。'),
+          body: translateWithFallback(t, 'joinInvite.loadingBody', '正在檢查邀請資料。'),
         };
       case 'missingParams':
         return {
           title: translateWithFallback(t, 'joinInvite.missingTitle', '邀請連結不完整'),
-          body: translateWithFallback(t, 'joinInvite.missingBody', '此邀請缺少房間代碼或驗證資料，請房主重新產生邀請。'),
+          body: translateWithFallback(t, 'joinInvite.missingBody', '此邀請連結缺少必要資料，請房主重新分享。'),
         };
       case 'invalidInvite':
         return {
@@ -133,11 +133,6 @@ function JoinInviteScreen({ navigation, route }: Props) {
           <AppText style={styles.kicker}>{translateWithFallback(t, 'joinInvite.kicker', '房間邀請')}</AppText>
           <AppText style={styles.title}>{copy.title}</AppText>
           <AppText style={styles.body}>{copy.body}</AppText>
-          {roomId ? (
-            <AppText style={styles.meta}>
-              {translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼')}：{roomId}
-            </AppText>
-          ) : null}
           {detail ? <AppText style={styles.detail}>{detail}</AppText> : null}
           <View style={styles.actions}>
             <AppButton
@@ -179,11 +174,6 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: theme.colors.textSecondary,
     lineHeight: 24,
-  },
-  meta: {
-    ...typography.body,
-    color: theme.colors.textPrimary,
-    marginTop: theme.spacing.sm,
   },
   detail: {
     ...typography.caption,

@@ -234,7 +234,7 @@ function RoomLobbyScreen({ navigation, route }: Props) {
     try {
       await Share.share({
         title: room.title,
-        message: buildInviteShareMessage(room.title, t('roomLobby.hostTools.roomCode'), invite),
+        message: buildInviteShareMessage(room.title, invite),
       });
     } catch (error) {
       Alert.alert(t('roomLobby.alert.shareInviteFailedTitle'), String(error));
@@ -765,8 +765,6 @@ function RoomLobbyScreen({ navigation, route }: Props) {
         labels={{
           title: t('roomLobby.hostTools.shareSheetTitle'),
           subtitle: t('roomLobby.hostTools.shareSheetSubtitle'),
-          qrCodeLabel: t('roomLobby.hostTools.qrCodeLabel'),
-          roomCodeLabel: t('roomLobby.hostTools.roomCode'),
           inviteUrlLabel: t('roomLobby.hostTools.inviteUrlLabel'),
           shareAction: t('roomLobby.hostTools.shareAction'),
           close: t('roomLobby.hostTools.closeShare'),

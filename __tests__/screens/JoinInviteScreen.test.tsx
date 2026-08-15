@@ -20,12 +20,11 @@ jest.mock('../../src/i18n/useAppLanguage', () => ({
         'common.back': '返回',
         'joinInvite.kicker': '房間邀請',
         'joinInvite.loadingTitle': '處理邀請中',
-        'joinInvite.loadingBody': '正在檢查房間代碼同邀請資料。',
+        'joinInvite.loadingBody': '正在檢查邀請資料。',
         'joinInvite.missingTitle': '邀請連結不完整',
-        'joinInvite.missingBody': '此邀請缺少房間代碼或驗證資料，請房主重新產生邀請。',
+        'joinInvite.missingBody': '此邀請連結缺少必要資料，請房主重新分享。',
         'joinInvite.localOnlyTitle': '暫未支援跨機加入',
         'joinInvite.localOnlyBody': '目前同步房間仍儲存在房主本機。',
-        'roomLobby.hostTools.roomCode': '房間代碼',
       };
       return table[key] ?? key;
     },
@@ -106,7 +105,7 @@ describe('JoinInviteScreen', () => {
 
     expect(mockedJoinWithInvite).toHaveBeenCalledWith('room-1', 'token-1', 'uid-1');
     expect(text).toContain('邀請已失效');
-    expect(text).toContain('房間代碼：room-1');
+    expect(text).not.toContain('room-1');
 
     await act(async () => {
       tree.unmount();

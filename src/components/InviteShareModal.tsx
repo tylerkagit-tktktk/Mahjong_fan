@@ -16,8 +16,6 @@ import type { InvitePayload } from '../services/cloud/roomRepo';
 export type InviteShareLabels = {
   title: string;
   subtitle: string;
-  qrCodeLabel: string;
-  roomCodeLabel: string;
   inviteUrlLabel: string;
   shareAction: string;
   close: string;

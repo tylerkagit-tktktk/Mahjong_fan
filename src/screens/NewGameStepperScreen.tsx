@@ -1235,7 +1235,6 @@ function NewGameStepperScreen({ navigation, route }: Props) {
         title: draftRoom.title,
         message: buildInviteShareMessage(
           draftRoom.title,
-          translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼'),
           invite,
         ),
       });
@@ -2108,10 +2107,8 @@ function NewGameStepperScreen({ navigation, route }: Props) {
             subtitle: translateWithFallback(
               t,
               'roomLobby.hostTools.shareSheetSubtitle',
-              '掃描 QR Code 或使用連結加入同步房。',
+              '朋友可以用手機相機掃描呢個 QR Code，或者使用邀請連結加入。',
             ),
-            qrCodeLabel: translateWithFallback(t, 'roomLobby.hostTools.qrCodeLabel', 'QR Code'),
-            roomCodeLabel: translateWithFallback(t, 'roomLobby.hostTools.roomCode', '房間代碼'),
             inviteUrlLabel: translateWithFallback(t, 'roomLobby.hostTools.inviteUrlLabel', '邀請連結'),
             shareAction: translateWithFallback(t, 'roomLobby.hostTools.shareAction', '分享連結'),
             close: translateWithFallback(t, 'roomLobby.hostTools.closeShare', '關閉'),

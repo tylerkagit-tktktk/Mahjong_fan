@@ -21,9 +21,7 @@ const invite = {
 
 const labels = {
   title: '分享邀請',
-  subtitle: '掃描 QR Code 加入同步房。',
-  qrCodeLabel: 'QR Code',
-  roomCodeLabel: '房間代碼',
+  subtitle: '朋友可以用手機相機掃描呢個 QR Code，或者使用邀請連結加入。',
   inviteUrlLabel: '邀請連結',
   shareAction: '分享連結',
   close: '關閉',
@@ -53,14 +51,8 @@ describe('InviteShareModal', () => {
     const qr = tree!.root.findAll((node) => String(node.type) === 'QRCode');
     expect(qr).toHaveLength(1);
     expect(qr[0].props.value).toBe(invite.deepLink);
-    expect(JSON.stringify(tree!.toJSON())).toContain(invite.roomId);
     expect(JSON.stringify(tree!.toJSON())).toContain(invite.deepLink);
 
-    const textValues = tree!.root
-      .findAll((node) => typeof node.props?.children === 'string')
-      .map((node) => node.props.children);
-    expect(textValues).not.toContain(labels.qrCodeLabel);
-    expect(textValues).not.toContain(labels.roomCodeLabel);
     expect(tree!.root.findAllByProps({ testID: 'invite-share-room-code' })).toHaveLength(0);
 
     act(() => {

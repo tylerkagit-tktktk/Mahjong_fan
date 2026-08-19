@@ -23,18 +23,10 @@ import { typography } from '../styles/typography';
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 const ONBOARDING_SEEN_KEY = 'home_onboarding_seen_v1';
 
-const CTA_SHADOW = {
-  shadowColor: '#000',
-  shadowOpacity: 0.16,
-  shadowRadius: 10,
-  shadowOffset: { width: 0, height: 6 },
-  elevation: 10,
-} as const;
-
 const DEPTH_BACKGROUND = 0;
 const DEPTH_FOCUS = 12;
 
-type IconName = 'settings' | 'group' | 'join';
+type IconName = 'settings' | 'score' | 'group' | 'join' | 'history';
 
 function HomeActionIcon({ name, color, size }: { name: IconName; color: string; size?: number }) {
   if (name === 'settings') {
@@ -50,24 +42,85 @@ function HomeActionIcon({ name, color, size }: { name: IconName; color: string; 
     );
   }
 
+  if (name === 'score') {
+    return (
+      <Svg width={size ?? 42} height={size ?? 42} viewBox="0 0 48 48" fill="none" accessibilityElementsHidden>
+        <Rect x={9} y={6} width={25} height={34} rx={4} stroke={color} strokeWidth={2.8} />
+        <Path d="M16 15h11M16 22h11M16 29h6" stroke={color} strokeWidth={2.8} strokeLinecap="round" />
+        <Path d="m31 34 7.5-7.5 3 3L34 37l-4 1 1-4Z" stroke={color} strokeWidth={2.6} strokeLinejoin="round" />
+      </Svg>
+    );
+  }
+
   if (name === 'group') {
     return (
       <Svg width={size ?? 38} height={size ?? 38} viewBox="0 0 40 40" fill="none" accessibilityElementsHidden>
-        <Circle cx={14} cy={13} r={6} fill={color} />
-        <Circle cx={28} cy={15} r={5} fill={color} opacity={0.82} />
-        <Path d="M4 33c0-6.08 4.92-11 11-11s11 4.92 11 11H4Z" fill={color} />
-        <Path d="M23 32c0-4.97 4.03-9 9-9 2.1 0 4.03.72 5.56 1.93A11.08 11.08 0 0 1 40 32H23Z" fill={color} opacity={0.82} />
+        <Circle cx={14} cy={13} r={6} stroke={color} strokeWidth={2.5} />
+        <Circle cx={28} cy={15} r={5} stroke={color} strokeWidth={2.5} />
+        <Path d="M4 34c0-6.63 4.92-11 11-11s11 4.37 11 11" stroke={color} strokeWidth={2.5} strokeLinecap="round" />
+        <Path d="M23 33c0-5.52 4.03-9.5 9-9.5 2.1 0 4.03.7 5.56 1.9" stroke={color} strokeWidth={2.5} strokeLinecap="round" />
+      </Svg>
+    );
+  }
+
+  if (name === 'join') {
+    return (
+      <Svg width={size ?? 38} height={size ?? 38} viewBox="0 0 40 40" fill="none" accessibilityElementsHidden>
+        <Path d="M15.1 25.1 24.9 15.3M12.3 30.4l-2.2 2.2a6.25 6.25 0 0 1-8.84-8.84l7.06-7.06a6.25 6.25 0 0 1 8.84 0M27.7 9.6l2.2-2.2a6.25 6.25 0 0 1 8.84 8.84l-7.06 7.06a6.25 6.25 0 0 1-8.84 0" stroke={color} strokeWidth={3} strokeLinecap="round" />
       </Svg>
     );
   }
 
   return (
     <Svg width={size ?? 38} height={size ?? 38} viewBox="0 0 40 40" fill="none" accessibilityElementsHidden>
-      <Rect x={5} y={5} width={10} height={10} rx={1.5} stroke={color} strokeWidth={3.2} />
-      <Rect x={25} y={5} width={10} height={10} rx={1.5} stroke={color} strokeWidth={3.2} />
-      <Rect x={5} y={25} width={10} height={10} rx={1.5} stroke={color} strokeWidth={3.2} />
-      <Path d="M25 27h5v5m0-5v8m0 0h5" stroke={color} strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M7 32V22M19 32V14M31 32V7" stroke={color} strokeWidth={5} strokeLinecap="round" />
     </Svg>
+  );
+}
+
+type HomeActionRowProps = {
+  testID: string;
+  icon: IconName;
+  iconColor: string;
+  title: string;
+  subtitle: string;
+  primary?: boolean;
+  showDivider?: boolean;
+  onPress: () => void;
+};
+
+function HomeActionRow({
+  testID,
+  icon,
+  iconColor,
+  title,
+  subtitle,
+  primary = false,
+  showDivider = false,
+  onPress,
+}: HomeActionRowProps) {
+  return (
+    <Pressable
+      testID={testID}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}，${subtitle}`}
+      style={({ pressed }) => [
+        styles.actionRow,
+        primary && styles.actionRowPrimary,
+        showDivider && styles.actionRowDivider,
+        pressed && styles.actionRowPressed,
+      ]}
+    >
+      <View style={[styles.actionRowIcon, primary && styles.actionRowIconPrimary]}>
+        <HomeActionIcon name={icon} color={iconColor} size={primary ? 44 : 38} />
+      </View>
+      <View style={styles.actionRowCopy}>
+        <AppText style={[styles.actionRowTitle, primary && styles.actionRowTitlePrimary]}>{title}</AppText>
+        <AppText style={styles.actionRowSubtitle}>{subtitle}</AppText>
+      </View>
+      <AppText accessibilityElementsHidden style={[styles.actionRowChevron, primary && styles.actionRowChevronPrimary]}>›</AppText>
+    </Pressable>
   );
 }
 
@@ -107,12 +160,13 @@ function HomeScreen({ navigation }: Props) {
     tagline: translateWithFallback(t, 'home.taglineHero', '計錢．分析．對局紀錄'),
     startScoring: translateWithFallback(t, 'home.startScoring', '開始記分'),
     startScoringHint: translateWithFallback(t, 'home.startScoringHint', '一部手機，立即開枱'),
-    multiplayer: translateWithFallback(t, 'home.multiplayer', '多人同步'),
+    multiplayer: translateWithFallback(t, 'home.multiplayer', '多人連線'),
     createMultiplayer: translateWithFallback(t, 'home.createMultiplayer', '開多人枱'),
     createMultiplayerHint: translateWithFallback(t, 'home.createMultiplayerHint', '邀朋友加入'),
     joinMultiplayer: translateWithFallback(t, 'home.joinMultiplayer', '加入牌局'),
     joinMultiplayerHint: translateWithFallback(t, 'home.joinMultiplayerHint', '使用邀請連結'),
     historyAll: translateWithFallback(t, 'home.historyAllCantonese', '所有戰績'),
+    historyAllHint: translateWithFallback(t, 'home.historyAllHint', '查看過往牌局與結果'),
     settings: translateWithFallback(t, 'nav.settings', '設定'),
     promptTitle: translateWithFallback(t, 'home.activeGameModal.title', '有局打緊喎'),
     promptMessage: translateWithFallback(t, 'home.activeGameModal.message', '你而家仲有一場牌未完：'),
@@ -278,21 +332,19 @@ function HomeScreen({ navigation }: Props) {
               <AppText style={styles.tagline}>{copy.tagline}</AppText>
             </View>
 
-            <Pressable
+            <HomeActionRow
               testID="home-start-local"
-              onPress={handleNewGamePress}
-              accessibilityRole="button"
-              accessibilityLabel={`${copy.startScoring}，${copy.startScoringHint}`}
-              style={({ pressed }) => [styles.primaryPressable, pressed && styles.primaryPressed]}
-            >
-              <View style={styles.primaryButton}>
-                <View style={styles.primaryCopy}>
-                  <AppText style={styles.primaryButtonTitle}>{copy.startScoring}</AppText>
-                  <AppText style={styles.primaryButtonHint}>{copy.startScoringHint}</AppText>
-                </View>
-                <AppText style={styles.primaryChevron}>›</AppText>
-              </View>
-            </Pressable>
+              icon="score"
+              iconColor="#17604A"
+              title={copy.startScoring}
+              subtitle={copy.startScoringHint}
+              primary
+              onPress={() => {
+                handleNewGamePress().catch((error) => {
+                  console.error('[Home] Failed to start a local game', error);
+                });
+              }}
+            />
 
             <View style={styles.multiplayerHeading}>
               <View style={styles.headingRule} />
@@ -300,52 +352,34 @@ function HomeScreen({ navigation }: Props) {
               <View style={styles.headingRule} />
             </View>
 
-            <View style={styles.multiplayerRows}>
-              <Pressable
+            <View style={styles.actionRows}>
+              <HomeActionRow
                 testID="home-create-multiplayer"
+                icon="group"
+                iconColor="#17604A"
+                title={copy.createMultiplayer}
+                subtitle={copy.createMultiplayerHint}
+                showDivider
                 onPress={() => navigation.navigate('NewGameStepper', { entryMode: 'multiplayer' })}
-                accessibilityRole="button"
-                accessibilityLabel={`${copy.createMultiplayer}，${copy.createMultiplayerHint}`}
-                style={({ pressed }) => [styles.multiplayerRow, styles.multiplayerRowDivider, pressed && styles.secondaryPressed]}
-              >
-                <View style={styles.multiplayerRowIcon}>
-                  <HomeActionIcon name="group" color="#287343" size={32} />
-                </View>
-                <View style={styles.multiplayerRowCopy}>
-                  <AppText style={styles.multiplayerRowTitle}>{copy.createMultiplayer}</AppText>
-                  <AppText style={styles.multiplayerRowHint}>{copy.createMultiplayerHint}</AppText>
-                </View>
-                <AppText style={styles.multiplayerRowChevron}>›</AppText>
-              </Pressable>
-
-              <Pressable
+              />
+              <HomeActionRow
                 testID="home-join-multiplayer"
+                icon="join"
+                iconColor="#A06A12"
+                title={copy.joinMultiplayer}
+                subtitle={copy.joinMultiplayerHint}
+                showDivider
                 onPress={() => navigation.navigate('JoinLanding')}
-                accessibilityRole="button"
-                accessibilityLabel={`${copy.joinMultiplayer}，${copy.joinMultiplayerHint}`}
-                style={({ pressed }) => [styles.multiplayerRow, pressed && styles.secondaryPressed]}
-              >
-                <View style={styles.multiplayerRowIcon}>
-                  <HomeActionIcon name="join" color="#A06A12" size={32} />
-                </View>
-                <View style={styles.multiplayerRowCopy}>
-                  <AppText style={styles.multiplayerRowTitle}>{copy.joinMultiplayer}</AppText>
-                  <AppText style={styles.multiplayerRowHint}>{copy.joinMultiplayerHint}</AppText>
-                </View>
-                <AppText style={styles.multiplayerRowChevron}>›</AppText>
-              </Pressable>
+              />
+              <HomeActionRow
+                testID="home-history"
+                icon="history"
+                iconColor="#17604A"
+                title={copy.historyAll}
+                subtitle={copy.historyAllHint}
+                onPress={() => navigation.navigate('History')}
+              />
             </View>
-
-            <Pressable
-              testID="home-history"
-              onPress={() => navigation.navigate('History')}
-              accessibilityRole="button"
-              accessibilityLabel={copy.historyAll}
-              style={({ pressed }) => [styles.historyButton, pressed && styles.secondaryPressed]}
-            >
-              <AppText style={styles.historyButtonText}>{copy.historyAll}</AppText>
-              <AppText style={styles.historyChevron}>›</AppText>
-            </Pressable>
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -547,135 +581,92 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
     marginBottom: 0,
   },
-  primaryPressable: {
-    marginTop: theme.spacing.lg,
-    width: '83%',
-    alignSelf: 'center',
-  },
-  primaryPressed: {
-    opacity: 0.94,
-  },
-  primaryButton: {
-    width: '100%',
-    minHeight: 96,
-    backgroundColor: '#1D5B47',
-    borderRadius: 20,
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    ...CTA_SHADOW,
-  },
-  primaryCopy: {
-    flex: 1,
-  },
-  primaryButtonTitle: {
-    ...typography.title,
-    fontSize: 28,
-    lineHeight: 36,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: 0.4,
-  },
-  primaryButtonHint: {
-    ...typography.body,
-    marginTop: theme.spacing.xs,
-    color: 'rgba(255,255,255,0.84)',
-    fontSize: theme.fontSize.md,
-    lineHeight: 23,
-  },
-  primaryChevron: {
-    marginLeft: theme.spacing.md,
-    color: '#FFFFFF',
-    fontSize: 44,
-    lineHeight: 46,
-    fontWeight: '300',
-  },
   multiplayerHeading: {
     flexDirection: 'row',
     alignItems: 'center',
     columnGap: theme.spacing.md,
-    marginTop: theme.spacing.xl,
-    marginBottom: theme.spacing.md,
+    marginTop: theme.spacing.md,
+    marginBottom: 20,
   },
   headingRule: {
     height: 1,
     flex: 1,
-    backgroundColor: 'rgba(55, 82, 74, 0.22)',
+    backgroundColor: 'rgba(55, 82, 74, 0.17)',
   },
   multiplayerTitle: {
     ...typography.subtitle,
     color: '#205E4B',
-    fontSize: 20,
-    lineHeight: 26,
+    fontSize: theme.fontSize.md,
+    lineHeight: 24,
     fontWeight: '600',
   },
-  multiplayerRows: {
+  actionRows: {
     width: '100%',
   },
-  multiplayerRow: {
-    minHeight: 76,
-    paddingHorizontal: theme.spacing.sm,
+  actionRow: {
+    minHeight: 80,
+    paddingHorizontal: theme.spacing.xs,
     paddingVertical: theme.spacing.sm,
     flexDirection: 'row',
     alignItems: 'center',
+    borderRadius: theme.radius.md,
   },
-  multiplayerRowDivider: {
+  actionRowPrimary: {
+    minHeight: 92,
+    marginTop: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+  },
+  actionRowDivider: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(55, 82, 74, 0.2)',
+    borderBottomColor: 'rgba(55, 82, 74, 0.16)',
   },
-  multiplayerRowIcon: {
-    width: 40,
+  actionRowPressed: {
+    backgroundColor: 'rgba(23, 96, 74, 0.08)',
+  },
+  actionRowIcon: {
+    width: 46,
     alignItems: 'center',
-    marginRight: theme.spacing.sm,
+    marginRight: theme.spacing.xs,
   },
-  multiplayerRowCopy: {
+  actionRowIconPrimary: {
+    width: 50,
+  },
+  actionRowCopy: {
     flex: 1,
+    minWidth: 0,
   },
-  multiplayerRowTitle: {
+  actionRowTitle: {
     ...typography.subtitle,
     fontSize: theme.fontSize.lg,
     lineHeight: 24,
     fontWeight: '700',
     color: '#235A49',
   },
-  multiplayerRowHint: {
+  actionRowTitlePrimary: {
+    fontSize: 30,
+    lineHeight: 38,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  actionRowSubtitle: {
     ...typography.body,
     marginTop: 2,
     fontSize: theme.fontSize.sm,
     color: theme.colors.textSecondary,
     lineHeight: 19,
   },
-  multiplayerRowChevron: {
+  actionRowChevron: {
     marginLeft: theme.spacing.md,
     color: '#4D7467',
     fontSize: 30,
     lineHeight: 32,
     fontWeight: '300',
+    flexShrink: 0,
   },
-  secondaryPressed: {
-    opacity: 0.78,
-  },
-  historyButton: {
-    flexDirection: 'row',
-    alignSelf: 'center',
-    alignItems: 'center',
-    minHeight: 48,
-    marginTop: theme.spacing.lg,
-    paddingHorizontal: theme.spacing.md,
-  },
-  historyButtonText: {
-    ...typography.subtitle,
-    color: '#205E4B',
-    fontSize: theme.fontSize.lg,
-    fontWeight: '700',
-  },
-  historyChevron: {
-    marginLeft: theme.spacing.xs,
-    color: '#205E4B',
-    fontSize: 30,
-    lineHeight: 32,
-    fontWeight: '300',
+  actionRowChevronPrimary: {
+    color: '#17604A',
+    fontSize: 36,
+    lineHeight: 40,
   },
   promptBackdrop: {
     flex: 1,

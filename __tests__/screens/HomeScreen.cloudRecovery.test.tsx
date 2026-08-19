@@ -1,4 +1,5 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import HomeScreen from '../../src/screens/HomeScreen';
 import en from '../../src/i18n/locales/en.json';
@@ -71,6 +72,12 @@ async function renderScreen() {
   return { tree: tree!, navigation };
 }
 
+function findHomeAction(tree: renderer.ReactTestRenderer, testID: string) {
+  return tree.root
+    .findAllByProps({ testID })
+    .find((node) => node.props.accessibilityRole === 'button')!;
+}
+
 describe('HomeScreen joined-room recovery', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -138,28 +145,35 @@ describe('HomeScreen joined-room recovery', () => {
   it('exposes the local, multiplayer, invite, history, and settings entry points', async () => {
     const { tree, navigation } = await renderScreen();
 
-    const localAction = tree.root.findByProps({ testID: 'home-start-local' });
-    const multiplayerAction = tree.root.findByProps({ testID: 'home-create-multiplayer' });
-    const joinAction = tree.root.findByProps({ testID: 'home-join-multiplayer' });
-    const historyAction = tree.root.findByProps({ testID: 'home-history' });
+    const localAction = findHomeAction(tree, 'home-start-local');
+    const multiplayerAction = findHomeAction(tree, 'home-create-multiplayer');
+    const joinAction = findHomeAction(tree, 'home-join-multiplayer');
+    const historyAction = findHomeAction(tree, 'home-history');
     const settingsAction = tree.root.findByProps({ testID: 'home-settings' });
 
     expect(localAction.props.accessibilityRole).toBe('button');
     expect(localAction.props.accessibilityLabel).toContain('開始記分');
+    const localRestingStyle = StyleSheet.flatten(localAction.props.style({ pressed: false }));
+    expect(localRestingStyle.backgroundColor).toBeUndefined();
+    expect(localRestingStyle.minHeight).toBe(92);
     expect(multiplayerAction.props.accessibilityRole).toBe('button');
     expect(multiplayerAction.props.accessibilityLabel).toContain('開多人枱');
     expect(joinAction.props.accessibilityRole).toBe('button');
     expect(joinAction.props.accessibilityLabel).toContain('加入牌局');
-    expect(historyAction.props.accessibilityLabel).toBe('所有戰績');
+    expect(historyAction.props.accessibilityLabel).toBe('所有戰績，查看過往牌局與結果');
     expect(zhHant['home.historyAllCantonese']).toBe('所有戰績');
     expect(zhHans['home.historyAllCantonese']).toBe('所有战绩');
     expect(en['home.historyAllCantonese']).toBe('All records');
-    expect(zhHant['home.multiplayer']).toBe('多人牌局');
-    expect(zhHans['home.multiplayer']).toBe('多人牌局');
+    expect(zhHant['home.multiplayer']).toBe('多人連線');
+    expect(zhHans['home.multiplayer']).toBe('多人联机');
     expect(en['home.multiplayer']).toBe('Multiplayer');
+    expect(zhHant['home.createMultiplayerHint']).toBe('邀請朋友加入');
     expect(zhHant['home.joinMultiplayerHint']).toBe('使用邀請連結');
     expect(zhHans['home.joinMultiplayerHint']).toBe('使用邀请连结');
     expect(en['home.joinMultiplayerHint']).toBe('Use an invite link');
+    expect(zhHant['home.historyAllHint']).toBe('查看過往牌局與結果');
+    expect(zhHans['home.historyAllHint']).toBe('查看过往牌局与结果');
+    expect(en['home.historyAllHint']).toBe('View past games and results');
 
     await act(async () => {
       localAction.props.onPress();

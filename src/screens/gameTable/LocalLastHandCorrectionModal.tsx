@@ -133,9 +133,11 @@ export default function LocalLastHandCorrectionModal({
             </>
           ) : null}
           <View style={styles.actions}>
-            <AppButton label={t('common.back')} onPress={onDismiss} disabled={pending} variant="secondary" style={styles.button} />
-            {!unavailableReason ? <AppButton testID="local-last-hand-undo" label={t('gameTable.correction.undo')} onPress={onUndo} disabled={pending} variant="secondary" style={styles.button} accessibilityLabel={t('gameTable.correction.undo')} /> : null}
-            {!unavailableReason ? <AppButton testID="local-last-hand-save" label={t('gameTable.correction.save')} disabled={pending || !valid} style={styles.button} onPress={() => onReplace(outcome === 'draw' ? { outcome, dealerAction } : { outcome, fan, winnerPlayerId: winnerId ?? undefined, ...(outcome === 'discard' ? { discarderPlayerId: discarderId ?? undefined } : {}) })} /> : null}
+            <View style={styles.secondaryActions}>
+              <AppButton label={t('common.back')} onPress={onDismiss} disabled={pending} variant="secondary" style={styles.secondaryButton} />
+              {!unavailableReason ? <AppButton testID="local-last-hand-undo" label={t('gameTable.correction.undo')} onPress={onUndo} disabled={pending} variant="secondary" style={styles.secondaryButton} accessibilityLabel={t('gameTable.correction.undo')} /> : null}
+            </View>
+            {!unavailableReason ? <AppButton testID="local-last-hand-save" label={t('gameTable.correction.save')} disabled={pending || !valid} style={styles.saveButton} onPress={() => onReplace(outcome === 'draw' ? { outcome, dealerAction } : { outcome, fan, winnerPlayerId: winnerId ?? undefined, ...(outcome === 'discard' ? { discarderPlayerId: discarderId ?? undefined } : {}) })} /> : null}
           </View>
         </Pressable>
       </Pressable>
@@ -152,5 +154,8 @@ const styles = StyleSheet.create({
   section: { marginTop: theme.spacing.md }, label: { marginBottom: theme.spacing.sm, fontWeight: '600' },
   stepper: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   stepperButton: { padding: theme.spacing.md, minWidth: 48, alignItems: 'center' },
-  actions: { flexDirection: 'row', gap: theme.spacing.sm, marginTop: theme.spacing.lg }, button: { flex: 1 },
+  actions: { gap: theme.spacing.sm, marginTop: theme.spacing.lg },
+  secondaryActions: { flexDirection: 'row', gap: theme.spacing.sm },
+  secondaryButton: { flex: 1 },
+  saveButton: { width: '100%' },
 });

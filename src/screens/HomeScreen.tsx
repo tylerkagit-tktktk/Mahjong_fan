@@ -630,6 +630,7 @@ const styles = StyleSheet.create({
   },
   actionRowIconPrimary: {
     width: 50,
+    marginLeft: theme.spacing.lg,
   },
   actionRowCopy: {
     flex: 1,
